@@ -3,6 +3,9 @@ project_id = "kgizusgqexmlfcqfjopk"
 [functions.bulk-approve-jobs]
 verify_jwt = false
 
+[functions.bulk-advance-stages]
+verify_jwt = false
+
 [functions.handle-proof-approval]
 verify_jwt = false
 
