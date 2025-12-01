@@ -58,10 +58,27 @@ const TrackerProduction = () => {
   const [partAssignmentJob, setPartAssignmentJob] = useState<AccessibleJob | null>(null);
   const [lastUpdate] = useState<Date>(new Date());
 
-  // Direct query to job_stage_instances for accurate stage counts
+  // Direct query to job_stage_instances for accurate stage counts (approved jobs only)
   const { data: stageCounts } = useQuery({
     queryKey: ['production-stage-counts', cacheKey],
     queryFn: async () => {
+      // Step 1: Get approved job IDs
+      const { data: approvedJobs, error: approvedError } = await supabase
+        .from('production_jobs')
+        .select('id')
+        .not('proof_approved_at', 'is', null)
+        .not('status', 'in', '("Completed","Cancelled")');
+      
+      if (approvedError) throw approvedError;
+      
+      const approvedJobIds = (approvedJobs || []).map(j => j.id);
+      
+      // If no approved jobs, return empty map
+      if (approvedJobIds.length === 0) {
+        return new Map();
+      }
+      
+      // Step 2: Get stage instances for approved jobs only
       const { data, error } = await supabase
         .from('job_stage_instances')
         .select(`
@@ -69,6 +86,7 @@ const TrackerProduction = () => {
           production_stages!inner(id, name, color, order_index)
         `)
         .eq('job_table_name', 'production_jobs')
+        .in('job_id', approvedJobIds)
         .in('status', ['pending', 'active', 'scheduled', 'held']);
       
       if (error) throw error;
