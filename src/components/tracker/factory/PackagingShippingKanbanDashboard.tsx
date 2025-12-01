@@ -159,15 +159,22 @@ export const PackagingShippingKanbanDashboard = () => {
   const handleBarcodeDetected = (barcodeData: string) => {
     if (!selectedJob) return;
     
-    const tokenMatch = barcodeData.match(/D\d{6}/i);
-    const scannedToken = tokenMatch ? tokenMatch[0].toUpperCase() : '';
-    const expectedToken = selectedJob.wo_no?.toUpperCase() || '';
+    // Flexible matching - extract numeric portions and compare
+    const cleanScanned = barcodeData.trim().toUpperCase();
+    const cleanExpected = (selectedJob.wo_no || '').trim().toUpperCase();
     
-    if (scannedToken && scannedToken === expectedToken) {
+    // Extract numbers only (remove any letter prefix like D, W, etc.)
+    const scannedNumbers = cleanScanned.replace(/^[A-Z]+/, '').replace(/\D/g, '');
+    const expectedNumbers = cleanExpected.replace(/^[A-Z]+/, '').replace(/\D/g, '');
+    
+    // Match if numeric portions are equal (handles "427310" matching "D427310")
+    const isMatch = scannedNumbers && expectedNumbers && scannedNumbers === expectedNumbers;
+    
+    if (isMatch) {
       setScanCompleted(true);
-      toast.success(`Work order ${scannedToken} verified - ready to proceed`);
+      toast.success(`Work order ${selectedJob.wo_no} verified - ready to proceed`);
     } else {
-      toast.error(`Wrong barcode scanned. Expected: ${expectedToken}, Got: ${barcodeData}`);
+      toast.error(`Wrong barcode scanned. Expected: ${cleanExpected}, Got: ${barcodeData}`);
     }
   };
 
