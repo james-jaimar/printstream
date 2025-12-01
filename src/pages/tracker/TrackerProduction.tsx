@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import { useAccessibleJobs } from "@/hooks/tracker/useAccessibleJobs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useJobStageInstancesMap } from "@/hooks/tracker/useJobStageInstancesMap";
@@ -56,6 +57,49 @@ const TrackerProduction = () => {
   const [selectedJob, setSelectedJob] = useState<AccessibleJob | null>(null);
   const [partAssignmentJob, setPartAssignmentJob] = useState<AccessibleJob | null>(null);
   const [lastUpdate] = useState<Date>(new Date());
+
+  // Direct query to job_stage_instances for accurate stage counts
+  const { data: stageCounts } = useQuery({
+    queryKey: ['production-stage-counts', cacheKey],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('job_stage_instances')
+        .select(`
+          production_stage_id,
+          production_stages!inner(id, name, color, order_index)
+        `)
+        .eq('job_table_name', 'production_jobs')
+        .in('status', ['pending', 'active', 'scheduled', 'held']);
+      
+      if (error) throw error;
+      
+      // Aggregate counts by stage
+      const counts = new Map<string, { 
+        stage_id: string; 
+        stage_name: string; 
+        stage_color: string; 
+        order_index: number;
+        count: number 
+      }>();
+      
+      data?.forEach((instance: any) => {
+        const stageId = instance.production_stage_id;
+        const stage = instance.production_stages;
+        const current = counts.get(stageId) || { 
+          stage_id: stageId,
+          stage_name: stage.name,
+          stage_color: stage.color || '#6B7280',
+          order_index: stage.order_index || 0,
+          count: 0 
+        };
+        current.count++;
+        counts.set(stageId, current);
+      });
+      
+      return counts;
+    },
+    staleTime: 30000, // Cache for 30 seconds
+  });
 
   // Optimized single-query approach: fetch all stages for jobs in the selected stage
   // Eliminates query waterfall for instant parallel processing display
@@ -139,20 +183,37 @@ const TrackerProduction = () => {
     return enhancedJobs.filter(job => !job.category_id);
   }, [enhancedJobs]);
 
-  // Build consolidated stages with accurate counts from current stages only
+  // Build consolidated stages from direct stage counts query
   const consolidatedStages = useMemo(() => {
-    const stageCounts = new Map<string, { stage_id: string; stage_name: string; stage_color: string; job_count: number }>();
+    // Primary: Use direct stage counts from job_stage_instances query
+    if (stageCounts && stageCounts.size > 0) {
+      return Array.from(stageCounts.values())
+        .filter(stage => stage.count > 0)
+        .map(stage => ({
+          stage_id: stage.stage_id,
+          stage_name: stage.stage_name,
+          stage_color: stage.stage_color,
+          order_index: stage.order_index,
+          job_count: stage.count
+        }))
+        .sort((a, b) => a.stage_name.localeCompare(b.stage_name));
+    }
     
-    // Use jobsByStage map to build accurate stage counts
+    // Fallback: Build from jobsByStage if query hasn't loaded yet
+    const fallbackCounts = new Map<string, { 
+      stage_id: string; 
+      stage_name: string; 
+      stage_color: string; 
+      job_count: number 
+    }>();
+    
     jobsByStage.forEach((stageJobs, stageId) => {
       if (stageJobs.length === 0) return;
       
-      // Try to get stage info from parallel_stages first, then fallback to current stage
       let stageName = null;
       let stageColor = null;
       
       for (const job of stageJobs) {
-        // Check parallel_stages first for matching stage
         if (job.parallel_stages && job.parallel_stages.length > 0) {
           const matchingParallelStage = job.parallel_stages.find(
             ps => ps.stage_id === stageId
@@ -163,7 +224,6 @@ const TrackerProduction = () => {
             break;
           }
         }
-        // Fallback: if this is the job's current stage
         if (job.current_stage_id === stageId && job.current_stage_name) {
           stageName = job.current_stage_name;
           stageColor = job.current_stage_color;
@@ -172,7 +232,7 @@ const TrackerProduction = () => {
       }
       
       if (stageName) {
-        stageCounts.set(stageId, {
+        fallbackCounts.set(stageId, {
           stage_id: stageId,
           stage_name: stageName,
           stage_color: stageColor || '#6B7280',
@@ -181,10 +241,10 @@ const TrackerProduction = () => {
       }
     });
     
-    return Array.from(stageCounts.values()).sort((a, b) => 
+    return Array.from(fallbackCounts.values()).sort((a, b) => 
       a.stage_name.localeCompare(b.stage_name)
     );
-  }, [jobsByStage]);
+  }, [stageCounts, jobsByStage]);
   const handleSidebarStageSelect = (stageId: string | null) => {
     if (!stageId) {
       setSelectedStageId(null);
