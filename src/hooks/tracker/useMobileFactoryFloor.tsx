@@ -253,17 +253,25 @@ export const useMobileFactoryFloor = (config: MobileFactoryFloorConfig = {}) => 
     };
   }, [jobs]);
 
-  // Process scan results
+  // Process scan results - flexible WO matching (with or without prefix)
   const handleScanResult = useCallback((data: string, type: 'qr' | 'barcode') => {
     triggerHapticFeedback('medium');
     playSound('info');
     
-    // Try to find job by WO number or ID
-    const job = jobs.find(j => 
-      j.wo_no === data || 
-      j.job_id === data ||
-      j.wo_no.includes(data)
-    );
+    // Extract numeric portion for flexible matching
+    const cleanData = data.trim().toUpperCase();
+    const dataNumbers = cleanData.replace(/^[A-Z]+/, '').replace(/\D/g, '');
+    
+    // Try to find job by flexible WO number matching
+    const job = jobs.find(j => {
+      const woNo = (j.wo_no || '').trim().toUpperCase();
+      const woNumbers = woNo.replace(/^[A-Z]+/, '').replace(/\D/g, '');
+      
+      // Match if: exact match, job_id match, or numeric portions match
+      return woNo === cleanData || 
+             j.job_id === data ||
+             (dataNumbers && woNumbers && dataNumbers === woNumbers);
+    });
     
     if (job) {
       toast.success(`Found job: ${job.wo_no}`, {
