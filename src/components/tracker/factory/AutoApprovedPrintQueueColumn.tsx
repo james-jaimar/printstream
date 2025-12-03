@@ -4,23 +4,34 @@ import { AutoApprovedJob } from '@/hooks/tracker/useAutoApprovedJobs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { formatDistanceToNow } from 'date-fns';
 
 interface AutoApprovedPrintQueueColumnProps {
   jobs: AutoApprovedJob[];
   onJobClick: (jobId: string) => void;
   onMarkFilesSent: (stageInstanceId: string) => Promise<boolean>;
+  showAllJobs?: boolean;
+  onToggleShowAll?: (show: boolean) => void;
+  myJobsCount?: number;
+  allJobsCount?: number;
 }
 
 export const AutoApprovedPrintQueueColumn: React.FC<AutoApprovedPrintQueueColumnProps> = ({
   jobs,
   onJobClick,
-  onMarkFilesSent
+  onMarkFilesSent,
+  showAllJobs = true,
+  onToggleShowAll,
+  myJobsCount = 0,
+  allJobsCount = 0
 }) => {
   const handleMarkSent = async (e: React.MouseEvent, stageInstanceId: string) => {
     e.stopPropagation();
     await onMarkFilesSent(stageInstanceId);
   };
+
+  const hasToggle = onToggleShowAll !== undefined;
 
   return (
     <div className="flex flex-col h-full bg-background rounded-lg border border-border overflow-hidden">
@@ -30,12 +41,30 @@ export const AutoApprovedPrintQueueColumn: React.FC<AutoApprovedPrintQueueColumn
             <Send className="h-5 w-5" />
             <h3 className="font-semibold">Auto Approved - Send to Print</h3>
           </div>
-          <Badge variant="secondary" className="bg-white/20 text-white">
-            {jobs.length}
-          </Badge>
+          {hasToggle ? (
+            <div className="flex items-center gap-2">
+              <Switch 
+                checked={showAllJobs}
+                onCheckedChange={onToggleShowAll}
+                className="data-[state=checked]:bg-white/30 data-[state=unchecked]:bg-white/20"
+              />
+              <span className="text-xs font-medium">
+                {showAllJobs ? 'All' : 'Mine'}
+              </span>
+            </div>
+          ) : (
+            <Badge variant="secondary" className="bg-white/20 text-white">
+              {jobs.length}
+            </Badge>
+          )}
         </div>
         <p className="text-xs text-white/80 mt-1">
-          Client approved online - confirm print files sent
+          {hasToggle 
+            ? (showAllJobs 
+                ? `Showing all ${allJobsCount} jobs` 
+                : `My jobs (${myJobsCount} of ${allJobsCount})`)
+            : 'Client approved online - confirm print files sent'
+          }
         </p>
       </div>
 
@@ -44,7 +73,10 @@ export const AutoApprovedPrintQueueColumn: React.FC<AutoApprovedPrintQueueColumn
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
             <CheckCircle className="h-12 w-12 mb-2" />
             <p className="text-sm text-center">
-              No auto-approved jobs pending file dispatch
+              {hasToggle && !showAllJobs 
+                ? 'No jobs you worked on pending file dispatch'
+                : 'No auto-approved jobs pending file dispatch'
+              }
             </p>
           </div>
         ) : (

@@ -3,29 +3,65 @@ import { Send, Clock } from 'lucide-react';
 import { AutoApprovedJob } from '@/hooks/tracker/useAutoApprovedJobs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { formatDistanceToNow } from 'date-fns';
 
 interface AutoApprovedPrintQueueListProps {
   jobs: AutoApprovedJob[];
   onJobClick: (jobId: string) => void;
   onMarkFilesSent: (stageInstanceId: string) => Promise<boolean>;
+  showAllJobs?: boolean;
+  onToggleShowAll?: (show: boolean) => void;
+  myJobsCount?: number;
+  allJobsCount?: number;
 }
 
 export const AutoApprovedPrintQueueList: React.FC<AutoApprovedPrintQueueListProps> = ({
   jobs,
   onJobClick,
-  onMarkFilesSent
+  onMarkFilesSent,
+  showAllJobs = true,
+  onToggleShowAll,
+  myJobsCount = 0,
+  allJobsCount = 0
 }) => {
+  const hasToggle = onToggleShowAll !== undefined;
+
   if (jobs.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
-        <p className="text-sm">No auto-approved jobs pending</p>
+        <p className="text-sm">
+          {hasToggle && !showAllJobs 
+            ? 'No jobs you worked on pending'
+            : 'No auto-approved jobs pending'
+          }
+        </p>
       </div>
     );
   }
 
   return (
     <div className="space-y-2">
+      {hasToggle && (
+        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg mb-3">
+          <span className="text-xs text-muted-foreground">
+            {showAllJobs 
+              ? `Showing all ${allJobsCount} jobs` 
+              : `My jobs (${myJobsCount} of ${allJobsCount})`
+            }
+          </span>
+          <div className="flex items-center gap-2">
+            <Switch 
+              checked={showAllJobs}
+              onCheckedChange={onToggleShowAll}
+            />
+            <span className="text-xs font-medium">
+              {showAllJobs ? 'All' : 'Mine'}
+            </span>
+          </div>
+        </div>
+      )}
+      
       {jobs.map((job) => (
         <div
           key={job.id}
