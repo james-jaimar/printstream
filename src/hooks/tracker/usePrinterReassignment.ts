@@ -24,7 +24,6 @@ export interface PendingPrintJob {
 export interface StageSpecification {
   id: string;
   name: string;
-  display_name: string;
   description: string | null;
 }
 
@@ -119,7 +118,7 @@ export const usePrinterReassignment = () => {
     try {
       const { data, error } = await supabase
         .from('stage_specifications')
-        .select('id, name, display_name, description')
+        .select('id, name, description')
         .eq('production_stage_id', stageId)
         .eq('is_active', true)
         .order('sort_order');
