@@ -64,6 +64,7 @@ export const DtpKanbanDashboard = () => {
   const [showJobModal, setShowJobModal] = useState(false);
   const [scanCompleted, setScanCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
 
   const dashboardMetrics = useMemo(() => {
     return calculateDashboardMetrics(jobs);
@@ -280,7 +281,16 @@ export const DtpKanbanDashboard = () => {
               dtpJobsCount={dtpJobs.length}
               proofJobsCount={proofJobs.length}
             />
-            <div className="flex-shrink-0 w-full sm:w-auto">
+            <div className="flex-shrink-0 w-full sm:w-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPrinterReassignment(true)}
+                className="flex items-center gap-2"
+              >
+                <ArrowRightLeft className="h-4 w-4" />
+                <span className="hidden sm:inline">Move Jobs</span>
+              </Button>
               <ViewToggle 
                 view={viewMode} 
                 onViewChange={setViewMode}
@@ -464,6 +474,12 @@ export const DtpKanbanDashboard = () => {
           />
         </TrackerErrorBoundary>
       )}
+
+      <PrinterReassignmentModal
+        isOpen={showPrinterReassignment}
+        onClose={() => setShowPrinterReassignment(false)}
+        onComplete={handleRefresh}
+      />
     </div>
   );
 };

@@ -259,11 +259,11 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
             <div className="space-y-2">
               <Label className="text-sm font-medium">Step 4: Select Print Mode</Label>
               <RadioGroup value={targetSpecId} onValueChange={setTargetSpecId}>
-                {targetSpecs.map(spec => (
+          {targetSpecs.map(spec => (
                   <div key={spec.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-muted/50">
                     <RadioGroupItem value={spec.id} id={spec.id} />
                     <Label htmlFor={spec.id} className="flex-1 cursor-pointer">
-                      <span className="font-medium">{spec.display_name || spec.name}</span>
+                      <span className="font-medium">{spec.name}</span>
                       {spec.description && (
                         <span className="text-sm text-muted-foreground ml-2">
                           - {spec.description}
@@ -288,7 +288,7 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
               <p className="text-sm text-muted-foreground">
                 Moving {selectedJobIds.size} job(s) with{' '}
                 <span className="font-medium">
-                  {targetSpecs.find(s => s.id === targetSpecId)?.display_name || 'selected'} 
+                  {targetSpecs.find(s => s.id === targetSpecId)?.name || 'selected'} 
                 </span>{' '}
                 print mode
               </p>
