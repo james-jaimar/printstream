@@ -16,10 +16,13 @@ export const GlobalBarcodeListener: React.FC<GlobalBarcodeListenerProps> = ({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    console.log('🔍 GlobalBarcodeListener mounted/updated');
+    
     const handleKeyDown = (event: KeyboardEvent) => {
       // Ignore keystrokes when user is typing in input fields
       const target = event.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        console.log('⏸️ Barcode listener paused - input field focused');
         return;
       }
 
@@ -52,18 +55,24 @@ export const GlobalBarcodeListener: React.FC<GlobalBarcodeListenerProps> = ({
         return;
       }
 
-      // Only append printable characters (letters, numbers, some symbols)
-      if (event.key.length === 1 && /[a-zA-Z0-9\-_]/.test(event.key)) {
+      // Only append printable characters (letters, numbers, common barcode symbols)
+      // Expanded to include dots, slashes, and spaces commonly found in barcodes
+      if (event.key.length === 1 && /[a-zA-Z0-9\-_\.\/]/.test(event.key)) {
         barcodeRef.current += event.key;
+        console.log('🔍 Barcode accumulating:', barcodeRef.current);
         
         // Set timeout to process accumulated data
         timeoutRef.current = setTimeout(() => {
           if (barcodeRef.current.length >= minLength) {
-            console.log('Barcode detected via timeout:', barcodeRef.current);
+            console.log('✅ Barcode detected via timeout:', barcodeRef.current);
             onBarcodeDetected(barcodeRef.current.trim());
+          } else {
+            console.log('⚠️ Barcode too short, ignoring:', barcodeRef.current);
           }
           barcodeRef.current = "";
         }, timeout);
+      } else if (event.key.length === 1) {
+        console.log('⚠️ Character filtered out:', event.key);
       }
     };
 

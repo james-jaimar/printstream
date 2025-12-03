@@ -75,6 +75,7 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
   const [scanRequired, setScanRequired] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showHoldDialog, setShowHoldDialog] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   
   const { holdStage, resumeStage, isProcessing: stageActionsProcessing } = useStageActions();
   const { generic: paperSpecs, sheetSize, isLoading: specsLoading } = useJobPaperSpecs(job?.job_id || "");
@@ -301,6 +302,16 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
           </TabsContent>
 
           <TabsContent value="scanning" className="space-y-6">
+            {/* Input Focus Warning */}
+            {inputFocused && !scanCompleted && (
+              <div className="bg-yellow-100 border-l-4 border-yellow-500 p-3 rounded flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-yellow-700" />
+                <p className="text-yellow-800 text-sm font-medium">
+                  Scanning paused - click outside text fields to enable scanner
+                </p>
+              </div>
+            )}
+            
             {/* Mandatory Scanning Section */}
             <Card className={cn("border-2", scanCompleted ? "border-green-500 bg-green-50" : "border-orange-500 bg-orange-50")}>
               <CardHeader>
@@ -321,7 +332,10 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
                 
                 {!scanCompleted ? (
                   <div className="text-center text-orange-700 font-medium">
-                    Listening for barcode scan… Present the job QR code to the scanner.
+                    {inputFocused 
+                      ? "⚠️ Click outside the text field to enable scanning"
+                      : "Listening for barcode scan… Present the job QR code to the scanner."
+                    }
                   </div>
                 ) : (
                   <div className="text-center text-green-700 font-medium">
@@ -633,6 +647,8 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
                   placeholder="Add production notes, material observations, or completion comments..."
                   value={operatorNotes}
                   onChange={(e) => setOperatorNotes(e.target.value)}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
                   rows={4}
                 />
                 <Button variant="outline" className="w-full">
@@ -682,6 +698,8 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
                   placeholder="Describe quality issue or concern..."
                   value={qualityIssue}
                   onChange={(e) => setQualityIssue(e.target.value)}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
                   rows={3}
                 />
                 <Button 
