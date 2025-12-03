@@ -143,34 +143,56 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
   const [selectedJobForDetails, setSelectedJobForDetails] = useState<ScheduledJobStage | null>(null);
   const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
 
-  // Global barcode handler
-  const handleBarcodeDetected = (barcodeData: string) => {
-    if (!selectedJobForDetails) return;
-    
-    console.log('🔍 Barcode detected:', barcodeData, 'Expected:', selectedJobForDetails.wo_no);
-    
-    // Robust verification - normalize and allow flexible matching
+  // Helper: normalize and match barcode to WO number
+  const woMatchesBarcode = (woNo: string, barcodeData: string): boolean => {
     const normalize = (s: string) => (s || "").toString().trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     const stripLetters = (s: string) => s.replace(/^[A-Z]+/, "");
 
     const cleanScanned = normalize(barcodeData);
-    const cleanExpected = normalize(selectedJobForDetails.wo_no);
+    const cleanExpected = normalize(woNo);
     const numericScanned = stripLetters(cleanScanned);
     const numericExpected = stripLetters(cleanExpected);
 
-    const isValid =
+    return (
       cleanScanned === cleanExpected ||
       numericScanned === numericExpected ||
       cleanScanned.includes(cleanExpected) ||
       cleanExpected.includes(cleanScanned) ||
       numericScanned.includes(numericExpected) ||
-      numericExpected.includes(numericScanned);
+      numericExpected.includes(numericScanned)
+    );
+  };
+
+  // Global barcode handler - works whether modal is open or not
+  const handleBarcodeDetected = (barcodeData: string) => {
+    console.log('🔍 Global barcode detected:', barcodeData, 'Modal open:', showJobDetailsModal);
     
-    if (isValid) {
-      setScanCompleted(true);
-      toast.success("Job barcode matched");
+    // If modal is already open, verify the barcode matches the selected job
+    if (showJobDetailsModal && selectedJobForDetails) {
+      console.log('🔍 Verifying against selected job:', selectedJobForDetails.wo_no);
+      
+      if (woMatchesBarcode(selectedJobForDetails.wo_no, barcodeData)) {
+        setScanCompleted(true);
+        toast.success("Job barcode matched");
+      } else {
+        toast.error(`Scanned code does not match this job. Expected like: ${selectedJobForDetails.wo_no} (prefix optional). Got: ${barcodeData}`);
+      }
+      return;
+    }
+    
+    // If no modal is open, search for the job in the queue and open it
+    console.log('🔍 Searching for job in queue...');
+    const matchedJob = scheduledJobs.find(job => woMatchesBarcode(job.wo_no, barcodeData));
+    
+    if (matchedJob) {
+      console.log('✅ Found matching job:', matchedJob.wo_no);
+      setSelectedJobForDetails(matchedJob);
+      setShowJobDetailsModal(true);
+      setScanCompleted(true); // Auto-validate since they scanned to find it
+      toast.success(`Found job ${matchedJob.wo_no} - opening...`);
     } else {
-      toast.error(`Scanned code does not match this job. Expected like: ${selectedJobForDetails.wo_no} (prefix optional). Got: ${barcodeData}`);
+      console.log('⚠️ No matching job found for:', barcodeData);
+      toast.warning(`No job found matching: ${barcodeData}`);
     }
   };
   
@@ -384,10 +406,8 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Global Barcode Listener - Only active when modal is open */}
-      {showJobDetailsModal && selectedJobForDetails && (
-        <GlobalBarcodeListener onBarcodeDetected={handleBarcodeDetected} minLength={5} />
-      )}
+      {/* Global Barcode Listener - ALWAYS active to allow scanning to find jobs */}
+      <GlobalBarcodeListener onBarcodeDetected={handleBarcodeDetected} minLength={5} />
       
       {/* Header */}
       <div className="bg-white border-b shadow-sm">
