@@ -14,7 +14,15 @@ export interface AutoApprovedJob {
   client_email?: string;
   print_files_sent_to_printer_at?: string;
   print_files_sent_by?: string;
+  // Track who worked on the proof stage
+  proof_completed_by?: string;
+  proof_started_by?: string;
+  // Track who worked on the DTP stage for this job
+  dtp_worked_by?: string[];
 }
+
+// DTP stage ID
+const DTP_STAGE_ID = '2bc1c3dc-9ec2-42ca-89a4-b40e557c6e9d';
 
 export const useAutoApprovedJobs = () => {
   const [jobs, setJobs] = useState<AutoApprovedJob[]>([]);
@@ -27,6 +35,7 @@ export const useAutoApprovedJobs = () => {
       setIsLoading(true);
       setError(null);
 
+      // Fetch proof stage instances with user tracking
       const { data, error: fetchError } = await supabase
         .from('job_stage_instances')
         .select(`
@@ -38,6 +47,8 @@ export const useAutoApprovedJobs = () => {
           print_files_sent_by,
           client_name,
           client_email,
+          completed_by,
+          started_by,
           production_stages!inner(name),
           production_jobs!inner(wo_no, customer, reference)
         `)
@@ -47,6 +58,40 @@ export const useAutoApprovedJobs = () => {
         .order('proof_approved_manually_at', { ascending: true });
 
       if (fetchError) throw fetchError;
+
+      // Get unique job IDs to fetch DTP stage workers
+      const jobIds = [...new Set((data || []).map((item: any) => item.job_id))];
+      
+      // Fetch DTP stage instances for these jobs to see who worked on them
+      let dtpWorkers: Record<string, string[]> = {};
+      if (jobIds.length > 0) {
+        const { data: dtpData, error: dtpError } = await supabase
+          .from('job_stage_instances')
+          .select('job_id, started_by, completed_by')
+          .eq('production_stage_id', DTP_STAGE_ID)
+          .in('job_id', jobIds);
+
+        if (!dtpError && dtpData) {
+          // Build a map of job_id -> array of user IDs who worked on DTP
+          dtpData.forEach((dtp: any) => {
+            const workers: string[] = [];
+            if (dtp.started_by) workers.push(dtp.started_by);
+            if (dtp.completed_by && dtp.completed_by !== dtp.started_by) {
+              workers.push(dtp.completed_by);
+            }
+            
+            if (!dtpWorkers[dtp.job_id]) {
+              dtpWorkers[dtp.job_id] = [];
+            }
+            dtpWorkers[dtp.job_id].push(...workers);
+          });
+          
+          // Remove duplicates
+          Object.keys(dtpWorkers).forEach(jobId => {
+            dtpWorkers[jobId] = [...new Set(dtpWorkers[jobId])];
+          });
+        }
+      }
 
       const formattedJobs: AutoApprovedJob[] = (data || []).map((item: any) => ({
         id: item.id,
@@ -59,7 +104,10 @@ export const useAutoApprovedJobs = () => {
         client_name: item.client_name,
         client_email: item.client_email,
         print_files_sent_to_printer_at: item.print_files_sent_to_printer_at,
-        print_files_sent_by: item.print_files_sent_by
+        print_files_sent_by: item.print_files_sent_by,
+        proof_completed_by: item.completed_by,
+        proof_started_by: item.started_by,
+        dtp_worked_by: dtpWorkers[item.job_id] || []
       }));
 
       setJobs(formattedJobs);

@@ -24,6 +24,7 @@ import { useNavigate } from "react-router-dom";
 import { JobListLoading, JobErrorState } from "../common/JobLoadingStates";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { PrinterReassignmentModal } from "../jobs/PrinterReassignmentModal";
 
@@ -57,6 +58,8 @@ export const DtpKanbanDashboard = () => {
     isLoading: autoApprovedLoading,
     markFilesSent
   } = useAutoApprovedJobs();
+
+  const { user } = useAuth();
   
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -65,6 +68,33 @@ export const DtpKanbanDashboard = () => {
   const [scanCompleted, setScanCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
+  const [showAllSendToPrint, setShowAllSendToPrint] = useState(false);
+
+  // Filter auto-approved jobs based on toggle - show only jobs user worked on
+  const filteredAutoApprovedJobs = useMemo(() => {
+    if (showAllSendToPrint || !user?.id) {
+      return autoApprovedJobs;
+    }
+    
+    // Filter to jobs where current user:
+    // - completed the proofing stage (approved it)
+    // - started the proofing stage
+    // - worked on the DTP stage for this job
+    return autoApprovedJobs.filter(job => 
+      job.proof_completed_by === user.id ||
+      job.proof_started_by === user.id ||
+      job.dtp_worked_by?.includes(user.id)
+    );
+  }, [autoApprovedJobs, showAllSendToPrint, user?.id]);
+
+  const myJobsCount = useMemo(() => {
+    if (!user?.id) return 0;
+    return autoApprovedJobs.filter(job => 
+      job.proof_completed_by === user.id ||
+      job.proof_started_by === user.id ||
+      job.dtp_worked_by?.includes(user.id)
+    ).length;
+  }, [autoApprovedJobs, user?.id]);
 
   const dashboardMetrics = useMemo(() => {
     return calculateDashboardMetrics(jobs);
@@ -361,9 +391,13 @@ export const DtpKanbanDashboard = () => {
 
             <div className="flex-1 min-h-0">
               <AutoApprovedPrintQueueColumn
-                jobs={autoApprovedForPrint}
+                jobs={filteredAutoApprovedJobs}
                 onJobClick={handleAutoApprovedJobClick}
                 onMarkFilesSent={markFilesSent}
+                showAllJobs={showAllSendToPrint}
+                onToggleShowAll={setShowAllSendToPrint}
+                myJobsCount={myJobsCount}
+                allJobsCount={autoApprovedJobs.length}
               />
             </div>
           </div>
@@ -441,16 +475,31 @@ export const DtpKanbanDashboard = () => {
                   <div className="flex items-center gap-2">
                     <Send className="h-4 w-4 flex-shrink-0" />
                     <span className="font-medium text-sm truncate">
-                      Auto Approved - Send to Print ({autoApprovedForPrint.length})
+                      Auto Approved - Send to Print ({filteredAutoApprovedJobs.length})
                     </span>
                   </div>
-                  <span className="text-xs opacity-80">Action Required</span>
+                  <div className="flex items-center gap-2">
+                    <Switch 
+                      checked={showAllSendToPrint}
+                      onCheckedChange={setShowAllSendToPrint}
+                      className="data-[state=checked]:bg-white/30 data-[state=unchecked]:bg-white/20"
+                    />
+                    <span className="text-xs font-medium">
+                      {showAllSendToPrint ? 'All' : 'Mine'}
+                    </span>
+                  </div>
                 </div>
+                <p className="text-xs text-white/80 mt-1">
+                  {showAllSendToPrint 
+                    ? `Showing all ${autoApprovedJobs.length} jobs` 
+                    : `My jobs (${myJobsCount} of ${autoApprovedJobs.length})`
+                  }
+                </p>
               </div>
               <ScrollArea className="flex-1">
                 <div className="pr-4">
                   <AutoApprovedPrintQueueList
-                    jobs={autoApprovedForPrint}
+                    jobs={filteredAutoApprovedJobs}
                     onJobClick={handleAutoApprovedJobClick}
                     onMarkFilesSent={markFilesSent}
                   />
