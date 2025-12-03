@@ -120,7 +120,7 @@ export const usePrinterReassignment = () => {
         .select('id, name, description')
         .eq('production_stage_id', stageId)
         .eq('is_active', true)
-        .order('sort_order');
+        .order('name');
 
       if (error) throw error;
       setTargetSpecs(data || []);
