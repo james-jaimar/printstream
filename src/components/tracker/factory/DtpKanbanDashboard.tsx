@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from "react";
-import { AlertTriangle, FileText, CheckCircle, RefreshCw, Package, Send } from "lucide-react";
+import { AlertTriangle, FileText, CheckCircle, RefreshCw, Package, Send, ArrowRightLeft } from "lucide-react";
 import { useUserRole } from "@/hooks/tracker/useUserRole";
 import { useAccessibleJobs } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobActions } from "@/hooks/tracker/useAccessibleJobs/useJobActions";
@@ -23,7 +23,9 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { JobListLoading, JobErrorState } from "../common/JobLoadingStates";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
+import { PrinterReassignmentModal } from "../jobs/PrinterReassignmentModal";
 
 export const DtpKanbanDashboard = () => {
   const { isDtpOperator, accessibleStages } = useUserRole();
