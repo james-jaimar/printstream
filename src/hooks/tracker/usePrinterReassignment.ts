@@ -73,8 +73,7 @@ export const usePrinterReassignment = () => {
           scheduled_start_at,
           stage_specification_id,
           stage_specifications (
-            name,
-            display_name
+            name
           ),
           production_jobs!fk_job_stage_instances_production_jobs (
             wo_no,
@@ -97,7 +96,7 @@ export const usePrinterReassignment = () => {
         reference: item.production_jobs?.reference || null,
         quantity: item.quantity,
         due_date: item.production_jobs?.due_date || null,
-        stage_spec_name: item.stage_specifications?.display_name || item.stage_specifications?.name || null,
+        stage_spec_name: item.stage_specifications?.name || null,
         stage_spec_id: item.stage_specification_id,
         scheduled_start_at: item.scheduled_start_at
       }));
