@@ -10,6 +10,7 @@ export interface ScheduledStageData {
   id: string;
   job_id: string;
   job_wo_no: string;
+  job_customer?: string;  // customer name for search
   job_due_date?: string | null;  // Schedule-aware due date (last stage + 1 working day)
   job_original_committed_due_date?: string | null;  // Original committed date from approval
   production_stage_id: string;
@@ -193,7 +194,7 @@ export function useScheduleReader() {
       // 4) job lookup (include due date fields)
       const { data: productionJobs, error: jobsError } = await supabase
         .from("production_jobs")
-        .select("id, wo_no, finishing_specifications, due_date, original_committed_due_date")
+        .select("id, wo_no, customer, finishing_specifications, due_date, original_committed_due_date")
         .in("id", jobIds);
 
       if (jobsError) {
@@ -397,6 +398,7 @@ export function useScheduleReader() {
             id: row.id + (isCarry ? "-carry" : ""),
             job_id: row.job_id,
             job_wo_no: job?.wo_no || "Unknown",
+            job_customer: job?.customer || undefined,
             job_due_date: job?.due_date || null,
             job_original_committed_due_date: job?.original_committed_due_date || null,
             production_stage_id: row.production_stage_id,
