@@ -3,13 +3,15 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Clock, GripVertical, Lock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Clock, GripVertical, Lock, HelpCircle } from "lucide-react";
 import type { ScheduledStageData } from "@/hooks/useScheduleReader";
 import { EnhancedDueDateDisplay } from "@/components/tracker/production/EnhancedDueDateDisplay";
 
 interface SortableScheduleStageCardProps {
   stage: ScheduledStageData;
   onJobClick?: (stage: ScheduledStageData) => void;
+  onDiagnosticsClick?: (stage: ScheduledStageData) => void;
   isAdminUser?: boolean;
   disabled?: boolean;
 }
@@ -17,6 +19,7 @@ interface SortableScheduleStageCardProps {
 export const SortableScheduleStageCard: React.FC<SortableScheduleStageCardProps> = ({
   stage,
   onJobClick,
+  onDiagnosticsClick,
   isAdminUser = false,
   disabled = false
 }) => {
@@ -83,9 +86,25 @@ export const SortableScheduleStageCard: React.FC<SortableScheduleStageCardProps>
               </Badge>
             )}
           </div>
-          <Badge variant="outline" className="text-xs">
-            {stage.estimated_duration_minutes}m
-          </Badge>
+          <div className="flex items-center gap-1">
+            <Badge variant="outline" className="text-xs">
+              {stage.estimated_duration_minutes}m
+            </Badge>
+            {onDiagnosticsClick && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDiagnosticsClick(stage);
+                }}
+                title="Why scheduled here?"
+              >
+                <HelpCircle className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </div>
         
         <div className="text-xs font-medium text-muted-foreground">

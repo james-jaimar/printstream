@@ -9,10 +9,13 @@ import { ScheduleWorkflowHeader } from "./header/ScheduleWorkflowHeader";
 import { ScheduleDayColumn } from "./day-columns/ScheduleDayColumn";
 import { WeekNavigation } from "./navigation/WeekNavigation";
 import { JobDiagnosticsModal } from "./JobDiagnosticsModal";
+import { MasterOrderModal } from "@/components/tracker/modals/MasterOrderModal";
 import type { ScheduleDayData, ScheduledStageData } from "@/hooks/useScheduleReader";
+import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobDiagnostics } from "@/hooks/useJobDiagnostics";
 import { startOfWeek, endOfWeek, isWithinInterval } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface ScheduleBoardProps {
   scheduleDays: ScheduleDayData[];
@@ -32,6 +35,12 @@ export function ScheduleBoard({
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [selectedStageName, setSelectedStageName] = useState<string | null>(null);
   const [currentWeek, setCurrentWeek] = useState<Date>(new Date());
+  
+  // Master Order Modal state
+  const [selectedJob, setSelectedJob] = useState<AccessibleJob | null>(null);
+  const [masterModalOpen, setMasterModalOpen] = useState(false);
+  
+  // Diagnostics Modal state
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const { isLoading: diagnosticsLoading, diagnostics, getDiagnostics } = useJobDiagnostics();
 
@@ -50,10 +59,68 @@ export function ScheduleBoard({
     setSelectedStageName(stageName);
   };
 
-  const handleJobClick = async (job: ScheduledStageData) => {
-    console.log('Job clicked - opening diagnostics:', job);
+  // Fetch full job data and open Master Order Modal
+  const handleJobClick = async (stage: ScheduledStageData) => {
+    console.log('Job clicked - opening master modal:', stage);
+    
+    try {
+      const { data: jobData, error } = await supabase
+        .from('production_jobs')
+        .select(`
+          *,
+          categories (id, name, color)
+        `)
+        .eq('id', stage.job_id)
+        .single();
+
+      if (error || !jobData) {
+        toast.error('Failed to load job details');
+        return;
+      }
+
+      // Convert to AccessibleJob format for MasterOrderModal
+      const accessibleJob: AccessibleJob = {
+        job_id: jobData.id,
+        id: stage.id,
+        wo_no: jobData.wo_no,
+        customer: jobData.customer || '',
+        status: jobData.status || 'Unknown',
+        due_date: jobData.due_date || '',
+        original_committed_due_date: jobData.original_committed_due_date,
+        reference: jobData.reference || '',
+        category_id: jobData.category_id,
+        category_name: jobData.categories?.name || 'No Category',
+        category_color: jobData.categories?.color || '#6B7280',
+        current_stage_id: stage.production_stage_id,
+        current_stage_name: stage.stage_name,
+        current_stage_color: stage.stage_color || '#6B7280',
+        current_stage_status: stage.status,
+        user_can_view: true,
+        user_can_edit: isAdminUser,
+        user_can_work: true,
+        user_can_manage: isAdminUser,
+        workflow_progress: 0,
+        total_stages: 0,
+        completed_stages: 0,
+        display_stage_name: stage.stage_name,
+        qty: jobData.qty || 0,
+        has_custom_workflow: jobData.has_custom_workflow || false,
+        is_in_batch_processing: false,
+      };
+
+      setSelectedJob(accessibleJob);
+      setMasterModalOpen(true);
+    } catch (err) {
+      console.error('Error fetching job:', err);
+      toast.error('Failed to load job details');
+    }
+  };
+
+  // Open diagnostics modal (triggered by icon button on card)
+  const handleDiagnosticsClick = async (stage: ScheduledStageData) => {
+    console.log('Diagnostics clicked:', stage);
     setDiagnosticsOpen(true);
-    await getDiagnostics(job.id);
+    await getDiagnostics(stage.id);
   };
 
   return (
@@ -100,6 +167,7 @@ export function ScheduleBoard({
               selectedStageId={selectedStageId}
               selectedStageName={selectedStageName}
               onJobClick={handleJobClick}
+              onDiagnosticsClick={handleDiagnosticsClick}
               isAdminUser={isAdminUser}
               onScheduleUpdate={onRefresh}
             />
@@ -117,6 +185,17 @@ export function ScheduleBoard({
           </div>
         </div>
       </div>
+
+      {/* Master Order Modal */}
+      <MasterOrderModal
+        isOpen={masterModalOpen}
+        onClose={() => {
+          setMasterModalOpen(false);
+          setSelectedJob(null);
+        }}
+        job={selectedJob}
+        onRefresh={onRefresh}
+      />
 
       {/* Job Diagnostics Modal */}
       <JobDiagnosticsModal
