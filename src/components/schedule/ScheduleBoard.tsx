@@ -3,7 +3,7 @@
  * NOW WITH WEEK NAVIGATION FOR VIEWING ONE WEEK AT A TIME
  */
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { ScheduleProductionSidebar } from "./sidebar/ScheduleProductionSidebar";
 import { ScheduleWorkflowHeader } from "./header/ScheduleWorkflowHeader";
 import { ScheduleDayColumn } from "./day-columns/ScheduleDayColumn";
@@ -35,6 +35,7 @@ export function ScheduleBoard({
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [selectedStageName, setSelectedStageName] = useState<string | null>(null);
   const [currentWeek, setCurrentWeek] = useState<Date>(new Date());
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Master Order Modal state
   const [selectedJob, setSelectedJob] = useState<AccessibleJob | null>(null);
@@ -53,6 +54,37 @@ export function ScheduleBoard({
     return isWithinInterval(dayDate, { start: weekStart, end: weekEnd }) && 
            dayDate.getDay() >= 1 && dayDate.getDay() <= 5; // Monday to Friday only
   });
+
+  // Filter schedule days based on search query
+  const filteredScheduleDays = useMemo(() => {
+    if (!searchQuery.trim()) return weekScheduleDays;
+    
+    const query = searchQuery.toLowerCase();
+    return weekScheduleDays.map(day => ({
+      ...day,
+      time_slots: day.time_slots.map(slot => ({
+        ...slot,
+        scheduled_stages: slot.scheduled_stages.filter(stage => 
+          stage.job_wo_no?.toLowerCase().includes(query) ||
+          stage.job_customer?.toLowerCase().includes(query)
+        )
+      })).filter(slot => slot.scheduled_stages.length > 0),
+      total_stages: day.time_slots.reduce((total, slot) => 
+        total + slot.scheduled_stages.filter(stage => 
+          stage.job_wo_no?.toLowerCase().includes(query) ||
+          stage.job_customer?.toLowerCase().includes(query)
+        ).length, 0
+      ),
+      total_minutes: day.time_slots.reduce((total, slot) => 
+        total + slot.scheduled_stages
+          .filter(stage => 
+            stage.job_wo_no?.toLowerCase().includes(query) ||
+            stage.job_customer?.toLowerCase().includes(query)
+          )
+          .reduce((slotTotal, stage) => slotTotal + stage.estimated_duration_minutes, 0), 0
+      )
+    })).filter(day => day.time_slots.some(slot => slot.scheduled_stages.length > 0));
+  }, [weekScheduleDays, searchQuery]);
 
   const handleStageSelect = (stageId: string | null, stageName: string | null) => {
     setSelectedStageId(stageId);
@@ -128,11 +160,13 @@ export function ScheduleBoard({
       {/* Header */}
       <div className="border-b bg-background p-4">
         <ScheduleWorkflowHeader
-          scheduleDays={weekScheduleDays}
+          scheduleDays={filteredScheduleDays}
           selectedStageName={selectedStageName}
           isLoading={isLoading}
           onRefresh={onRefresh}
           onReschedule={onReschedule}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
         />
         
         {/* Week Navigation */}
@@ -149,7 +183,7 @@ export function ScheduleBoard({
         {/* Sidebar */}
         <div className="w-64 border-r bg-background overflow-y-auto">
           <ScheduleProductionSidebar
-            scheduleDays={weekScheduleDays}
+            scheduleDays={filteredScheduleDays}
             selectedStageId={selectedStageId}
             selectedStageName={selectedStageName}
             onStageSelect={handleStageSelect}
@@ -160,7 +194,7 @@ export function ScheduleBoard({
         <div className="flex-1 overflow-hidden">
           <div className="h-full overflow-x-auto overflow-y-auto">
             <div className="flex gap-4 p-4 min-w-max">
-              {weekScheduleDays.map((day) => (
+              {filteredScheduleDays.map((day) => (
             <ScheduleDayColumn 
               key={day.date}
               day={day}
@@ -173,11 +207,15 @@ export function ScheduleBoard({
             />
               ))}
               
-              {weekScheduleDays.length === 0 && (
+              {filteredScheduleDays.length === 0 && (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="text-center text-muted-foreground">
-                    <p className="text-lg font-medium mb-2">No scheduled days for this week</p>
-                    <p className="text-sm">Use the week navigation to view other weeks or reschedule jobs</p>
+                    <p className="text-lg font-medium mb-2">
+                      {searchQuery ? 'No jobs match your search' : 'No scheduled days for this week'}
+                    </p>
+                    <p className="text-sm">
+                      {searchQuery ? 'Try a different search term' : 'Use the week navigation to view other weeks or reschedule jobs'}
+                    </p>
                   </div>
                 </div>
               )}
