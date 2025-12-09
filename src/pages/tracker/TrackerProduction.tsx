@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
-import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAccessibleJobs } from "@/hooks/tracker/useAccessibleJobs";
@@ -58,119 +58,16 @@ const TrackerProduction = () => {
   const [partAssignmentJob, setPartAssignmentJob] = useState<AccessibleJob | null>(null);
   const [lastUpdate] = useState<Date>(new Date());
 
-  // Direct query to job_stage_instances for accurate stage counts
-  // Shows each job ONLY in its CURRENT stage (lowest order pending/active stage)
-  const { data: stageCounts } = useQuery({
-    queryKey: ['production-stage-counts', cacheKey],
-    queryFn: async () => {
-      // Step 1: Get all active (non-completed/cancelled) job IDs
-      const { data: activeJobs, error: activeError } = await supabase
-        .from('production_jobs')
-        .select('id')
-        .not('status', 'in', '("Completed","Cancelled")');
-      
-      if (activeError) throw activeError;
-      
-      const activeJobIds = new Set((activeJobs || []).map(j => j.id));
-      
-      if (activeJobIds.size === 0) {
-        return new Map();
-      }
-      
-      // Step 2: Get all pending/active stage instances with order_index
-      const { data, error } = await supabase
-        .from('job_stage_instances')
-        .select(`
-          job_id,
-          production_stage_id,
-          status,
-          stage_order,
-          production_stages!inner(id, name, color, order_index)
-        `)
-        .eq('job_table_name', 'production_jobs')
-        .in('status', ['pending', 'active', 'scheduled', 'held']);
-      
-      if (error) throw error;
-      
-      // Status priority: active (1) > awaiting_approval (2) > pending/scheduled (3) > held (4) > others (5)
-      const getStatusPriority = (status: string) => {
-        switch (status) {
-          case 'active': return 1;
-          case 'awaiting_approval': return 2;
-          case 'pending': return 3;
-          case 'scheduled': return 3;
-          case 'held': return 4;
-          default: return 5;
-        }
-      };
-      
-      // Step 3: For each job, find its CURRENT stage (by status priority, then lowest order)
-      const jobCurrentStage = new Map<string, {
-        stage_id: string;
-        stage_name: string;
-        stage_color: string;
-        order_index: number;
-        status: string;
-      }>();
-      
-      data?.forEach((instance: any) => {
-        if (!activeJobIds.has(instance.job_id)) return;
-        
-        const stage = instance.production_stages;
-        const stageOrder = instance.stage_order ?? stage.order_index ?? 999;
-        const statusPriority = getStatusPriority(instance.status);
-        const existing = jobCurrentStage.get(instance.job_id);
-        
-        // Compare by status priority first, then by stage_order
-        const existingPriority = existing ? getStatusPriority(existing.status) : 999;
-        const shouldReplace = !existing || 
-          statusPriority < existingPriority ||
-          (statusPriority === existingPriority && stageOrder < existing.order_index);
-        
-        if (shouldReplace) {
-          jobCurrentStage.set(instance.job_id, {
-            stage_id: instance.production_stage_id,
-            stage_name: stage.name,
-            stage_color: stage.color || '#6B7280',
-            order_index: stageOrder,
-            status: instance.status
-          });
-        }
-      });
-      
-      // Step 4: Aggregate counts by stage (each job counted only once)
-      const counts = new Map<string, { 
-        stage_id: string; 
-        stage_name: string; 
-        stage_color: string; 
-        order_index: number;
-        count: number 
-      }>();
-      
-      jobCurrentStage.forEach((currentStage) => {
-        const current = counts.get(currentStage.stage_id) || { 
-          stage_id: currentStage.stage_id,
-          stage_name: currentStage.stage_name,
-          stage_color: currentStage.stage_color,
-          order_index: currentStage.order_index,
-          count: 0 
-        };
-        current.count++;
-        counts.set(currentStage.stage_id, current);
-      });
-      
-      return counts;
-    },
-    staleTime: 30000,
-  });
+  // Get all job IDs for loading stage instances upfront
+  const allJobIds = useMemo(() => jobs.map(j => j.job_id), [jobs]);
 
-  // Optimized single-query approach: fetch all stages for jobs in the selected stage
-  // Eliminates query waterfall for instant parallel processing display
+  // Load stage instances for ALL jobs upfront (not just when a stage is selected)
+  // This ensures sidebar and main content use the same data source
   const { data: jobStageInstancesMap } = useJobStageInstancesMap(
-    [], // Empty array when using filterByStageId
-    !!selectedStageId, // Only fetch when a specific stage is selected
+    allJobIds,
+    allJobIds.length > 0 && allJobIds.length <= 1000,
     cacheKey,
-    selectedStageId // Filter by stage in the query itself
+    null // Don't filter by stage - get all stages for all jobs
   );
 
   // Enhance jobs with parallel stage data when available
@@ -285,68 +182,85 @@ const TrackerProduction = () => {
     return enhancedJobs.filter(job => !job.category_id);
   }, [enhancedJobs]);
 
-  // Build consolidated stages from direct stage counts query
+  // Build consolidated stages from enhancedJobs using IDENTICAL logic to filteredJobs
+  // This ensures sidebar counts match exactly what's shown in main content
   const consolidatedStages = useMemo(() => {
-    // Primary: Use direct stage counts from job_stage_instances query
-    if (stageCounts && stageCounts.size > 0) {
-      return Array.from(stageCounts.values())
-        .filter(stage => stage.count > 0)
-        .map(stage => ({
-          stage_id: stage.stage_id,
-          stage_name: stage.stage_name,
-          stage_color: stage.stage_color,
-          order_index: stage.order_index,
-          job_count: stage.count
-        }))
-        .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-    }
+    // Status priority: active (1) > awaiting_approval (2) > pending/scheduled (3) > held (4) > others (5)
+    const getStatusPriority = (status: string) => {
+      switch (status) {
+        case 'active': return 1;
+        case 'awaiting_approval': return 2;
+        case 'pending': return 3;
+        case 'scheduled': return 3;
+        case 'held': return 4;
+        default: return 5;
+      }
+    };
     
-    // Fallback: Build from jobsByStage if query hasn't loaded yet
-    const fallbackCounts = new Map<string, { 
-      stage_id: string; 
-      stage_name: string; 
-      stage_color: string; 
-      job_count: number 
+    // Count jobs per stage using same logic as filteredJobs
+    const stageCounts = new Map<string, {
+      stage_id: string;
+      stage_name: string;
+      stage_color: string;
+      order_index: number;
+      count: number;
     }>();
     
-    jobsByStage.forEach((stageJobs, stageId) => {
-      if (stageJobs.length === 0) return;
+    enhancedJobs.forEach(job => {
+      let currentStage: { stage_id: string; stage_name: string; stage_color: string; stage_order: number } | null = null;
       
-      let stageName = null;
-      let stageColor = null;
-      
-      for (const job of stageJobs) {
-        if (job.parallel_stages && job.parallel_stages.length > 0) {
-          const matchingParallelStage = job.parallel_stages.find(
-            ps => ps.stage_id === stageId
-          );
-          if (matchingParallelStage) {
-            stageName = matchingParallelStage.stage_name;
-            stageColor = matchingParallelStage.stage_color;
-            break;
-          }
+      // Same logic as filteredJobs: find current stage by status priority, then stage_order
+      if (job.parallel_stages && job.parallel_stages.length > 0) {
+        const pendingStages = job.parallel_stages.filter(
+          s => ['pending', 'active', 'scheduled', 'held', 'awaiting_approval'].includes(s.stage_status || '')
+        );
+        
+        if (pendingStages.length > 0) {
+          const sortedStages = [...pendingStages].sort((a, b) => {
+            const priorityA = getStatusPriority(a.stage_status || 'pending');
+            const priorityB = getStatusPriority(b.stage_status || 'pending');
+            if (priorityA !== priorityB) return priorityA - priorityB;
+            return (a.stage_order || 0) - (b.stage_order || 0);
+          });
+          currentStage = sortedStages[0];
         }
-        if (job.current_stage_id === stageId && job.current_stage_name) {
-          stageName = job.current_stage_name;
-          stageColor = job.current_stage_color;
-          break;
-        }
+      } else if (job.current_stage_id) {
+        // Fallback for jobs without parallel_stages
+        currentStage = {
+          stage_id: job.current_stage_id,
+          stage_name: job.current_stage_name || 'Unknown',
+          stage_color: job.current_stage_color || '#6B7280',
+          stage_order: job.current_stage_order || 999
+        };
       }
       
-      if (stageName) {
-        fallbackCounts.set(stageId, {
-          stage_id: stageId,
-          stage_name: stageName,
-          stage_color: stageColor || '#6B7280',
-          job_count: stageJobs.length
-        });
+      if (currentStage) {
+        const existing = stageCounts.get(currentStage.stage_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          stageCounts.set(currentStage.stage_id, {
+            stage_id: currentStage.stage_id,
+            stage_name: currentStage.stage_name,
+            stage_color: currentStage.stage_color || '#6B7280',
+            order_index: currentStage.stage_order || 999,
+            count: 1
+          });
+        }
       }
     });
     
-    return Array.from(fallbackCounts.values()).sort((a, b) => 
-      a.stage_name.localeCompare(b.stage_name)
-    );
-  }, [stageCounts, jobsByStage]);
+    return Array.from(stageCounts.values())
+      .filter(stage => stage.count > 0)
+      .map(stage => ({
+        stage_id: stage.stage_id,
+        stage_name: stage.stage_name,
+        stage_color: stage.stage_color,
+        order_index: stage.order_index,
+        job_count: stage.count
+      }))
+      .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+  }, [enhancedJobs]);
   const handleSidebarStageSelect = (stageId: string | null) => {
     if (!stageId) {
       setSelectedStageId(null);
