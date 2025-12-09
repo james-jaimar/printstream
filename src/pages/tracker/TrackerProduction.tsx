@@ -58,40 +58,67 @@ const TrackerProduction = () => {
   const [partAssignmentJob, setPartAssignmentJob] = useState<AccessibleJob | null>(null);
   const [lastUpdate] = useState<Date>(new Date());
 
-  // Direct query to job_stage_instances for accurate stage counts (approved jobs only)
+  // Direct query to job_stage_instances for accurate stage counts
+  // Shows each job ONLY in its CURRENT stage (lowest order pending/active stage)
   const { data: stageCounts } = useQuery({
     queryKey: ['production-stage-counts', cacheKey],
     queryFn: async () => {
-      // Step 1: Get approved job IDs
-      const { data: approvedJobs, error: approvedError } = await supabase
+      // Step 1: Get all active (non-completed/cancelled) job IDs
+      const { data: activeJobs, error: activeError } = await supabase
         .from('production_jobs')
         .select('id')
-        .not('proof_approved_at', 'is', null)
         .not('status', 'in', '("Completed","Cancelled")');
       
-      if (approvedError) throw approvedError;
+      if (activeError) throw activeError;
       
-      const approvedJobIds = (approvedJobs || []).map(j => j.id);
+      const activeJobIds = new Set((activeJobs || []).map(j => j.id));
       
-      // If no approved jobs, return empty map
-      if (approvedJobIds.length === 0) {
+      if (activeJobIds.size === 0) {
         return new Map();
       }
       
-      // Step 2: Get stage instances for approved jobs only
+      // Step 2: Get all pending/active stage instances with order_index
       const { data, error } = await supabase
         .from('job_stage_instances')
         .select(`
+          job_id,
           production_stage_id,
+          status,
+          stage_order,
           production_stages!inner(id, name, color, order_index)
         `)
         .eq('job_table_name', 'production_jobs')
-        .in('job_id', approvedJobIds)
         .in('status', ['pending', 'active', 'scheduled', 'held']);
       
       if (error) throw error;
       
-      // Aggregate counts by stage
+      // Step 3: For each job, find its CURRENT stage (lowest order pending/active stage)
+      const jobCurrentStage = new Map<string, {
+        stage_id: string;
+        stage_name: string;
+        stage_color: string;
+        order_index: number;
+      }>();
+      
+      data?.forEach((instance: any) => {
+        if (!activeJobIds.has(instance.job_id)) return;
+        
+        const stage = instance.production_stages;
+        const stageOrder = instance.stage_order ?? stage.order_index ?? 999;
+        const existing = jobCurrentStage.get(instance.job_id);
+        
+        // Keep only the lowest order stage per job (that's the current stage)
+        if (!existing || stageOrder < existing.order_index) {
+          jobCurrentStage.set(instance.job_id, {
+            stage_id: instance.production_stage_id,
+            stage_name: stage.name,
+            stage_color: stage.color || '#6B7280',
+            order_index: stageOrder
+          });
+        }
+      });
+      
+      // Step 4: Aggregate counts by stage (each job counted only once)
       const counts = new Map<string, { 
         stage_id: string; 
         stage_name: string; 
@@ -100,23 +127,21 @@ const TrackerProduction = () => {
         count: number 
       }>();
       
-      data?.forEach((instance: any) => {
-        const stageId = instance.production_stage_id;
-        const stage = instance.production_stages;
-        const current = counts.get(stageId) || { 
-          stage_id: stageId,
-          stage_name: stage.name,
-          stage_color: stage.color || '#6B7280',
-          order_index: stage.order_index || 0,
+      jobCurrentStage.forEach((currentStage) => {
+        const current = counts.get(currentStage.stage_id) || { 
+          stage_id: currentStage.stage_id,
+          stage_name: currentStage.stage_name,
+          stage_color: currentStage.stage_color,
+          order_index: currentStage.order_index,
           count: 0 
         };
         current.count++;
-        counts.set(stageId, current);
+        counts.set(currentStage.stage_id, current);
       });
       
       return counts;
     },
-    staleTime: 30000, // Cache for 30 seconds
+    staleTime: 30000,
   });
 
   // Optimized single-query approach: fetch all stages for jobs in the selected stage
@@ -172,11 +197,34 @@ const TrackerProduction = () => {
     return map;
   }, [enhancedJobs]);
 
-  // Filter jobs based on selected stage
+  // Filter jobs based on selected stage - only show jobs where this is their CURRENT stage
   const filteredJobs = useMemo(() => {
     if (!selectedStageId) return enhancedJobs;
-    return jobsByStage.get(selectedStageId) || [];
-  }, [enhancedJobs, selectedStageId, jobsByStage]);
+    
+    return enhancedJobs.filter(job => {
+      // If job has parallel stages, find the current stage (lowest order pending/active)
+      if (job.parallel_stages && job.parallel_stages.length > 0) {
+        // Filter to only pending/active stages
+        const pendingStages = job.parallel_stages.filter(
+          s => ['pending', 'active', 'scheduled', 'held'].includes(s.stage_status || '')
+        );
+        
+        if (pendingStages.length === 0) return false;
+        
+        // Sort by stage_order to find the current (lowest order) stage
+        const sortedStages = [...pendingStages].sort(
+          (a, b) => (a.stage_order || 0) - (b.stage_order || 0)
+        );
+        
+        // Current stage is the lowest order pending stage
+        const currentStage = sortedStages[0];
+        return currentStage.stage_id === selectedStageId;
+      }
+      
+      // Fallback: use current_stage_id directly
+      return job.current_stage_id === selectedStageId;
+    });
+  }, [enhancedJobs, selectedStageId]);
   // Enhanced sorting with batch processing awareness
   const sortedJobs = useMemo(() => {
     return [...filteredJobs].sort((a, b) => {
@@ -214,7 +262,7 @@ const TrackerProduction = () => {
           order_index: stage.order_index,
           job_count: stage.count
         }))
-        .sort((a, b) => a.stage_name.localeCompare(b.stage_name));
+        .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
     }
     
     // Fallback: Build from jobsByStage if query hasn't loaded yet

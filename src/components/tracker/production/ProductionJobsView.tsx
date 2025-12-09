@@ -31,7 +31,7 @@ export const ProductionJobsView: React.FC<ProductionJobsViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [specFilters, setSpecFilters] = useState<SpecificationFilters>({});
-  const [viewMode, setViewMode] = useState<"card" | "list">("card");
+  const [viewMode, setViewMode] = useState<"card" | "list">("list");
   const { completeBatchProcessing, isProcessing } = useUnifiedBatchWorkflow();
 
   // Extract available specifications for filtering
