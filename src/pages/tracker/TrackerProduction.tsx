@@ -92,12 +92,25 @@ const TrackerProduction = () => {
       
       if (error) throw error;
       
-      // Step 3: For each job, find its CURRENT stage (lowest order pending/active stage)
+      // Status priority: active (1) > awaiting_approval (2) > pending/scheduled (3) > held (4) > others (5)
+      const getStatusPriority = (status: string) => {
+        switch (status) {
+          case 'active': return 1;
+          case 'awaiting_approval': return 2;
+          case 'pending': return 3;
+          case 'scheduled': return 3;
+          case 'held': return 4;
+          default: return 5;
+        }
+      };
+      
+      // Step 3: For each job, find its CURRENT stage (by status priority, then lowest order)
       const jobCurrentStage = new Map<string, {
         stage_id: string;
         stage_name: string;
         stage_color: string;
         order_index: number;
+        status: string;
       }>();
       
       data?.forEach((instance: any) => {
@@ -105,15 +118,22 @@ const TrackerProduction = () => {
         
         const stage = instance.production_stages;
         const stageOrder = instance.stage_order ?? stage.order_index ?? 999;
+        const statusPriority = getStatusPriority(instance.status);
         const existing = jobCurrentStage.get(instance.job_id);
         
-        // Keep only the lowest order stage per job (that's the current stage)
-        if (!existing || stageOrder < existing.order_index) {
+        // Compare by status priority first, then by stage_order
+        const existingPriority = existing ? getStatusPriority(existing.status) : 999;
+        const shouldReplace = !existing || 
+          statusPriority < existingPriority ||
+          (statusPriority === existingPriority && stageOrder < existing.order_index);
+        
+        if (shouldReplace) {
           jobCurrentStage.set(instance.job_id, {
             stage_id: instance.production_stage_id,
             stage_name: stage.name,
             stage_color: stage.color || '#6B7280',
-            order_index: stageOrder
+            order_index: stageOrder,
+            status: instance.status
           });
         }
       });
@@ -198,25 +218,41 @@ const TrackerProduction = () => {
   }, [enhancedJobs]);
 
   // Filter jobs based on selected stage - only show jobs where this is their CURRENT stage
+  // Uses same status priority logic as stageCounts: active > awaiting_approval > pending > held
   const filteredJobs = useMemo(() => {
     if (!selectedStageId) return enhancedJobs;
     
+    // Status priority: active (1) > awaiting_approval (2) > pending/scheduled (3) > held (4) > others (5)
+    const getStatusPriority = (status: string) => {
+      switch (status) {
+        case 'active': return 1;
+        case 'awaiting_approval': return 2;
+        case 'pending': return 3;
+        case 'scheduled': return 3;
+        case 'held': return 4;
+        default: return 5;
+      }
+    };
+    
     return enhancedJobs.filter(job => {
-      // If job has parallel stages, find the current stage (lowest order pending/active)
+      // If job has parallel stages, find the current stage (by status priority, then stage_order)
       if (job.parallel_stages && job.parallel_stages.length > 0) {
         // Filter to only pending/active stages
         const pendingStages = job.parallel_stages.filter(
-          s => ['pending', 'active', 'scheduled', 'held'].includes(s.stage_status || '')
+          s => ['pending', 'active', 'scheduled', 'held', 'awaiting_approval'].includes(s.stage_status || '')
         );
         
         if (pendingStages.length === 0) return false;
         
-        // Sort by stage_order to find the current (lowest order) stage
-        const sortedStages = [...pendingStages].sort(
-          (a, b) => (a.stage_order || 0) - (b.stage_order || 0)
-        );
+        // Sort by status priority first, then by stage_order
+        const sortedStages = [...pendingStages].sort((a, b) => {
+          const priorityA = getStatusPriority(a.stage_status || 'pending');
+          const priorityB = getStatusPriority(b.stage_status || 'pending');
+          if (priorityA !== priorityB) return priorityA - priorityB;
+          return (a.stage_order || 0) - (b.stage_order || 0);
+        });
         
-        // Current stage is the lowest order pending stage
+        // Current stage is the one with highest status priority (or lowest order if tied)
         const currentStage = sortedStages[0];
         return currentStage.stage_id === selectedStageId;
       }
