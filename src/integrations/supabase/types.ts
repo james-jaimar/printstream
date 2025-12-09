@@ -3730,6 +3730,16 @@ export type Database = {
       }
       calculate_stage_queue_workload:
         | {
+            Args: { p_production_stage_id: string }
+            Returns: {
+              active_jobs_count: number
+              earliest_available_slot: string
+              pending_jobs_count: number
+              total_active_hours: number
+              total_pending_hours: number
+            }[]
+          }
+        | {
             Args: { stage_ids: string[] }
             Returns: {
               active_jobs_count: number
@@ -3737,16 +3747,6 @@ export type Database = {
               pending_jobs_count: number
               queue_processing_hours: number
               stage_id: string
-              total_active_hours: number
-              total_pending_hours: number
-            }[]
-          }
-        | {
-            Args: { p_production_stage_id: string }
-            Returns: {
-              active_jobs_count: number
-              earliest_available_slot: string
-              pending_jobs_count: number
               total_active_hours: number
               total_pending_hours: number
             }[]
@@ -3804,15 +3804,15 @@ export type Database = {
       }
       create_batch_master_job:
         | {
+            Args: { p_batch_id: string; p_constituent_job_ids: string[] }
+            Returns: string
+          }
+        | {
             Args: {
               p_batch_id: string
               p_constituent_job_ids: string[]
               p_created_by?: string
             }
-            Returns: string
-          }
-        | {
-            Args: { p_batch_id: string; p_constituent_job_ids: string[] }
             Returns: string
           }
       create_batch_master_job_simple: {
@@ -3853,8 +3853,8 @@ export type Database = {
         }[]
       }
       export_scheduler_input:
-        | { Args: { p_division?: string }; Returns: Json }
         | { Args: never; Returns: Json }
+        | { Args: { p_division?: string }; Returns: Json }
       find_available_gaps: {
         Args: {
           p_align_at?: string
@@ -3896,16 +3896,16 @@ export type Database = {
       }
       get_admin_status:
         | {
+            Args: never
+            Returns: {
+              is_admin: boolean
+            }[]
+          }
+        | {
             Args: { check_user_id?: string }
             Returns: {
               any_admin_exists: boolean
               user_is_admin: boolean
-            }[]
-          }
-        | {
-            Args: never
-            Returns: {
-              is_admin: boolean
             }[]
           }
       get_admin_user_stats: {
@@ -4308,8 +4308,8 @@ export type Database = {
       is_hp12000_stage: { Args: { stage_name: string }; Returns: boolean }
       is_public_holiday: { Args: { check_date: string }; Returns: boolean }
       is_user_admin:
-        | { Args: { check_user_id?: string }; Returns: boolean }
         | { Args: never; Returns: boolean }
+        | { Args: { check_user_id?: string }; Returns: boolean }
       is_working_day: { Args: { p_date: string }; Returns: boolean }
       jsi_minutes: {
         Args: {
@@ -4574,13 +4574,6 @@ export type Database = {
       }
       shift_window_enhanced:
         | {
-            Args: { p_end_date: string; p_start_date: string }
-            Returns: {
-              end_time: string
-              start_time: string
-            }[]
-          }
-        | {
             Args: { p_date: string }
             Returns: {
               has_lunch_break: boolean
@@ -4588,6 +4581,13 @@ export type Database = {
               lunch_start: string
               win_end: string
               win_start: string
+            }[]
+          }
+        | {
+            Args: { p_end_date: string; p_start_date: string }
+            Returns: {
+              end_time: string
+              start_time: string
             }[]
           }
       simple_scheduler_wrapper: {
