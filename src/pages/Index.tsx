@@ -26,6 +26,11 @@ const Index = () => {
         navigate('/tracker/dtp-workflow');
         return;
       }
+      // Redirect packaging operators to their specialized workflow
+      if (userRole === 'packaging_operator') {
+        navigate('/tracker/packaging-shipping');
+        return;
+      }
       // Redirect regular operators to factory floor
       if (userRole === 'operator') {
         navigate('/tracker/factory-floor');
@@ -48,7 +53,7 @@ const Index = () => {
   }
 
   // Don't render anything if redirecting
-  if (!user || userRole === 'operator' || userRole === 'dtp_operator') {
+  if (!user || userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator') {
     return null;
   }
 
