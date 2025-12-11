@@ -196,10 +196,10 @@ export const FinishingKanbanDashboard: React.FC = () => {
 
       <div className="flex-1 overflow-hidden px-3 sm:px-4 pb-3 sm:pb-4">
         {viewMode === 'card' ? (
-          <div key="card-view" className="overflow-x-auto pb-4 h-full">
-            <div className="flex gap-4 min-w-max">
+          <div key="card-view" className="h-full overflow-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 h-full">
               {QUEUE_CONFIGS.map(config => (
-                <div key={config.id} className="w-80 flex-shrink-0">
+                <div key={config.id} className="flex flex-col min-h-0">
                   <DtpKanbanColumnWithBoundary
                     title={config.title}
                     jobs={queueJobs[config.id] || []}
@@ -215,13 +215,13 @@ export const FinishingKanbanDashboard: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div key="list-view" className="overflow-x-auto pb-4 h-full">
-            <div className="flex gap-4 min-w-max">
+          <div key="list-view" className="h-full overflow-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 h-full">
               {QUEUE_CONFIGS.map(config => {
                 const jobsForQueue = queueJobs[config.id] || [];
                 
                 return (
-                  <div key={config.id} className="w-80 flex-shrink-0 flex flex-col space-y-2">
+                  <div key={config.id} className="flex flex-col space-y-2 min-h-0">
                     <div 
                       className="flex-shrink-0 px-3 py-2 text-white rounded-md"
                       style={{ backgroundColor: config.backgroundColor }}
