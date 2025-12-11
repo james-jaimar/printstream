@@ -55,15 +55,33 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
   // Packaging/Shipping stage patterns (redirect to packaging)
   const PACKAGING_PATTERNS = ['packaging', 'shipping', 'dispatch'];
   
-  // Redirect non-DTP/non-Packaging operators to the finishing dashboard (multi-column view)
+  // Die Cutting patterns (redirect to die cutting dashboard)
+  const DIE_CUTTING_PATTERNS = ['die cut', 'die-cut', 'diecutting'];
+  
+  // Redirect based on user role and stage access
   useEffect(() => {
     if (roleLoading) return;
     
-    // Skip redirect if user is admin or manager
-    if (isAdmin || isManager) return;
-    
     // Skip redirect if already on a specific stage (production_stage_id provided)
     if (production_stage_id) return;
+    
+    // Check for die cutting manager (manager with die cutting access)
+    if (isManager && accessibleStages.length > 0) {
+      const hasDieCuttingStages = accessibleStages.some(stage => 
+        DIE_CUTTING_PATTERNS.some(pattern => 
+          stage.stage_name.toLowerCase().includes(pattern)
+        )
+      );
+      
+      if (hasDieCuttingStages) {
+        console.log('🔄 Redirecting die cutting manager to /tracker/die-cutting');
+        navigate('/tracker/die-cutting', { replace: true });
+        return;
+      }
+    }
+    
+    // Skip redirect if user is admin (they stay on factory floor)
+    if (isAdmin) return;
     
     // Check if user is operator with stages
     if (isOperator && accessibleStages.length > 0) {
@@ -79,8 +97,21 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
         )
       );
       
+      const hasDieCuttingStages = accessibleStages.some(stage => 
+        DIE_CUTTING_PATTERNS.some(pattern => 
+          stage.stage_name.toLowerCase().includes(pattern)
+        )
+      );
+      
+      // If operator has die cutting stages, redirect to die cutting
+      if (hasDieCuttingStages && !hasDtpStages && !hasPackagingStages) {
+        console.log('🔄 Redirecting operator to /tracker/die-cutting');
+        navigate('/tracker/die-cutting', { replace: true });
+        return;
+      }
+      
       // If operator has NO DTP stages and NO Packaging stages, redirect to finishing (multi-column view)
-      if (!hasDtpStages && !hasPackagingStages) {
+      if (!hasDtpStages && !hasPackagingStages && !hasDieCuttingStages) {
         console.log('🔄 Redirecting operator to /tracker/finishing (multi-column view)');
         navigate('/tracker/finishing', { replace: true });
         return;

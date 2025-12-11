@@ -31,6 +31,7 @@ import TrackerDTPWorkflow from "@/pages/tracker/TrackerDTPWorkflow";
 import TrackerPackagingShipping from "@/pages/tracker/TrackerPackagingShipping";
 import TrackerFinishing from "@/pages/tracker/TrackerFinishing";
 import TrackerScoring from "@/pages/tracker/TrackerScoring";
+import TrackerDieCutting from "@/pages/tracker/TrackerDieCutting";
 import FactoryFloor from "@/pages/tracker/FactoryFloor";
 import MobileFactory from "@/pages/tracker/MobileFactory";
 
@@ -218,6 +219,7 @@ function App() {
                   <Route path="packaging-shipping" element={<TrackerPackagingShipping />} />
                   <Route path="finishing" element={<TrackerFinishing />} />
                   <Route path="scoring" element={<TrackerScoring />} />
+                  <Route path="die-cutting" element={<TrackerDieCutting />} />
                   <Route path="analytics" element={<TrackerAnalytics />} />
                   <Route path="bulk-approval" element={<TrackerBulkApproval />} />
                   <Route path="bulk-advance" element={<TrackerBulkAdvance />} />
