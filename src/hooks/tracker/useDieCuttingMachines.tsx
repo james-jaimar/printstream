@@ -54,7 +54,7 @@ export const useDieCuttingMachines = () => {
     }
   }, []);
 
-  // Fetch all jobs that are in a die cutting stage
+  // Fetch jobs where Die Cutting is the CURRENT stage (first pending/active stage)
   const fetchJobs = useCallback(async () => {
     try {
       // First get die cutting production stage IDs
@@ -71,10 +71,10 @@ export const useDieCuttingMachines = () => {
         return;
       }
 
-      const stageIds = dieCuttingStages.map(s => s.id);
+      const dieCuttingStageIds = dieCuttingStages.map(s => s.id);
 
-      // Fetch job stage instances for die cutting stages
-      const { data: stageInstances, error: instancesError } = await supabase
+      // Fetch ALL pending/active stages to determine current stage per job
+      const { data: allPendingStages, error: pendingError } = await supabase
         .from('job_stage_instances')
         .select(`
           id,
@@ -87,19 +87,37 @@ export const useDieCuttingMachines = () => {
           stage_order,
           quantity
         `)
-        .in('production_stage_id', stageIds)
+        .eq('job_table_name', 'production_jobs')
         .in('status', ['pending', 'active', 'queued'])
         .order('stage_order', { ascending: true });
 
-      if (instancesError) throw instancesError;
+      if (pendingError) throw pendingError;
 
-      if (!stageInstances || stageInstances.length === 0) {
+      if (!allPendingStages || allPendingStages.length === 0) {
         setJobs([]);
         return;
       }
 
-      // Get job details
-      const jobIds = [...new Set(stageInstances.map(si => si.job_id))];
+      // Group by job_id and find the FIRST (current) stage for each job
+      const jobCurrentStages = new Map<string, typeof allPendingStages[0]>();
+      allPendingStages.forEach(stage => {
+        // Only set if this job doesn't have a current stage yet (first one wins due to ordering)
+        if (!jobCurrentStages.has(stage.job_id)) {
+          jobCurrentStages.set(stage.job_id, stage);
+        }
+      });
+
+      // Filter to only jobs where the current stage is a Die Cutting stage
+      const dieCuttingCurrentStages = Array.from(jobCurrentStages.values())
+        .filter(stage => dieCuttingStageIds.includes(stage.production_stage_id));
+
+      if (dieCuttingCurrentStages.length === 0) {
+        setJobs([]);
+        return;
+      }
+
+      // Get job details for these jobs
+      const jobIds = dieCuttingCurrentStages.map(s => s.job_id);
       const { data: productionJobs, error: jobsError } = await supabase
         .from('production_jobs')
         .select(`
@@ -122,7 +140,7 @@ export const useDieCuttingMachines = () => {
       // Combine the data
       const jobsMap = new Map(productionJobs?.map(j => [j.id, j]) || []);
       
-      const combinedJobs: DieCuttingJob[] = stageInstances.map(si => {
+      const combinedJobs: DieCuttingJob[] = dieCuttingCurrentStages.map(si => {
         const job = jobsMap.get(si.job_id);
         const category = job?.categories as { name: string; color: string } | null;
         
