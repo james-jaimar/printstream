@@ -49,27 +49,13 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
   const [supervisorOverrideJob, setSupervisorOverrideJob] = useState<any>(null);
   const [showBatchStartModal, setShowBatchStartModal] = useState(false);
   
-  // Finishing stages list
-  const FINISHING_STAGES = [
-    'Handwork',
-    'Padding', 
-    'Round Corners',
-    'Box Gluing',
-    'Gathering',
-    'Wire Binding'
-  ];
+  // DTP stage patterns (stay on Factory Floor)
+  const DTP_PATTERNS = ['dtp', 'prepress', 'proof'];
   
-  // Scoring stages list
-  const SCORING_STAGES = [
-    'Scoring',
-    'Scoring & Folding',
-    'Perfing',
-    'Creasing',
-    'Manual Folding',
-    'Auto Folding'
-  ];
+  // Packaging/Shipping stage patterns (redirect to packaging)
+  const PACKAGING_PATTERNS = ['packaging', 'shipping', 'dispatch'];
   
-  // Redirect finishing operators to dedicated finishing dashboard
+  // Redirect non-DTP/non-Packaging operators to the finishing dashboard (multi-column view)
   useEffect(() => {
     if (roleLoading) return;
     
@@ -79,30 +65,25 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
     // Skip redirect if already on a specific stage (production_stage_id provided)
     if (production_stage_id) return;
     
-    // Check if user is operator with ONLY finishing stages
+    // Check if user is operator with stages
     if (isOperator && accessibleStages.length > 0) {
-      const allStagesAreFinishing = accessibleStages.every(stage => 
-        FINISHING_STAGES.some(finishingStage => 
-          stage.stage_name.toLowerCase().includes(finishingStage.toLowerCase())
+      const hasDtpStages = accessibleStages.some(stage => 
+        DTP_PATTERNS.some(pattern => 
+          stage.stage_name.toLowerCase().includes(pattern)
         )
       );
       
-      if (allStagesAreFinishing) {
-        console.log('🔄 Redirecting finishing operator to /tracker/finishing');
+      const hasPackagingStages = accessibleStages.some(stage => 
+        PACKAGING_PATTERNS.some(pattern => 
+          stage.stage_name.toLowerCase().includes(pattern)
+        )
+      );
+      
+      // If operator has NO DTP stages and NO Packaging stages, redirect to finishing (multi-column view)
+      if (!hasDtpStages && !hasPackagingStages) {
+        console.log('🔄 Redirecting operator to /tracker/finishing (multi-column view)');
         navigate('/tracker/finishing', { replace: true });
         return;
-      }
-      
-      // Check if user is operator with ONLY scoring stages
-      const allStagesAreScoring = accessibleStages.every(stage => 
-        SCORING_STAGES.some(scoringStage => 
-          stage.stage_name.toLowerCase().includes(scoringStage.toLowerCase())
-        )
-      );
-      
-      if (allStagesAreScoring) {
-        console.log('🔄 Redirecting scoring operator to /tracker/scoring');
-        navigate('/tracker/scoring', { replace: true });
       }
     }
   }, [roleLoading, isOperator, isAdmin, isManager, accessibleStages, production_stage_id, navigate]);
