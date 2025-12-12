@@ -116,7 +116,7 @@ export const useDieCuttingMachines = () => {
         return;
       }
 
-      // Get job details for these jobs
+      // Get job details for these jobs - only approved orders (proof_approved_at is not null)
       const jobIds = dieCuttingCurrentStages.map(s => s.job_id);
       const { data: productionJobs, error: jobsError } = await supabase
         .from('production_jobs')
@@ -128,19 +128,23 @@ export const useDieCuttingMachines = () => {
           due_date,
           qty,
           category_id,
+          proof_approved_at,
           categories:category_id (
             name,
             color
           )
         `)
-        .in('id', jobIds);
+        .in('id', jobIds)
+        .not('proof_approved_at', 'is', null);
 
       if (jobsError) throw jobsError;
 
-      // Combine the data
+      // Combine the data - only include jobs that passed the proof_approved_at filter
+      const approvedJobIds = new Set(productionJobs?.map(j => j.id) || []);
+      const filteredStages = dieCuttingCurrentStages.filter(s => approvedJobIds.has(s.job_id));
       const jobsMap = new Map(productionJobs?.map(j => [j.id, j]) || []);
       
-      const combinedJobs: DieCuttingJob[] = dieCuttingCurrentStages.map(si => {
+      const combinedJobs: DieCuttingJob[] = filteredStages.map(si => {
         const job = jobsMap.get(si.job_id);
         const category = job?.categories as { name: string; color: string } | null;
         
