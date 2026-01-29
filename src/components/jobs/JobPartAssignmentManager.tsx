@@ -8,9 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
-import { CheckCircle2, Clock, Play, Package, Wrench, Truck, ChevronDown, ChevronRight, List } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { CheckCircle2, Clock, Play, Package, Wrench, Truck, ChevronDown, ChevronRight, List, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { autoAssignParts } from '@/utils/tracker/partAutoAssignment';
+import { scheduleJobs } from '@/utils/scheduler';
 
 interface SubTask {
   id: string;
@@ -98,6 +100,15 @@ const JobPartAssignmentManager: React.FC<JobPartAssignmentManagerProps> = ({
 }) => {
   const queryClient = useQueryClient();
   const [expandedStageIds, setExpandedStageIds] = useState<Set<string>>(new Set());
+  const [hasChanges, setHasChanges] = useState(false);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+
+  // Reset hasChanges when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setHasChanges(false);
+    }
+  }, [open]);
 
   // Optimized job details query with proper caching
   const { data: job } = useQuery<Job>({
@@ -277,7 +288,8 @@ const JobPartAssignmentManager: React.FC<JobPartAssignmentManagerProps> = ({
     onSuccess: () => {
       // Only invalidate the specific stage query, not all job-related queries
       queryClient.invalidateQueries({ queryKey: ['job-stages-simple', jobId] });
-      toast.success('Part assignment updated');
+      setHasChanges(true);
+      toast.success('Part assignment updated - reschedule recommended');
     },
     onError: (error) => {
       toast.error('Failed to update part assignment: ' + error.message);
@@ -366,6 +378,33 @@ const JobPartAssignmentManager: React.FC<JobPartAssignmentManagerProps> = ({
 
   const handlePartAssignmentChange = (stageId: string, newAssignment: string) => {
     updatePartAssignmentMutation.mutate({ stageId, partAssignment: newAssignment });
+  };
+
+  const handleReschedule = async () => {
+    setIsRescheduling(true);
+    try {
+      const result = await scheduleJobs([jobId], true);
+      if (result) {
+        toast.success(`Job rescheduled: ${result.wrote_slots} time slots updated`);
+        setHasChanges(false);
+        // Invalidate schedule-related queries
+        queryClient.invalidateQueries({ queryKey: ['schedule'] });
+        queryClient.invalidateQueries({ queryKey: ['job-stages-simple', jobId] });
+      } else {
+        toast.error('Reschedule returned no result');
+      }
+    } catch (error: any) {
+      toast.error(`Reschedule failed: ${error?.message || error}`);
+    } finally {
+      setIsRescheduling(false);
+    }
+  };
+
+  const handleClose = () => {
+    if (hasChanges) {
+      toast.info('Part assignments saved. Remember to reschedule if needed.');
+    }
+    onClose();
   };
 
   const groupStagesByGroup = () => {
@@ -612,9 +651,9 @@ const JobPartAssignmentManager: React.FC<JobPartAssignmentManagerProps> = ({
               </Card>
             ))}
 
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-              <h4 className="font-medium text-blue-900 mb-2">Part Assignment Guide</h4>
-              <div className="grid grid-cols-2 gap-4 text-sm text-blue-800">
+            <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+              <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">Part Assignment Guide</h4>
+              <div className="grid grid-cols-2 gap-4 text-sm text-blue-800 dark:text-blue-200">
                 <div>
                   <strong>Cover:</strong> For jobs that work on the cover/outer part (e.g., Cover Print, Cover Lamination)
                 </div>
@@ -632,8 +671,43 @@ const JobPartAssignmentManager: React.FC<JobPartAssignmentManagerProps> = ({
           </div>
         )}
 
-        <div className="flex justify-end pt-4">
-          <Button onClick={onClose}>Close</Button>
+        {/* Reschedule Warning Section */}
+        {hasChanges && (
+          <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <AlertDescription className="text-amber-800 dark:text-amber-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <strong>Part assignments changed.</strong> Changes to parallel processing require a schedule recalculation to take effect.
+                </div>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="flex justify-end gap-2 pt-4">
+          {hasChanges && (
+            <Button 
+              onClick={handleReschedule} 
+              disabled={isRescheduling}
+              variant="default"
+            >
+              {isRescheduling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Rescheduling...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Reschedule Now
+                </>
+              )}
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleClose}>
+            {hasChanges ? 'Close Without Rescheduling' : 'Close'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
