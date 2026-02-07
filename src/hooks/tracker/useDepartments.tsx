@@ -30,12 +30,12 @@ export const useDepartments = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch all departments
+  // OPTIMIZED: Specific columns instead of SELECT *
   const fetchDepartments = async () => {
     try {
       const { data, error } = await supabase
         .from('departments')
-        .select('*')
+        .select('id, name, description, color, allows_concurrent_jobs, max_concurrent_jobs, created_at, updated_at')
         .order('name');
       
       if (error) throw error;

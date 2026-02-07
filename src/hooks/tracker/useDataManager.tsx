@@ -1,8 +1,8 @@
-
 // --- Refactored for maintainability. Utilities/types extracted. ---
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useTabVisibility } from '@/hooks/useTabVisibility';
 import { toast } from 'sonner';
 import { CACHE_TTL, isCacheValid, groupStagesByMasterQueue } from './useDataManager.utils';
 import type { CachedData, DataManagerState } from './useDataManager.types';
@@ -11,8 +11,20 @@ const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 const globalRouteCache: Record<string, { jobs: CachedData | null; stages: CachedData | null }> = {};
 
+// OPTIMIZED: Specific columns instead of SELECT *
+const JOBS_SELECT = `
+  id, wo_no, customer, status, due_date, reference,
+  created_at, is_expedited, category_id,
+  categories(id, name, color, sla_target_days)
+`;
+
+const STAGES_SELECT = `
+  id, name, description, color, order_index, is_active, supports_parts
+`;
+
 export const useDataManager = () => {
   const { user } = useAuth();
+  const { isVisible } = useTabVisibility();
   const [state, setState] = useState<DataManagerState>({
     jobs: [],
     stages: [],
@@ -31,18 +43,10 @@ export const useDataManager = () => {
   const isManualRefreshRef = useRef(false);
 
   const fetchJobs = useCallback(async (): Promise<any[]> => {
+    // OPTIMIZED: Use specific columns
     const { data, error } = await supabase
       .from('production_jobs')
-      .select(`
-        *,
-        categories (
-          id,
-          name,
-          description,
-          color,
-          sla_target_days
-        )
-      `)
+      .select(JOBS_SELECT)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -50,9 +54,10 @@ export const useDataManager = () => {
   }, []);
 
   const fetchStages = useCallback(async (): Promise<any[]> => {
+    // OPTIMIZED: Use specific columns
     const { data, error } = await supabase
       .from('production_stages')
-      .select('*')
+      .select(STAGES_SELECT)
       .eq('is_active', true)
       .order('order_index', { ascending: true });
 
@@ -115,7 +120,6 @@ export const useDataManager = () => {
         toast.success('Data refreshed successfully');
       }
 
-      // Data loaded: ${jobsData.length} jobs, ${stagesData.length} stages
     } catch (error) {
       console.error('❌ Error loading data:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to load data';
@@ -130,28 +134,61 @@ export const useDataManager = () => {
         toast.error('Failed to refresh data');
       }
     }
-  }, [user?.id, fetchJobs, fetchStages]);
+  }, [user?.id, fetchJobs, fetchStages, routeKey]);
 
   const manualRefresh = useCallback(() => {
     console.log('🔄 Manual refresh triggered');
     loadData(true);
   }, [loadData]);
 
+  // OPTIMIZED: Only run interval when tab is visible
   useEffect(() => {
     if (!user?.id) return;
+
+    // Initial load
     loadData(false);
 
-    autoRefreshIntervalRef.current = setInterval(() => {
-      loadData(false);
-    }, AUTO_REFRESH_INTERVAL);
+    // OPTIMIZED: Only set up interval when tab is visible
+    if (isVisible) {
+      autoRefreshIntervalRef.current = setInterval(() => {
+        console.log('🔄 Auto-refresh triggered (tab visible)');
+        loadData(false);
+      }, AUTO_REFRESH_INTERVAL);
+    }
 
     return () => {
       if (autoRefreshIntervalRef.current) {
         clearInterval(autoRefreshIntervalRef.current);
+        autoRefreshIntervalRef.current = null;
       }
     };
-  }, [user?.id, loadData, routeKey]);
+  }, [user?.id, loadData, routeKey, isVisible]);
 
+  // OPTIMIZED: Pause/resume interval based on tab visibility
+  useEffect(() => {
+    if (!user?.id) return;
+
+    if (isVisible) {
+      // Tab became visible - refresh data and restart interval
+      console.log('📱 useDataManager: Tab visible - resuming');
+      loadData(false);
+      
+      if (!autoRefreshIntervalRef.current) {
+        autoRefreshIntervalRef.current = setInterval(() => {
+          loadData(false);
+        }, AUTO_REFRESH_INTERVAL);
+      }
+    } else {
+      // Tab hidden - pause interval
+      console.log('📱 useDataManager: Tab hidden - pausing');
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
+        autoRefreshIntervalRef.current = null;
+      }
+    }
+  }, [isVisible, user?.id, loadData]);
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (autoRefreshIntervalRef.current) {
@@ -179,6 +216,6 @@ export const useDataManager = () => {
     error: state.error,
     manualRefresh,
     getTimeSinceLastUpdate,
-    groupStagesByMasterQueue // imported utility
+    groupStagesByMasterQueue
   };
 };
