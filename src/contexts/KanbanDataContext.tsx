@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -13,7 +12,8 @@ export interface KanbanJob {
   category_id?: string;
   category_name?: string;
   stages?: any[];
-  // ... extend as needed based on your columns
+  created_at?: string;
+  is_expedited?: boolean;
 }
 
 interface KanbanDataContextType {
@@ -37,6 +37,16 @@ export const useKanbanDataContext = () => {
 // --- Data Fetching/Caching/Realtime ---
 let globalKanbanCache = { jobs: [] as KanbanJob[], stages: [], lastUpdated: 0 };
 
+// OPTIMIZED: Specific columns instead of SELECT *
+const JOBS_SELECT = `
+  id, wo_no, customer, status, due_date, reference, 
+  category_id, created_at, is_expedited
+`;
+
+const STAGES_SELECT = `
+  id, name, description, color, order_index, is_active, supports_parts
+`;
+
 export const KanbanDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [jobs, setJobs] = useState<KanbanJob[]>([]);
   const [stages, setStages] = useState<any[]>([]);
@@ -44,10 +54,30 @@ export const KanbanDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isTabVisible, setIsTabVisible] = useState(() => {
+    if (typeof document === 'undefined') return true;
+    return !document.hidden;
+  });
+  
   const subscriptionRef = useRef<any>(null);
+  const debouncedFetchRef = useRef<NodeJS.Timeout | null>(null);
 
   // 5 min cache
   const CACHE_TTL = 5 * 60 * 1000;
+
+  // Tab visibility detection
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    
+    const handler = () => {
+      const visible = !document.hidden;
+      setIsTabVisible(visible);
+      console.log(`📱 KanbanDataContext: Tab ${visible ? 'visible' : 'hidden'}`);
+    };
+    
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, []);
 
   const fetchKanbanData = useCallback(async (force = false) => {
     if (
@@ -63,21 +93,23 @@ export const KanbanDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setError(null);
       return;
     }
+    
     setIsLoading(true);
     setError(null);
+    
     try {
-      // Fetch jobs
+      // OPTIMIZED: Fetch jobs with specific columns only
       const { data: jobsData, error: jobsError } = await supabase
         .from('production_jobs')
-        .select("*")
+        .select(JOBS_SELECT)
         .order('created_at', { ascending: false });
 
       if (jobsError) throw jobsError;
 
-      // Fetch stages
+      // OPTIMIZED: Fetch stages with specific columns only
       const { data: stagesData, error: stagesErr } = await supabase
         .from('production_stages')
-        .select("*")
+        .select(STAGES_SELECT)
         .order('order_index', { ascending: true });
 
       if (stagesErr) throw stagesErr;
@@ -100,27 +132,67 @@ export const KanbanDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
-  const refresh = useCallback(() => fetchKanbanData(true), [fetchKanbanData]);
+  // OPTIMIZED: Debounced handler for real-time changes
+  const handleRealtimeChange = useCallback(() => {
+    // Skip if tab is hidden
+    if (!isTabVisible) {
+      console.log('📡 KanbanDataContext: Skipping refetch (tab hidden)');
+      return;
+    }
 
-  // Real-time only ONCE
+    // Debounce: wait 2 seconds before refetching
+    if (debouncedFetchRef.current) {
+      clearTimeout(debouncedFetchRef.current);
+    }
+
+    debouncedFetchRef.current = setTimeout(() => {
+      console.log('📡 KanbanDataContext: Debounced refetch triggered');
+      fetchKanbanData(true);
+    }, 2000);
+  }, [isTabVisible, fetchKanbanData]);
+
+  const refresh = useCallback(() => {
+    // Clear any pending debounced fetches
+    if (debouncedFetchRef.current) {
+      clearTimeout(debouncedFetchRef.current);
+    }
+    setIsRefreshing(true);
+    fetchKanbanData(true);
+  }, [fetchKanbanData]);
+
+  // Initial fetch and real-time subscription
   useEffect(() => {
     fetchKanbanData(false);
+
+    // OPTIMIZED: Only subscribe when tab is visible
+    if (!isTabVisible) {
+      // Cleanup existing subscription when tab hidden
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current);
+        subscriptionRef.current = null;
+      }
+      return;
+    }
+
     if (!subscriptionRef.current) {
       const channel = supabase
         .channel("kanban_realtime")
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'production_jobs' }, () => fetchKanbanData(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'production_stages' }, () => fetchKanbanData(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'production_jobs' }, handleRealtimeChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'production_stages' }, handleRealtimeChange)
         .subscribe();
       subscriptionRef.current = channel;
     }
+
     return () => {
+      if (debouncedFetchRef.current) {
+        clearTimeout(debouncedFetchRef.current);
+      }
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current);
         subscriptionRef.current = null;
       }
     };
-    // eslint-disable-next-line
-  }, []);
+  }, [fetchKanbanData, handleRealtimeChange, isTabVisible]);
 
   return (
     <KanbanDataContext.Provider value={{ jobs, stages, isLoading, isRefreshing, error, lastUpdated, refresh }}>

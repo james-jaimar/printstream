@@ -1,40 +1,51 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useTabVisibility } from "@/hooks/useTabVisibility";
 import { toast } from "sonner";
 import { formatWONumber } from "@/utils/woNumberFormatter";
 import { processJobsArray, RawJobData } from "./useAccessibleJobs/jobDataProcessor";
 
 interface UseEnhancedProductionJobsOptions {
-  fetchAllJobs?: boolean; // New option to fetch all jobs instead of user-specific
+  fetchAllJobs?: boolean;
 }
+
+// OPTIMIZED: Specific columns instead of SELECT *
+const JOBS_SELECT = `
+  id, wo_no, customer, status, due_date, reference,
+  created_at, updated_at, is_expedited, has_custom_workflow,
+  manual_due_date, proof_approved_at, category_id, user_id,
+  categories(id, name, description, color, sla_target_days)
+`;
+
+const STAGES_SELECT = `
+  id, job_id, status, stage_order, started_at, completed_at,
+  scheduled_start_at, estimated_duration_minutes, part_assignment,
+  production_stage_id, job_table_name,
+  production_stages(id, name, description, color, supports_parts)
+`;
 
 export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOptions = {}) => {
   const { user, isLoading: authLoading } = useAuth();
+  const { isVisible } = useTabVisibility();
   const [jobs, setJobs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { fetchAllJobs = false } = options;
+  
+  const subscriptionRef = useRef<any>(null);
+  const debouncedRefetchRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
       setError(null);
       setIsLoading(true);
-      console.log("🔍 Fetching enhanced production jobs with centralized processor...", { fetchAllJobs, userId: user?.id });
+      console.log("🔍 Fetching enhanced production jobs with optimized columns...", { fetchAllJobs, userId: user?.id });
 
-      // Build the query - conditionally add user filter
+      // OPTIMIZED: Build the query with specific columns
       let query = supabase
         .from('production_jobs')
-        .select(`
-          *,
-          categories (
-            id,
-            name,
-            description,
-            color,
-            sla_target_days
-          )
-        `)
+        .select(JOBS_SELECT)
         .order('created_at', { ascending: false });
 
       // Only filter by user if fetchAllJobs is false
@@ -57,23 +68,14 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
         return;
       }
 
-      // Fetch job stage instances for all jobs
+      // OPTIMIZED: Fetch job stage instances with specific columns
       const jobIds = jobsData.map(job => job.id);
       let stagesData: any[] = [];
       
       if (jobIds.length > 0) {
         const { data: stagesResult, error: stagesError } = await supabase
           .from('job_stage_instances')
-          .select(`
-            *,
-            production_stages (
-              id,
-              name,
-              description,
-              color,
-              supports_parts
-            )
-          `)
+          .select(STAGES_SELECT)
           .in('job_id', jobIds)
           .eq('job_table_name', 'production_jobs')
           .order('stage_order', { ascending: true });
@@ -104,19 +106,15 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
         let currentStageId = null;
         
         if (activeStage) {
-          // Use the active stage name
           currentStage = activeStage.production_stages?.name || 'Active Stage';
           currentStageId = activeStage.production_stage_id;
         } else if (pendingStages.length > 0) {
-          // If no active stage, the first pending stage is current
           const firstPending = pendingStages.sort((a, b) => a.stage_order - b.stage_order)[0];
           currentStage = firstPending.production_stages?.name || 'Pending Stage';
           currentStageId = firstPending.production_stage_id;
         } else if (hasWorkflow && completedStages.length === jobStages.length && jobStages.length > 0) {
-          // All stages completed
           currentStage = 'Completed';
         } else if (!hasWorkflow) {
-          // No workflow - use job status or fallback
           currentStage = job.status || 'DTP';
         }
         
@@ -128,7 +126,7 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
         const processedStages = jobStages.map(stage => ({
           ...stage,
           production_stage_id: stage.production_stage_id,
-          stage_id: stage.production_stage_id, // Alias for compatibility
+          stage_id: stage.production_stage_id,
           stage_name: stage.production_stages?.name || 'Unknown Stage',
           stage_color: stage.production_stages?.color || '#6B7280',
           status: stage.status
@@ -166,12 +164,10 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
         
         return {
           ...processedJob,
-          // Preserve enhanced fields
           has_workflow: originalData.stages?.length > 0,
           stages: originalData.stages,
           job_stage_instances: originalData.job_stage_instances,
           category_id: processedJob.category_id || null,
-          // Add computed fields for easier filtering
           is_active: originalData.stages?.some((s: any) => s.status === 'active') || false,
           is_pending: !originalData.stages?.some((s: any) => s.status === 'active') && originalData.stages?.some((s: any) => s.status === 'pending') || false,
           is_completed: originalData.stages?.length > 0 && originalData.stages?.every((s: any) => s.status === 'completed') || false,
@@ -179,7 +175,7 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
         };
       });
 
-      console.log("✅ Enhanced production jobs processed with centralized processor:", finalJobs.length, "jobs");
+      console.log("✅ Enhanced production jobs processed:", finalJobs.length, "jobs");
       setJobs(finalJobs);
     } catch (err) {
       console.error('❌ Error fetching enhanced production jobs:', err);
@@ -190,6 +186,25 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
       setIsLoading(false);
     }
   }, [fetchAllJobs, user?.id]);
+
+  // OPTIMIZED: Debounced refetch handler
+  const debouncedRefetch = useCallback(() => {
+    // Skip if tab is hidden
+    if (!isVisible) {
+      console.log('📡 useEnhancedProductionJobs: Skipping refetch (tab hidden)');
+      return;
+    }
+
+    // Debounce: wait 3 seconds before refetching
+    if (debouncedRefetchRef.current) {
+      clearTimeout(debouncedRefetchRef.current);
+    }
+
+    debouncedRefetchRef.current = setTimeout(() => {
+      console.log('📡 useEnhancedProductionJobs: Debounced refetch triggered');
+      fetchJobs();
+    }, 3000);
+  }, [isVisible, fetchJobs]);
 
   const startStage = useCallback(async (jobId: string, stageId: string) => {
     try {
@@ -222,11 +237,9 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
     try {
       console.log('🔄 [useEnhancedProductionJobs] Completing stage:', { jobId, stageId });
       
-      // Get stage info to check if it's a proof stage
       const { getStageInfoForProofCheck, triggerProofCompletionCalculation } = await import('./utils/proofStageUtils');
       const stageInfo = await getStageInfoForProofCheck(stageId);
       
-      // Check if this job has parallel components (cover/text workflow)
       const { data: parallelCheck } = await supabase
         .from('job_stage_instances')
         .select('part_assignment')
@@ -238,7 +251,6 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
       
       let error;
       if (hasParallelComponents) {
-        // Use parallel-aware advancement for cover/text jobs
         const result = await supabase.rpc('advance_parallel_job_stage' as any, {
           p_job_id: jobId,
           p_job_table_name: 'production_jobs',
@@ -246,7 +258,6 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
         });
         error = result.error;
       } else {
-        // Use standard advancement for regular jobs
         const result = await supabase.rpc('advance_job_stage', {
           p_job_id: jobId,
           p_job_table_name: 'production_jobs',
@@ -257,7 +268,6 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
 
       if (error) throw error;
 
-      // If this was a proof stage completion, trigger queue-based due date calculation
       if (stageInfo?.isProof && jobId) {
         await triggerProofCompletionCalculation(jobId, 'production_jobs');
       }
@@ -303,12 +313,28 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
     }
   }, [authLoading, fetchJobs]);
 
-  // Real-time subscription for production jobs
+  // OPTIMIZED: Real-time subscription with visibility check and debouncing
   useEffect(() => {
-    console.log("Setting up real-time subscription for enhanced production jobs");
+    // Cleanup when tab hidden or component unmounts
+    if (!isVisible) {
+      if (subscriptionRef.current) {
+        console.log("📡 useEnhancedProductionJobs: Removing subscription (tab hidden)");
+        supabase.removeChannel(subscriptionRef.current);
+        subscriptionRef.current = null;
+      }
+      if (debouncedRefetchRef.current) {
+        clearTimeout(debouncedRefetchRef.current);
+      }
+      return;
+    }
+
+    // Don't create duplicate subscriptions
+    if (subscriptionRef.current) return;
+
+    console.log("📡 useEnhancedProductionJobs: Setting up real-time subscription");
 
     const channel = supabase
-      .channel(`enhanced_production_jobs_global`)
+      .channel(`enhanced_production_jobs_${Date.now()}`)
       .on(
         'postgres_changes',
         {
@@ -317,8 +343,8 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
           table: 'production_jobs',
         },
         (payload) => {
-          console.log('Production jobs changed:', payload.eventType);
-          fetchJobs(); // Refetch to get updated data with relations
+          console.log('📡 Production jobs changed:', payload.eventType);
+          debouncedRefetch();
         }
       )
       .on(
@@ -329,19 +355,31 @@ export const useEnhancedProductionJobs = (options: UseEnhancedProductionJobsOpti
           table: 'job_stage_instances',
         },
         (payload) => {
-          console.log('Job stage instances changed:', payload.eventType);
-          fetchJobs(); // Refetch to get updated workflow data
+          console.log('📡 Job stage instances changed:', payload.eventType);
+          debouncedRefetch();
         }
       )
       .subscribe();
 
+    subscriptionRef.current = channel;
+
     return () => {
-      console.log("Cleaning up enhanced production jobs real-time subscription");
-      supabase.removeChannel(channel);
+      console.log("📡 useEnhancedProductionJobs: Cleaning up subscription");
+      if (debouncedRefetchRef.current) {
+        clearTimeout(debouncedRefetchRef.current);
+      }
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current);
+        subscriptionRef.current = null;
+      }
     };
-  }, [fetchJobs]);
+  }, [isVisible, debouncedRefetch]);
 
   const refreshJobs = useCallback(() => {
+    // Clear any pending debounced fetches for immediate refresh
+    if (debouncedRefetchRef.current) {
+      clearTimeout(debouncedRefetchRef.current);
+    }
     fetchJobs();
   }, [fetchJobs]);
 
