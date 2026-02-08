@@ -1,183 +1,98 @@
 
+# Fix: RunLayoutDiagram to Show Full Roll Usage for Single-Item Runs
 
-# Fix: RunLayoutDiagram Not Showing + VPS Preflight 404 Errors
+## Problem Analysis
 
-## Issues Identified
+Looking at your screenshot and the code, I can see the issue clearly:
 
-### Issue 1: RunLayoutDiagram Not Rendered in LayoutOptimizer
-The `RunLayoutDiagram` component is imported in `LayoutOptimizer.tsx` but never actually used. The component displays layout options as cards but doesn't show the visual diagram when an option is selected.
+**Current behavior (incorrect):**
+- Run 1 shows: `[S1 filled] [2 empty] [3 empty]`
+- Run 2 shows: `[S1 filled] [2 empty] [3 empty]`
+- Run 3 shows: `[S1 filled] [2 empty] [3 empty]`
 
-**Current state:** User clicks "Generate Layout Options" > sees option cards > but no visual preview of the actual roll layout.
+**Expected behavior (correct):**
+- Run 1 shows: `[Label 1] [Label 1] [Label 1]` (all blue - 3 columns all printing label 1)
+- Run 2 shows: `[Label 2] [Label 2] [Label 2]` (all green - 3 columns all printing label 2)  
+- Run 3 shows: `[Label 3] [Label 3] [Label 3]` (all amber - 3 columns all printing label 3)
 
-### Issue 2: VPS `/preflight` Endpoint Returns 404
-The edge function logs show:
-```
-VPS API error: 404 - {"detail":"Not Found"}
-```
-The VPS at `pdf-api.jaimar.dev` doesn't have a `/preflight` endpoint. It needs to be added to your VPS codebase (similar to how we added `/page-boxes`).
+The root cause: When running a single item, **ALL slots print that item** - you're using the full roll width. The current diagram treats `slot: 0` literally as "only column 0 is used".
 
 ---
 
-## Fix 1: Add RunLayoutDiagram to LayoutOptimizer
+## Solution: Smart Slot Filling Logic
 
-**File:** `src/components/labels/LayoutOptimizer.tsx`
+Update `RunLayoutDiagram.tsx` to detect single-item runs and fill all slots with that item.
 
-Add a preview section after the options list that shows the visual diagram when an option is selected:
+### Key Logic Change
 
 ```text
-After the layout options list (around line 161), add:
+// Detect if this is a single-item run (one item uses all slots)
+const isSingleItemRun = slotAssignments.length === 1;
+const singleItem = isSingleItemRun ? slotAssignments[0] : null;
 
-{/* Selected Layout Preview */}
-{selectedOption && dieline && (
-  <Collapsible open={showPreview} onOpenChange={setShowPreview}>
-    <CollapsibleTrigger asChild>
-      <Button variant="ghost" size="sm" className="w-full justify-between">
-        <span className="flex items-center gap-2">
-          <LayoutGrid className="h-4 w-4" />
-          Preview Layout Diagram
-        </span>
-        {showPreview ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-      </Button>
-    </CollapsibleTrigger>
-    <CollapsibleContent className="pt-4">
-      <ScrollArea className="max-h-[400px]">
-        <div className="space-y-4">
-          {selectedOption.runs.map((run, idx) => (
-            <RunLayoutDiagram
-              key={idx}
-              runNumber={run.run_number}
-              slotAssignments={run.slot_assignments}
-              dieline={dieline}
-              items={items}
-              meters={run.meters}
-              frames={run.frames}
-              showStats={true}
-            />
-          ))}
-        </div>
-      </ScrollArea>
-    </CollapsibleContent>
-  </Collapsible>
-)}
-```
-
-This adds a collapsible section that shows the visual grid diagram for each run in the selected layout option.
-
----
-
-## Fix 2: VPS Preflight Endpoint (Separate VPS Update)
-
-The `/preflight` endpoint needs to be added to your VPS. Here's the file to create:
-
-**New VPS File:** `app/api/preflight.py`
-
-```python
-"""
-Preflight API - Deep PDF analysis for print quality
-Uses pikepdf for comprehensive preflight checks
-"""
-
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List
-import logging
-
-from app.services.pikepdf_service import PikepdfService
-from app.services.file_manager import FileManager
-
-router = APIRouter()
-logger = logging.getLogger(__name__)
-
-
-class PreflightRequest(BaseModel):
-    pdf_url: str
-
-
-class ImageInfo(BaseModel):
-    page: int
-    width: int
-    height: int
-    color_space: str
-    bits_per_component: int
-    estimated_dpi: Optional[float] = None
-    is_low_res: bool = False
-
-
-class FontInfo(BaseModel):
-    name: str
-    subtype: str
-    embedded: bool
-    subset: bool
-
-
-class PreflightResponse(BaseModel):
-    page_count: int
-    pdf_version: str
-    has_bleed: bool
-    bleed_mm: Optional[float] = None
-    images: List[ImageInfo]
-    low_res_images: int
-    min_dpi: float
-    fonts: List[FontInfo]
-    unembedded_fonts: int
-    color_spaces: List[str]
-    has_rgb: bool
-    has_cmyk: bool
-    spot_colors: List[str]
-    warnings: List[str]
-    errors: List[str]
-
-
-@router.post("", response_model=PreflightResponse)
-async def run_preflight(request: PreflightRequest):
-    """
-    Run comprehensive preflight analysis on a PDF from URL.
-    
-    Checks:
-    - Image resolution (DPI)
-    - Font embedding
-    - Color spaces (RGB vs CMYK)
-    - Spot colors
-    - Page boxes (bleed detection)
-    """
-    file_manager = FileManager()
-    pikepdf_service = PikepdfService()
-    input_path = None
-    
-    try:
-        logger.info(f"Running preflight for: {request.pdf_url[:80]}...")
-        input_path = await file_manager.download_from_url(request.pdf_url)
-        
-        # Run full preflight check
-        report = await pikepdf_service.full_preflight(input_path)
-        
-        return PreflightResponse(**report)
-        
-    except Exception as e:
-        logger.error(f"Preflight error: {e}")
-        raise HTTPException(status_code=422, detail=str(e))
-    finally:
-        if input_path:
-            await file_manager.cleanup(input_path)
-```
-
-**Update VPS:** `app/api/routes.py` to include the new router:
-
-```python
-from app.api.preflight import router as preflight_router
-# ...
-api_router.include_router(preflight_router, prefix="/preflight", tags=["Preflight"])
+// When rendering each cell:
+if (isSingleItemRun) {
+  // All slots show the same item
+  assignment = singleItem;
+  item = items.find(i => i.id === singleItem.item_id);
+} else {
+  // Multi-item run: use the actual slot mapping
+  assignment = slotMap.get(slotNumber);
+  item = assignment ? items.find(i => i.id === assignment.item_id) : null;
+}
 ```
 
 ---
 
-## Summary of Changes
+## File Changes
 
-| Location | File | Change |
-|----------|------|--------|
-| Lovable | `LayoutOptimizer.tsx` | Add collapsible preview section with `RunLayoutDiagram` |
-| VPS | `app/api/preflight.py` | Create new endpoint for deep PDF analysis |
-| VPS | `app/api/routes.py` | Register preflight router |
+### File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
 
-The VPS changes are separate from this Lovable project - you'll need to update your VPS repository and redeploy.
+1. **Add single-item run detection** after the slot map creation
+2. **Modify cell rendering logic** to fill all columns when it's a single-item run
+3. **Update legend** to show the single item correctly
+4. **Update slot label** to show item name instead of just "S1"
 
+### Visual Result
+
+After the fix:
+
+**Run 1 (Label A - 5000 qty):**
+```text
++----------+----------+----------+
+|  Label A |  Label A |  Label A |
++----------+----------+----------+
+|  Label A |  Label A |  Label A |
++----------+----------+----------+
+|  Label A |  Label A |  Label A |
++----------+----------+----------+
+```
+
+**Run 2 (Label B - 3000 qty):**
+```text
++----------+----------+----------+
+|  Label B |  Label B |  Label B |
++----------+----------+----------+
+|  Label B |  Label B |  Label B |
++----------+----------+----------+
+```
+
+**Run 3 (Label C - 1000 qty):**
+```text
++----------+----------+----------+
+|  Label C |  Label C |  Label C |
++----------+----------+----------+
+```
+
+---
+
+## Technical Details
+
+The fix involves updating the cell rendering section (lines 159-203) to:
+
+1. Check if `slotAssignments.length === 1` (single-item run)
+2. If single-item: apply the same item's color to ALL cells in the grid
+3. Show the item name/number in the first row instead of slot numbers
+4. Keep the legend accurate for both single and multi-item runs
+
+No changes needed to the optimizer logic - the diagram interpretation is what needs fixing.
