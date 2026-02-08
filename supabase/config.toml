@@ -57,3 +57,7 @@ verify_jwt = false
 [functions.label-impose]
 verify_jwt = false
 
+# LABELS DIVISION: AI Layout Optimizer
+[functions.label-optimize]
+verify_jwt = false
+
