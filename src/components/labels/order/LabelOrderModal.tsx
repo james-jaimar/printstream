@@ -53,7 +53,13 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
 
-  const handleFilesUploaded = useCallback(async (files: { url: string; name: string; analysis?: unknown }[]) => {
+  const handleFilesUploaded = useCallback(async (files: { 
+    url: string; 
+    name: string; 
+    thumbnailUrl?: string; 
+    preflightStatus?: 'pending' | 'passed' | 'failed' | 'warnings';
+    analysis?: unknown;
+  }[]) => {
     if (!order) return;
 
     for (const file of files) {
@@ -63,8 +69,10 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           name: file.name.replace('.pdf', ''),
           quantity: 1,
           artwork_pdf_url: file.url,
+          artwork_thumbnail_url: file.thumbnailUrl,
           width_mm: order.dieline?.label_width_mm,
           height_mm: order.dieline?.label_height_mm,
+          preflight_status: file.preflightStatus,
         });
 
         // Store analysis for the new item
