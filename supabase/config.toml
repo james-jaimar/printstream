@@ -47,3 +47,13 @@ verify_jwt = false
 [functions.parallel-auto-scheduler]
 verify_jwt = false
 
+# LABELS DIVISION: VPS PDF API Integration
+[functions.label-preflight]
+verify_jwt = false
+
+[functions.label-convert-cmyk]
+verify_jwt = false
+
+[functions.label-impose]
+verify_jwt = false
+
