@@ -10,7 +10,7 @@ import {
   validatePdfDimensions,
   type ValidationResult 
 } from '@/utils/pdf/thumbnailUtils';
-import type { LabelDieline } from '@/types/labels';
+import type { LabelDieline, PreflightReport } from '@/types/labels';
 
 interface UploadingFile {
   file: File;
@@ -18,16 +18,20 @@ interface UploadingFile {
   error?: string;
 }
 
+export interface UploadedFileResult {
+  url: string; 
+  name: string; 
+  thumbnailUrl?: string; 
+  preflightStatus: 'pending' | 'passed' | 'failed' | 'warnings';
+  preflightReport?: PreflightReport;
+  width_mm?: number;
+  height_mm?: number;
+}
+
 interface LabelItemsDropZoneProps {
   orderId: string;
   dieline: LabelDieline | null;
-  onFilesUploaded: (files: { 
-    url: string; 
-    name: string; 
-    thumbnailUrl?: string; 
-    preflightStatus?: 'pending' | 'passed' | 'failed' | 'warnings';
-    analysis?: unknown;
-  }[]) => void;
+  onFilesUploaded: (files: UploadedFileResult[]) => void;
   disabled?: boolean;
 }
 
@@ -92,13 +96,7 @@ export function LabelItemsDropZone({
     // Initialize uploading state
     setUploadingFiles(files.map(file => ({ file, progress: 'uploading' })));
 
-    const uploadedFiles: { 
-      url: string; 
-      name: string; 
-      thumbnailUrl?: string; 
-      preflightStatus?: 'pending' | 'passed' | 'failed' | 'warnings';
-      analysis?: unknown;
-    }[] = [];
+    const uploadedFiles: UploadedFileResult[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -127,28 +125,11 @@ export function LabelItemsDropZone({
           )
         );
 
-        // Generate thumbnail client-side
-        let thumbnailUrl: string | undefined;
-        try {
-          const thumbnailDataUrl = await generatePdfThumbnail(file, 300);
-          const thumbnailBlob = dataUrlToBlob(thumbnailDataUrl);
-          const thumbnailPath = `label-artwork/orders/${orderId}/thumbnails/${fileName.replace('.pdf', '.png')}`;
-          
-          const { error: thumbError } = await supabase.storage
-            .from('label-files')
-            .upload(thumbnailPath, thumbnailBlob, { contentType: 'image/png' });
-          
-          if (!thumbError) {
-            const { data: { publicUrl: thumbPublicUrl } } = supabase.storage
-              .from('label-files')
-              .getPublicUrl(thumbnailPath);
-            thumbnailUrl = thumbPublicUrl;
-          }
-        } catch (thumbError) {
-          console.warn('Thumbnail generation failed:', thumbError);
-          // Continue without thumbnail
-        }
-
+        // Run validation FIRST (before thumbnail) to ensure it always persists
+        let preflightStatus: 'pending' | 'passed' | 'failed' | 'warnings' = 'pending';
+        let validation: ValidationResult | undefined;
+        let pdfDimensions: { width_mm: number; height_mm: number } | undefined;
+        
         // Update progress to validating
         setUploadingFiles(prev => 
           prev.map((uf, idx) => 
@@ -157,15 +138,13 @@ export function LabelItemsDropZone({
         );
 
         // Client-side PDF dimension validation
-        let preflightStatus: 'pending' | 'passed' | 'failed' | 'warnings' = 'pending';
-        let validation: ValidationResult | undefined;
-        
-        if (dieline) {
-          try {
-            const dimensions = await getPdfDimensionsMm(file);
+        try {
+          pdfDimensions = await getPdfDimensionsMm(file);
+          
+          if (dieline) {
             validation = validatePdfDimensions(
-              dimensions.width_mm,
-              dimensions.height_mm,
+              pdfDimensions.width_mm,
+              pdfDimensions.height_mm,
               dieline.label_width_mm,
               dieline.label_height_mm,
               dieline.bleed_left_mm ?? 1.5,
@@ -182,18 +161,63 @@ export function LabelItemsDropZone({
                 duration: 4000,
               });
             }
-          } catch (validationError) {
-            console.warn('PDF validation failed:', validationError);
-            // Leave as pending if validation fails
           }
+        } catch (validationError) {
+          console.warn('PDF validation failed:', validationError);
+          // Leave as pending if validation fails
         }
+
+        // Update progress to generating thumbnail
+        setUploadingFiles(prev => 
+          prev.map((uf, idx) => 
+            idx === i ? { ...uf, progress: 'generating_thumbnail' } : uf
+          )
+        );
+
+        // Generate thumbnail client-side with robust error handling
+        let thumbnailUrl: string | undefined;
+        let thumbnailDataUrl: string | undefined;
+        
+        try {
+          thumbnailDataUrl = await generatePdfThumbnail(file, 300);
+          const thumbnailBlob = dataUrlToBlob(thumbnailDataUrl);
+          const thumbnailPath = `label-artwork/orders/${orderId}/thumbnails/${fileName.replace('.pdf', '.png')}`;
+          
+          const { error: thumbError } = await supabase.storage
+            .from('label-files')
+            .upload(thumbnailPath, thumbnailBlob, { contentType: 'image/png' });
+          
+          if (thumbError) {
+            console.warn('Thumbnail upload failed:', thumbError.message);
+            // Fall back to data URL (stored directly in DB)
+            thumbnailUrl = thumbnailDataUrl;
+          } else {
+            const { data: { publicUrl: thumbPublicUrl } } = supabase.storage
+              .from('label-files')
+              .getPublicUrl(thumbnailPath);
+            thumbnailUrl = thumbPublicUrl;
+          }
+        } catch (thumbError) {
+          console.warn('Thumbnail generation failed:', thumbError);
+          // Continue without thumbnail - validation still proceeds
+        }
+
+        // Build preflight report for database storage
+        const preflightReport: PreflightReport | undefined = validation ? {
+          has_bleed: validation.status === 'passed' || validation.status === 'needs_crop',
+          warnings: validation.issues.length > 0 && preflightStatus !== 'failed' 
+            ? validation.issues : undefined,
+          errors: preflightStatus === 'failed' ? validation.issues : undefined,
+        } : undefined;
 
         uploadedFiles.push({ 
           url: publicUrl, 
           name: file.name, 
           thumbnailUrl, 
           preflightStatus,
-          analysis: validation ? { validation } : undefined,
+          preflightReport,
+          width_mm: pdfDimensions?.width_mm,
+          height_mm: pdfDimensions?.height_mm,
         });
 
         // Mark as complete

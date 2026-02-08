@@ -217,11 +217,11 @@ function createGangedRun(items: LabelItem[], config: SlotConfig): ProposedRun {
   }));
   
   // Find the item requiring most frames (determines run length)
-  const maxFrames = Math.max(
+  const maxFrames = Math.ceil(Math.max(
     ...items.map(item => 
       calculateFramesNeeded(item.quantity, 1, config)
     )
-  );
+  ));
   
   return {
     run_number: 1,
@@ -236,7 +236,8 @@ function createSingleItemRun(
   runNumber: number, 
   config: SlotConfig
 ): ProposedRun {
-  const frames = calculateFramesNeeded(item.quantity, config.totalSlots, config);
+  // Ensure frames is always an integer
+  const frames = Math.ceil(calculateFramesNeeded(item.quantity, config.totalSlots, config));
   
   return {
     run_number: runNumber,
@@ -278,7 +279,8 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
     });
     
     const maxQty = Math.max(...slotAssignments.map(s => s.quantity_in_slot));
-    const frames = calculateFramesNeeded(maxQty, 1, config);
+    // Ensure frames is always an integer
+    const frames = Math.ceil(calculateFramesNeeded(maxQty, 1, config));
     
     runs.push({
       run_number: runNumber++,

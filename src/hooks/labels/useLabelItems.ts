@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { LabelItem, CreateLabelItemInput } from '@/types/labels';
+import type { Json } from '@/integrations/supabase/types';
 
 const QUERY_KEY = ['label_items'];
 
@@ -66,20 +67,23 @@ export function useCreateLabelItem() {
 
       const nextItemNumber = (existingItems?.[0]?.item_number || 0) + 1;
       
+      const insertData = {
+        order_id: input.order_id,
+        item_number: nextItemNumber,
+        name: input.name,
+        quantity: input.quantity,
+        artwork_pdf_url: input.artwork_pdf_url,
+        artwork_thumbnail_url: input.artwork_thumbnail_url,
+        width_mm: input.width_mm,
+        height_mm: input.height_mm,
+        notes: input.notes,
+        preflight_status: input.preflight_status || 'pending',
+        preflight_report: (input.preflight_report || null) as Json,
+      };
+      
       const { data, error } = await supabase
         .from('label_items')
-        .insert({
-          order_id: input.order_id,
-          item_number: nextItemNumber,
-          name: input.name,
-          quantity: input.quantity,
-          artwork_pdf_url: input.artwork_pdf_url,
-          artwork_thumbnail_url: input.artwork_thumbnail_url,
-          width_mm: input.width_mm,
-          height_mm: input.height_mm,
-          notes: input.notes,
-          preflight_status: input.preflight_status || 'pending',
-        })
+        .insert(insertData)
         .select()
         .single();
 

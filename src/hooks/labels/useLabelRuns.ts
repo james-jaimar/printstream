@@ -122,8 +122,10 @@ export function useCreateLabelRun() {
           run_number: nextRunNumber,
           slot_assignments: toJsonSlotAssignments(input.slot_assignments),
           meters_to_print: input.meters_to_print,
-          frames_count: input.frames_count,
-          estimated_duration_minutes: input.estimated_duration_minutes,
+          // Round to integers - database columns are integer type
+          frames_count: input.frames_count != null ? Math.round(input.frames_count) : null,
+          estimated_duration_minutes: input.estimated_duration_minutes != null 
+            ? Math.round(input.estimated_duration_minutes) : null,
           ai_optimization_score: input.ai_optimization_score,
           ai_reasoning: input.ai_reasoning,
           status: 'planned',
