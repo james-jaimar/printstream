@@ -6,7 +6,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { ArrowDown, Layers, Ruler, Clock } from 'lucide-react';
+import { ArrowUp, Layers, Ruler, Clock } from 'lucide-react';
 import type { LabelItem, LabelDieline, SlotAssignment, LabelRunStatus } from '@/types/labels';
 import { cn } from '@/lib/utils';
 
@@ -133,10 +133,10 @@ export function RunLayoutDiagram({
           <div className="flex items-stretch gap-3">
             {/* Web Direction Indicator - Left */}
             <div className="flex flex-col items-center justify-center text-muted-foreground">
-              <div className="text-[10px] writing-mode-vertical transform -rotate-180" style={{ writingMode: 'vertical-rl' }}>
+              <ArrowUp className="h-4 w-4 mb-1 animate-pulse" />
+              <div className="text-[10px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
                 WEB
               </div>
-              <ArrowDown className="h-4 w-4 mt-1 animate-pulse" />
             </div>
 
             {/* Roll Layout Container */}
@@ -226,17 +226,17 @@ export function RunLayoutDiagram({
 
               {/* Print Direction */}
               <div className="flex items-center justify-center gap-1 mt-2 text-muted-foreground">
-                <ArrowDown className="h-3 w-3" />
+                <ArrowUp className="h-3 w-3" />
                 <span className="text-[10px]">Print Direction</span>
               </div>
             </div>
 
             {/* Web Direction Indicator - Right */}
             <div className="flex flex-col items-center justify-center text-muted-foreground">
-              <div className="text-[10px]" style={{ writingMode: 'vertical-rl' }}>
+              <ArrowUp className="h-4 w-4 mb-1 animate-pulse" />
+              <div className="text-[10px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
                 WEB
               </div>
-              <ArrowDown className="h-4 w-4 mt-1 animate-pulse" />
             </div>
           </div>
 
