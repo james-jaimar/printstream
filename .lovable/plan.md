@@ -1,132 +1,183 @@
 
-# Visual Layout Diagram for Label Optimizer
 
-## Overview
-Enhance the label layout visualization by creating an interactive, print-accurate diagram that clearly shows how labels are arranged on the press roll - similar to the reference image provided.
+# Fix: RunLayoutDiagram Not Showing + VPS Preflight 404 Errors
 
-## Issues to Fix
+## Issues Identified
 
-### 1. Dialog Accessibility Warning
-The `LabelOrderModal` component has a DialogContent without a proper DialogTitle inside the DialogHeader for accessibility. Need to add a visually hidden title for screen readers.
+### Issue 1: RunLayoutDiagram Not Rendered in LayoutOptimizer
+The `RunLayoutDiagram` component is imported in `LayoutOptimizer.tsx` but never actually used. The component displays layout options as cards but doesn't show the visual diagram when an option is selected.
 
-**File:** `src/components/labels/order/LabelOrderModal.tsx`
+**Current state:** User clicks "Generate Layout Options" > sees option cards > but no visual preview of the actual roll layout.
+
+### Issue 2: VPS `/preflight` Endpoint Returns 404
+The edge function logs show:
+```
+VPS API error: 404 - {"detail":"Not Found"}
+```
+The VPS at `pdf-api.jaimar.dev` doesn't have a `/preflight` endpoint. It needs to be added to your VPS codebase (similar to how we added `/page-boxes`).
 
 ---
 
-## Main Feature: Visual Layout Diagram
+## Fix 1: Add RunLayoutDiagram to LayoutOptimizer
 
-### Component: `RunLayoutDiagram`
-A new component that renders a visual representation of a single production run showing:
+**File:** `src/components/labels/LayoutOptimizer.tsx`
+
+Add a preview section after the options list that shows the visual diagram when an option is selected:
 
 ```text
-                    Run 1 - 360m
-                        |
-    +-------------------+-------------------+
-    |    +---------+  +---------+  +---------+  |
-    |    |    1    |  |    2    |  |    3    |  |
-    |    +---------+  +---------+  +---------+  |
-    |    +---------+  +---------+  +---------+  |
-    |    |    1    |  |    2    |  |    3    |  |
-W   |    +---------+  +---------+  +---------+  | W
-e   |    +---------+  +---------+  +---------+  | e
-b   |    |    1    |  |    2    |  |    3    |  | b
-    |    +---------+  +---------+  +---------+  |
-D   |    +---------+  +---------+  +---------+  | D
-i   |    |    1    |  |    2    |  |    3    |  | i
-r   |    +---------+  +---------+  +---------+  | r
-    |    +---------+  +---------+  +---------+  |
-    |    |    1    |  |    2    |  |    3    |  |
-    +-------------------+-------------------+
-                        |
-                        v  (print direction)
+After the layout options list (around line 161), add:
+
+{/* Selected Layout Preview */}
+{selectedOption && dieline && (
+  <Collapsible open={showPreview} onOpenChange={setShowPreview}>
+    <CollapsibleTrigger asChild>
+      <Button variant="ghost" size="sm" className="w-full justify-between">
+        <span className="flex items-center gap-2">
+          <LayoutGrid className="h-4 w-4" />
+          Preview Layout Diagram
+        </span>
+        {showPreview ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </Button>
+    </CollapsibleTrigger>
+    <CollapsibleContent className="pt-4">
+      <ScrollArea className="max-h-[400px]">
+        <div className="space-y-4">
+          {selectedOption.runs.map((run, idx) => (
+            <RunLayoutDiagram
+              key={idx}
+              runNumber={run.run_number}
+              slotAssignments={run.slot_assignments}
+              dieline={dieline}
+              items={items}
+              meters={run.meters}
+              frames={run.frames}
+              showStats={true}
+            />
+          ))}
+        </div>
+      </ScrollArea>
+    </CollapsibleContent>
+  </Collapsible>
+)}
 ```
 
-### Key Visual Elements
-
-1. **Run Header**
-   - Run number with status badge
-   - Total meters for this run
-   - Frame count
-
-2. **Roll Container**
-   - Vertical web direction arrows on left and right
-   - Border representing the roll edges
-   - Roll width indication
-
-3. **Label Grid**
-   - Columns = `dieline.columns_across` (slots)
-   - Rows = `dieline.rows_around` (labels per frame)
-   - Each cell shows:
-     - Slot number (1, 2, 3...)
-     - Item color coding (matching legend)
-     - Optional: miniature thumbnail of artwork
-
-4. **Slot Legend**
-   - Color-coded squares with item names
-   - Quantity per slot
-   - Total labels printed in this run
-
-5. **Summary Stats**
-   - Frames: X
-   - Meters: X.Xm
-   - Estimated time: ~X min
+This adds a collapsible section that shows the visual grid diagram for each run in the selected layout option.
 
 ---
 
-## File Changes
+## Fix 2: VPS Preflight Endpoint (Separate VPS Update)
 
-### 1. New File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
-Main visual diagram component with:
-- CSS Grid layout for label cells
-- SVG arrows for web direction
-- Color-coded slots matching item legend
-- Hover tooltips with item details
-- Responsive sizing
+The `/preflight` endpoint needs to be added to your VPS. Here's the file to create:
 
-### 2. Update: `src/components/labels/SlotLayoutPreview.tsx`
-Replace the simple horizontal bar with the new `RunLayoutDiagram` component for each run.
+**New VPS File:** `app/api/preflight.py`
 
-### 3. Update: `src/components/labels/LabelRunsCard.tsx`
-Add a "View Layout" button that opens a dialog with the full visual diagram.
+```python
+"""
+Preflight API - Deep PDF analysis for print quality
+Uses pikepdf for comprehensive preflight checks
+"""
 
-### 4. Update: `src/components/labels/order/LabelOrderModal.tsx`
-- Fix accessibility warning by adding a VisuallyHidden DialogTitle
-- Integrate the new layout diagram in the Production section
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List
+import logging
 
-### 5. Update: `src/components/labels/LayoutOptimizer.tsx`
-Show the visual diagram when an option is selected so users can preview before applying.
+from app.services.pikepdf_service import PikepdfService
+from app.services.file_manager import FileManager
 
----
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
-## Technical Details
 
-### Color Assignment Logic
-```typescript
-const itemColors = [
-  { bg: 'bg-blue-500', text: 'text-white', border: 'border-blue-600' },
-  { bg: 'bg-green-500', text: 'text-white', border: 'border-green-600' },
-  { bg: 'bg-amber-500', text: 'text-white', border: 'border-amber-600' },
-  // ... more colors
-];
+class PreflightRequest(BaseModel):
+    pdf_url: str
+
+
+class ImageInfo(BaseModel):
+    page: int
+    width: int
+    height: int
+    color_space: str
+    bits_per_component: int
+    estimated_dpi: Optional[float] = None
+    is_low_res: bool = False
+
+
+class FontInfo(BaseModel):
+    name: str
+    subtype: str
+    embedded: bool
+    subset: bool
+
+
+class PreflightResponse(BaseModel):
+    page_count: int
+    pdf_version: str
+    has_bleed: bool
+    bleed_mm: Optional[float] = None
+    images: List[ImageInfo]
+    low_res_images: int
+    min_dpi: float
+    fonts: List[FontInfo]
+    unembedded_fonts: int
+    color_spaces: List[str]
+    has_rgb: bool
+    has_cmyk: bool
+    spot_colors: List[str]
+    warnings: List[str]
+    errors: List[str]
+
+
+@router.post("", response_model=PreflightResponse)
+async def run_preflight(request: PreflightRequest):
+    """
+    Run comprehensive preflight analysis on a PDF from URL.
+    
+    Checks:
+    - Image resolution (DPI)
+    - Font embedding
+    - Color spaces (RGB vs CMYK)
+    - Spot colors
+    - Page boxes (bleed detection)
+    """
+    file_manager = FileManager()
+    pikepdf_service = PikepdfService()
+    input_path = None
+    
+    try:
+        logger.info(f"Running preflight for: {request.pdf_url[:80]}...")
+        input_path = await file_manager.download_from_url(request.pdf_url)
+        
+        # Run full preflight check
+        report = await pikepdf_service.full_preflight(input_path)
+        
+        return PreflightResponse(**report)
+        
+    except Exception as e:
+        logger.error(f"Preflight error: {e}")
+        raise HTTPException(status_code=422, detail=str(e))
+    finally:
+        if input_path:
+            await file_manager.cleanup(input_path)
 ```
 
-### Grid Rendering
-- Use CSS Grid with `grid-template-columns: repeat(columns_across, minmax(60px, 1fr))`
-- Show `rows_around` rows to represent one frame
-- Add visual separator between frames when multiple shown
+**Update VPS:** `app/api/routes.py` to include the new router:
 
-### Responsive Behavior
-- On mobile: Show simplified view with numbers only
-- On desktop: Full grid with thumbnails option
-- Zoomable/pannable for large layouts (>6 slots)
+```python
+from app.api.preflight import router as preflight_router
+# ...
+api_router.include_router(preflight_router, prefix="/preflight", tags=["Preflight"])
+```
 
 ---
 
-## Dependencies
-No new dependencies required - uses existing Tailwind CSS and Radix UI components.
+## Summary of Changes
 
-## Accessibility
-- ARIA labels for diagram regions
-- Keyboard navigable slots
-- Screen reader description of layout
-- Fix DialogTitle warning with VisuallyHidden component
+| Location | File | Change |
+|----------|------|--------|
+| Lovable | `LayoutOptimizer.tsx` | Add collapsible preview section with `RunLayoutDiagram` |
+| VPS | `app/api/preflight.py` | Create new endpoint for deep PDF analysis |
+| VPS | `app/api/routes.py` | Register preflight router |
+
+The VPS changes are separate from this Lovable project - you'll need to update your VPS repository and redeploy.
+
