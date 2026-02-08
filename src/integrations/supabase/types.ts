@@ -1207,6 +1207,457 @@ export type Database = {
           },
         ]
       }
+      label_dielines: {
+        Row: {
+          columns_across: number
+          corner_radius_mm: number | null
+          created_at: string
+          created_by: string | null
+          dieline_pdf_url: string | null
+          horizontal_gap_mm: number
+          id: string
+          is_active: boolean
+          is_custom: boolean
+          label_height_mm: number
+          label_width_mm: number
+          name: string
+          roll_width_mm: number
+          rows_around: number
+          updated_at: string
+          vertical_gap_mm: number
+        }
+        Insert: {
+          columns_across?: number
+          corner_radius_mm?: number | null
+          created_at?: string
+          created_by?: string | null
+          dieline_pdf_url?: string | null
+          horizontal_gap_mm?: number
+          id?: string
+          is_active?: boolean
+          is_custom?: boolean
+          label_height_mm: number
+          label_width_mm: number
+          name: string
+          roll_width_mm: number
+          rows_around?: number
+          updated_at?: string
+          vertical_gap_mm?: number
+        }
+        Update: {
+          columns_across?: number
+          corner_radius_mm?: number | null
+          created_at?: string
+          created_by?: string | null
+          dieline_pdf_url?: string | null
+          horizontal_gap_mm?: number
+          id?: string
+          is_active?: boolean
+          is_custom?: boolean
+          label_height_mm?: number
+          label_width_mm?: number
+          name?: string
+          roll_width_mm?: number
+          rows_around?: number
+          updated_at?: string
+          vertical_gap_mm?: number
+        }
+        Relationships: []
+      }
+      label_items: {
+        Row: {
+          artwork_pdf_url: string | null
+          artwork_thumbnail_url: string | null
+          created_at: string
+          has_bleed: boolean | null
+          height_mm: number | null
+          id: string
+          is_cmyk: boolean | null
+          item_number: number
+          min_dpi: number | null
+          name: string
+          notes: string | null
+          order_id: string
+          preflight_report: Json | null
+          preflight_status: string
+          quantity: number
+          updated_at: string
+          width_mm: number | null
+        }
+        Insert: {
+          artwork_pdf_url?: string | null
+          artwork_thumbnail_url?: string | null
+          created_at?: string
+          has_bleed?: boolean | null
+          height_mm?: number | null
+          id?: string
+          is_cmyk?: boolean | null
+          item_number?: number
+          min_dpi?: number | null
+          name: string
+          notes?: string | null
+          order_id: string
+          preflight_report?: Json | null
+          preflight_status?: string
+          quantity?: number
+          updated_at?: string
+          width_mm?: number | null
+        }
+        Update: {
+          artwork_pdf_url?: string | null
+          artwork_thumbnail_url?: string | null
+          created_at?: string
+          has_bleed?: boolean | null
+          height_mm?: number | null
+          id?: string
+          is_cmyk?: boolean | null
+          item_number?: number
+          min_dpi?: number | null
+          name?: string
+          notes?: string | null
+          order_id?: string
+          preflight_report?: Json | null
+          preflight_status?: string
+          quantity?: number
+          updated_at?: string
+          width_mm?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_items_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_orders: {
+        Row: {
+          client_approved_at: string | null
+          client_approved_by: string | null
+          contact_email: string | null
+          contact_name: string | null
+          created_at: string
+          created_by: string | null
+          customer_id: string | null
+          customer_name: string
+          dieline_id: string | null
+          due_date: string | null
+          estimated_frames: number | null
+          estimated_meters: number | null
+          id: string
+          notes: string | null
+          order_number: string
+          proof_token: string | null
+          quickeasy_wo_no: string | null
+          roll_width_mm: number | null
+          status: string
+          substrate_id: string | null
+          total_label_count: number
+          updated_at: string
+        }
+        Insert: {
+          client_approved_at?: string | null
+          client_approved_by?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string | null
+          customer_name: string
+          dieline_id?: string | null
+          due_date?: string | null
+          estimated_frames?: number | null
+          estimated_meters?: number | null
+          id?: string
+          notes?: string | null
+          order_number: string
+          proof_token?: string | null
+          quickeasy_wo_no?: string | null
+          roll_width_mm?: number | null
+          status?: string
+          substrate_id?: string | null
+          total_label_count?: number
+          updated_at?: string
+        }
+        Update: {
+          client_approved_at?: string | null
+          client_approved_by?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string | null
+          customer_name?: string
+          dieline_id?: string | null
+          due_date?: string | null
+          estimated_frames?: number | null
+          estimated_meters?: number | null
+          id?: string
+          notes?: string | null
+          order_number?: string
+          proof_token?: string | null
+          quickeasy_wo_no?: string | null
+          roll_width_mm?: number | null
+          status?: string
+          substrate_id?: string | null
+          total_label_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_orders_dieline_id_fkey"
+            columns: ["dieline_id"]
+            isOneToOne: false
+            referencedRelation: "label_dielines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_orders_substrate_id_fkey"
+            columns: ["substrate_id"]
+            isOneToOne: false
+            referencedRelation: "label_stock"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_runs: {
+        Row: {
+          actual_meters_printed: number | null
+          ai_optimization_score: number | null
+          ai_reasoning: string | null
+          completed_at: string | null
+          created_at: string
+          estimated_duration_minutes: number | null
+          frames_count: number | null
+          id: string
+          imposed_pdf_url: string | null
+          imposed_pdf_with_dielines_url: string | null
+          meters_to_print: number | null
+          order_id: string
+          run_number: number
+          slot_assignments: Json
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          actual_meters_printed?: number | null
+          ai_optimization_score?: number | null
+          ai_reasoning?: string | null
+          completed_at?: string | null
+          created_at?: string
+          estimated_duration_minutes?: number | null
+          frames_count?: number | null
+          id?: string
+          imposed_pdf_url?: string | null
+          imposed_pdf_with_dielines_url?: string | null
+          meters_to_print?: number | null
+          order_id: string
+          run_number?: number
+          slot_assignments?: Json
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          actual_meters_printed?: number | null
+          ai_optimization_score?: number | null
+          ai_reasoning?: string | null
+          completed_at?: string | null
+          created_at?: string
+          estimated_duration_minutes?: number | null
+          frames_count?: number | null
+          id?: string
+          imposed_pdf_url?: string | null
+          imposed_pdf_with_dielines_url?: string | null
+          meters_to_print?: number | null
+          order_id?: string
+          run_number?: number
+          slot_assignments?: Json
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_runs_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_schedule: {
+        Row: {
+          actual_end_time: string | null
+          actual_start_time: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          operator_id: string | null
+          printer_id: string | null
+          run_id: string
+          scheduled_date: string
+          scheduled_end_time: string | null
+          scheduled_start_time: string | null
+          sort_order: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          actual_end_time?: string | null
+          actual_start_time?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          operator_id?: string | null
+          printer_id?: string | null
+          run_id: string
+          scheduled_date: string
+          scheduled_end_time?: string | null
+          scheduled_start_time?: string | null
+          sort_order?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          actual_end_time?: string | null
+          actual_start_time?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          operator_id?: string | null
+          printer_id?: string | null
+          run_id?: string
+          scheduled_date?: string
+          scheduled_end_time?: string | null
+          scheduled_start_time?: string | null
+          sort_order?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_schedule_printer_id_fkey"
+            columns: ["printer_id"]
+            isOneToOne: false
+            referencedRelation: "printers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_schedule_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "label_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_stock: {
+        Row: {
+          barcode: string | null
+          cost_per_meter: number | null
+          created_at: string
+          current_stock_meters: number
+          finish: string
+          gsm: number | null
+          id: string
+          is_active: boolean
+          last_stock_take: string | null
+          name: string
+          reorder_level_meters: number
+          roll_length_meters: number
+          substrate_type: string
+          supplier: string | null
+          updated_at: string
+          width_mm: number
+        }
+        Insert: {
+          barcode?: string | null
+          cost_per_meter?: number | null
+          created_at?: string
+          current_stock_meters?: number
+          finish?: string
+          gsm?: number | null
+          id?: string
+          is_active?: boolean
+          last_stock_take?: string | null
+          name: string
+          reorder_level_meters?: number
+          roll_length_meters?: number
+          substrate_type?: string
+          supplier?: string | null
+          updated_at?: string
+          width_mm: number
+        }
+        Update: {
+          barcode?: string | null
+          cost_per_meter?: number | null
+          created_at?: string
+          current_stock_meters?: number
+          finish?: string
+          gsm?: number | null
+          id?: string
+          is_active?: boolean
+          last_stock_take?: string | null
+          name?: string
+          reorder_level_meters?: number
+          roll_length_meters?: number
+          substrate_type?: string
+          supplier?: string | null
+          updated_at?: string
+          width_mm?: number
+        }
+        Relationships: []
+      }
+      label_stock_transactions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          meters: number
+          notes: string | null
+          run_id: string | null
+          stock_id: string
+          transaction_type: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          meters: number
+          notes?: string | null
+          run_id?: string | null
+          stock_id: string
+          transaction_type: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          meters?: number
+          notes?: string | null
+          run_id?: string | null
+          stock_id?: string
+          transaction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_stock_transactions_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "label_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_stock_transactions_stock_id_fkey"
+            columns: ["stock_id"]
+            isOneToOne: false
+            referencedRelation: "label_stock"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       machine_availability: {
         Row: {
           capacity_hours: number
@@ -3890,6 +4341,7 @@ export type Database = {
           stages_updated: number
         }[]
       }
+      generate_label_order_number: { Args: never; Returns: string }
       get_actual_stage_end_time: {
         Args: { p_stage_instance_id: string }
         Returns: string

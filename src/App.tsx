@@ -92,6 +92,11 @@ import AdminSchedulePage from "@/pages/admin/AdminSchedulePage";
 import ScheduleBoardPage from "@/pages/ScheduleBoardPage";
 import Layout from "@/components/Layout";
 import BackfillPaperSpecs from "@/pages/BackfillPaperSpecs";
+
+// Labels Division imports
+import LabelsLayout from "@/components/labels/LabelsLayout";
+import { LabelsHome, LabelsOrders, LabelsDielines, LabelsStock, LabelsSchedule } from "@/pages/labels";
+
 // Removed legacy test components
 // Removed scheduler components
 
@@ -232,6 +237,19 @@ function App() {
                   <Route path="labels" element={<TrackerLabels />} />
                   <Route path="upload" element={<TrackerUpload />} />
                   <Route path="mobile" element={<MobileFactory />} />
+                </Route>
+                
+                {/* Labels Division routes - completely isolated */}
+                <Route path="/labels" element={
+                  <ProtectedRoute>
+                    <LabelsLayout />
+                  </ProtectedRoute>
+                }>
+                  <Route index element={<LabelsHome />} />
+                  <Route path="orders" element={<LabelsOrders />} />
+                  <Route path="dielines" element={<LabelsDielines />} />
+                  <Route path="stock" element={<LabelsStock />} />
+                  <Route path="schedule" element={<LabelsSchedule />} />
                 </Route>
                 
                 {/* Schedule Board standalone route */}
