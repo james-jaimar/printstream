@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
@@ -19,10 +20,12 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { LabelItemsTable } from '@/components/labels/LabelItemsTable';
 import { LabelRunsCard } from '@/components/labels/LabelRunsCard';
 import { AddLabelItemDialog } from '@/components/labels/AddLabelItemDialog';
+import { LayoutOptimizer } from '@/components/labels/LayoutOptimizer';
 import type { LabelOrderStatus } from '@/types/labels';
 
 const statusConfig: Record<LabelOrderStatus, { 
@@ -41,7 +44,8 @@ const statusConfig: Record<LabelOrderStatus, {
 export function LabelsOrderDetail() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
-  const { data: order, isLoading, error } = useLabelOrder(orderId);
+  const { data: order, isLoading, error, refetch } = useLabelOrder(orderId);
+  const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -107,10 +111,28 @@ export function LabelsOrderDetail() {
             <FileText className="h-4 w-4 mr-2" />
             Generate Proof
           </Button>
-          <Button>
-            <Sparkles className="h-4 w-4 mr-2" />
-            AI Layout
-          </Button>
+          <Dialog open={layoutDialogOpen} onOpenChange={setLayoutDialogOpen}>
+            <DialogTrigger asChild>
+              <Button disabled={items.length === 0 || !order.dieline}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                AI Layout
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>AI Layout Optimizer</DialogTitle>
+              </DialogHeader>
+              <LayoutOptimizer
+                orderId={order.id}
+                items={items}
+                dieline={order.dieline || null}
+                onLayoutApplied={() => {
+                  setLayoutDialogOpen(false);
+                  refetch();
+                }}
+              />
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
