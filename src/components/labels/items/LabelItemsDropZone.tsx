@@ -3,18 +3,19 @@ import { Upload, FileText, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { generatePdfThumbnail, dataUrlToBlob } from '@/utils/pdf/thumbnailUtils';
 import type { LabelDieline } from '@/types/labels';
 
 interface UploadingFile {
   file: File;
-  progress: 'uploading' | 'analyzing' | 'complete' | 'error';
+  progress: 'uploading' | 'generating_thumbnail' | 'analyzing' | 'complete' | 'error';
   error?: string;
 }
 
 interface LabelItemsDropZoneProps {
   orderId: string;
   dieline: LabelDieline | null;
-  onFilesUploaded: (files: { url: string; name: string; analysis?: unknown }[]) => void;
+  onFilesUploaded: (files: { url: string; name: string; thumbnailUrl?: string; analysis?: unknown }[]) => void;
   disabled?: boolean;
 }
 
@@ -79,7 +80,7 @@ export function LabelItemsDropZone({
     // Initialize uploading state
     setUploadingFiles(files.map(file => ({ file, progress: 'uploading' })));
 
-    const uploadedFiles: { url: string; name: string; analysis?: unknown }[] = [];
+    const uploadedFiles: { url: string; name: string; thumbnailUrl?: string; analysis?: unknown }[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -100,6 +101,35 @@ export function LabelItemsDropZone({
         const { data: { publicUrl } } = supabase.storage
           .from('label-files')
           .getPublicUrl(filePath);
+
+        // Update progress to generating thumbnail
+        setUploadingFiles(prev => 
+          prev.map((uf, idx) => 
+            idx === i ? { ...uf, progress: 'generating_thumbnail' } : uf
+          )
+        );
+
+        // Generate thumbnail client-side
+        let thumbnailUrl: string | undefined;
+        try {
+          const thumbnailDataUrl = await generatePdfThumbnail(file, 300);
+          const thumbnailBlob = dataUrlToBlob(thumbnailDataUrl);
+          const thumbnailPath = `label-artwork/orders/${orderId}/thumbnails/${fileName.replace('.pdf', '.png')}`;
+          
+          const { error: thumbError } = await supabase.storage
+            .from('label-files')
+            .upload(thumbnailPath, thumbnailBlob, { contentType: 'image/png' });
+          
+          if (!thumbError) {
+            const { data: { publicUrl: thumbPublicUrl } } = supabase.storage
+              .from('label-files')
+              .getPublicUrl(thumbnailPath);
+            thumbnailUrl = thumbPublicUrl;
+          }
+        } catch (thumbError) {
+          console.warn('Thumbnail generation failed:', thumbError);
+          // Continue without thumbnail
+        }
 
         // Update progress to analyzing
         setUploadingFiles(prev => 
@@ -134,7 +164,7 @@ export function LabelItemsDropZone({
           }
         }
 
-        uploadedFiles.push({ url: publicUrl, name: file.name, analysis });
+        uploadedFiles.push({ url: publicUrl, name: file.name, thumbnailUrl, analysis });
 
         // Mark as complete
         setUploadingFiles(prev => 
@@ -163,8 +193,9 @@ export function LabelItemsDropZone({
     }
   };
 
-  const isProcessing = uploadingFiles.some(f => f.progress === 'uploading' || f.progress === 'analyzing');
-
+  const isProcessing = uploadingFiles.some(f => 
+    f.progress === 'uploading' || f.progress === 'generating_thumbnail' || f.progress === 'analyzing'
+  );
   return (
     <div className="space-y-4">
       {/* Drop Zone */}
@@ -196,6 +227,7 @@ export function LabelItemsDropZone({
               <p className="font-medium">Processing {uploadingFiles.length} file(s)...</p>
               <p className="text-sm text-muted-foreground">
                 {uploadingFiles.filter(f => f.progress === 'uploading').length > 0 && 'Uploading... '}
+                {uploadingFiles.filter(f => f.progress === 'generating_thumbnail').length > 0 && 'Generating thumbnails... '}
                 {uploadingFiles.filter(f => f.progress === 'analyzing').length > 0 && 'Analyzing PDFs...'}
               </p>
             </div>
@@ -237,7 +269,7 @@ export function LabelItemsDropZone({
                 (uf.progress === 'uploading' || uf.progress === 'analyzing') && "border-accent bg-accent/10"
               )}
             >
-              {uf.progress === 'uploading' || uf.progress === 'analyzing' ? (
+              {uf.progress === 'uploading' || uf.progress === 'generating_thumbnail' || uf.progress === 'analyzing' ? (
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
               ) : uf.progress === 'complete' ? (
                 <div className="h-4 w-4 rounded-full bg-primary flex items-center justify-center">
@@ -250,7 +282,8 @@ export function LabelItemsDropZone({
               )}
               <span className="flex-1 truncate">{uf.file.name}</span>
               <span className="text-muted-foreground capitalize">
-                {uf.progress === 'analyzing' ? 'Analyzing...' : uf.progress}
+                {uf.progress === 'generating_thumbnail' ? 'Generating preview...' : 
+                 uf.progress === 'analyzing' ? 'Analyzing...' : uf.progress}
               </span>
             </div>
           ))}

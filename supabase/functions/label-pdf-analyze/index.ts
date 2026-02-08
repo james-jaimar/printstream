@@ -99,37 +99,67 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Call VPS API for PDF analysis
-    const vpsResponse = await fetch(`${VPS_API_URL}/analyze-pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-      },
-      body: JSON.stringify({ pdf_url }),
-    });
+    // Try to call VPS API for PDF analysis, but handle failures gracefully
+    let dimensions: PdfDimensions | null = null;
+    let thumbnailUrl: string | undefined;
+    let vpsAvailable = false;
 
-    if (!vpsResponse.ok) {
-      const errorText = await vpsResponse.text();
-      console.error('VPS API error:', errorText);
-      return new Response(
-        JSON.stringify({ success: false, error: `PDF analysis failed: ${errorText}` }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    try {
+      const vpsResponse = await fetch(`${VPS_API_URL}/analyze-pdf`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+        },
+        body: JSON.stringify({ pdf_url }),
+      });
+
+      if (vpsResponse.ok) {
+        const vpsData = await vpsResponse.json();
+        vpsAvailable = true;
+        
+        // Extract dimensions from VPS response (convert points to mm: 1 pt = 0.3528mm)
+        const PT_TO_MM = 0.3528;
+        dimensions = {
+          mediabox_width_mm: (vpsData.mediabox?.width || 0) * PT_TO_MM,
+          mediabox_height_mm: (vpsData.mediabox?.height || 0) * PT_TO_MM,
+          trimbox_width_mm: vpsData.trimbox ? vpsData.trimbox.width * PT_TO_MM : null,
+          trimbox_height_mm: vpsData.trimbox ? vpsData.trimbox.height * PT_TO_MM : null,
+          bleedbox_width_mm: vpsData.bleedbox ? vpsData.bleedbox.width * PT_TO_MM : null,
+          bleedbox_height_mm: vpsData.bleedbox ? vpsData.bleedbox.height * PT_TO_MM : null,
+        };
+        thumbnailUrl = vpsData.thumbnail_url;
+      } else {
+        console.warn('VPS API returned error, continuing without server-side analysis');
+      }
+    } catch (vpsError) {
+      console.warn('VPS API unavailable, continuing without server-side analysis:', vpsError);
     }
 
-    const vpsData = await vpsResponse.json();
-    
-    // Extract dimensions from VPS response (convert points to mm: 1 pt = 0.3528mm)
-    const PT_TO_MM = 0.3528;
-    const dimensions: PdfDimensions = {
-      mediabox_width_mm: (vpsData.mediabox?.width || 0) * PT_TO_MM,
-      mediabox_height_mm: (vpsData.mediabox?.height || 0) * PT_TO_MM,
-      trimbox_width_mm: vpsData.trimbox ? vpsData.trimbox.width * PT_TO_MM : null,
-      trimbox_height_mm: vpsData.trimbox ? vpsData.trimbox.height * PT_TO_MM : null,
-      bleedbox_width_mm: vpsData.bleedbox ? vpsData.bleedbox.width * PT_TO_MM : null,
-      bleedbox_height_mm: vpsData.bleedbox ? vpsData.bleedbox.height * PT_TO_MM : null,
-    };
+    // If VPS is unavailable, return a pending status so client can handle it
+    if (!dimensions) {
+      const response: AnalysisResponse = {
+        success: true,
+        dimensions: {
+          mediabox_width_mm: 0,
+          mediabox_height_mm: 0,
+          trimbox_width_mm: null,
+          trimbox_height_mm: null,
+          bleedbox_width_mm: null,
+          bleedbox_height_mm: null,
+        },
+        validation: {
+          status: 'pending' as ValidationStatus,
+          issues: ['PDF analysis pending - dimensions will be validated client-side'],
+          can_auto_crop: false,
+          crop_amount_mm: null,
+        },
+      };
+
+      return new Response(JSON.stringify(response), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Use actual PDF size (prefer bleedbox > mediabox for actual size)
     const actualWidth = dimensions.bleedbox_width_mm || dimensions.mediabox_width_mm;
@@ -150,7 +180,7 @@ Deno.serve(async (req) => {
       success: true,
       dimensions,
       validation,
-      thumbnail_url: vpsData.thumbnail_url,
+      thumbnail_url: thumbnailUrl,
     };
 
     return new Response(JSON.stringify(response), {
