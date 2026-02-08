@@ -159,6 +159,21 @@ export interface LabelItem {
   updated_at: string;
 }
 
+// PDF page box dimensions in mm
+export interface PdfBoxMm {
+  width_mm: number;
+  height_mm: number;
+}
+
+// All PDF page boxes
+export interface PdfBoxes {
+  mediabox: PdfBoxMm | null;
+  cropbox: PdfBoxMm | null;
+  bleedbox: PdfBoxMm | null;
+  trimbox: PdfBoxMm | null;
+  artbox: PdfBoxMm | null;
+}
+
 export interface PreflightReport {
   page_count?: number;
   pdf_version?: string;
@@ -175,6 +190,9 @@ export interface PreflightReport {
   spot_colors?: string[];
   warnings?: string[];
   errors?: string[];
+  // PDF page boxes for accurate dimension validation
+  boxes?: PdfBoxes;
+  primary_box?: "trimbox" | "mediabox";
 }
 
 export interface ImageInfo {

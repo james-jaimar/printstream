@@ -155,10 +155,13 @@ export function LabelItemCard({
             />
           </div>
 
-          {/* Dimensions (if available) */}
+          {/* Dimensions - show box type if available */}
           {(item.width_mm || item.height_mm) && (
             <p className="text-xs text-muted-foreground">
-              {item.width_mm}×{item.height_mm}mm
+              {item.preflight_report?.primary_box === 'trimbox' ? (
+                <span className="text-primary font-medium">TrimBox: </span>
+              ) : null}
+              {Number(item.width_mm).toFixed(1)}×{Number(item.height_mm).toFixed(1)}mm
             </p>
           )}
 

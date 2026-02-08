@@ -98,7 +98,8 @@ export function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 /**
- * Get PDF page dimensions in mm
+ * Get PDF page dimensions in mm (MediaBox only - client-side fallback)
+ * Note: For accurate TrimBox/BleedBox, use the VPS page-boxes endpoint
  * @param file - The PDF file
  * @returns Object with width and height in mm
  */
@@ -130,12 +131,15 @@ export interface ValidationResult {
   expected_width_mm: number;
   expected_height_mm: number;
   can_auto_crop: boolean;
+  // Which box was used for validation
+  box_used?: 'trimbox' | 'mediabox' | 'client';
 }
 
 /**
  * Validate PDF dimensions against expected dieline specs
- * @param actualWidth - Actual PDF width in mm
- * @param actualHeight - Actual PDF height in mm
+ * Now supports TrimBox-based validation when available
+ * @param actualWidth - Actual PDF width in mm (from TrimBox or MediaBox)
+ * @param actualHeight - Actual PDF height in mm (from TrimBox or MediaBox)
  * @param expectedTrimWidth - Expected trim width in mm
  * @param expectedTrimHeight - Expected trim height in mm
  * @param bleedLeft - Left bleed in mm
@@ -143,6 +147,7 @@ export interface ValidationResult {
  * @param bleedTop - Top bleed in mm
  * @param bleedBottom - Bottom bleed in mm
  * @param toleranceMm - Tolerance in mm (default 1.0)
+ * @param isTrimBox - Whether the dimensions are from TrimBox (true) or MediaBox (false)
  * @returns ValidationResult with status and issues
  */
 export function validatePdfDimensions(
@@ -154,7 +159,8 @@ export function validatePdfDimensions(
   bleedRight: number = 1.5,
   bleedTop: number = 1.5,
   bleedBottom: number = 1.5,
-  toleranceMm: number = 1.0
+  toleranceMm: number = 1.0,
+  isTrimBox: boolean = false
 ): ValidationResult {
   const expectedWidthWithBleed = expectedTrimWidth + bleedLeft + bleedRight;
   const expectedHeightWithBleed = expectedTrimHeight + bleedTop + bleedBottom;
@@ -163,6 +169,41 @@ export function validatePdfDimensions(
   let status: ValidationResult['status'] = 'passed';
   let can_auto_crop = false;
 
+  // If dimensions are from TrimBox, compare directly to trim size
+  if (isTrimBox) {
+    const widthDiff = actualWidth - expectedTrimWidth;
+    const heightDiff = actualHeight - expectedTrimHeight;
+    
+    // Check if TrimBox matches expected trim size (within tolerance)
+    if (Math.abs(widthDiff) <= toleranceMm && Math.abs(heightDiff) <= toleranceMm) {
+      status = 'passed';
+      // TrimBox matches - artwork has correct trim size
+    } else if (widthDiff > toleranceMm || heightDiff > toleranceMm) {
+      status = 'too_large';
+      issues.push(`TrimBox is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
+      issues.push(`Expected ${expectedTrimWidth.toFixed(1)}×${expectedTrimHeight.toFixed(1)}mm`);
+      issues.push('Trim area is larger than dieline specification');
+    } else {
+      status = 'too_small';
+      issues.push(`TrimBox is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
+      issues.push(`Expected ${expectedTrimWidth.toFixed(1)}×${expectedTrimHeight.toFixed(1)}mm`);
+      issues.push('Trim area is smaller than dieline specification');
+    }
+    
+    return {
+      status,
+      preflightStatus: status === 'passed' ? 'passed' : 'failed',
+      issues,
+      actual_width_mm: actualWidth,
+      actual_height_mm: actualHeight,
+      expected_width_mm: expectedTrimWidth,
+      expected_height_mm: expectedTrimHeight,
+      can_auto_crop,
+      box_used: 'trimbox',
+    };
+  }
+
+  // Original MediaBox validation logic (with bleed calculations)
   const widthDiff = actualWidth - expectedWidthWithBleed;
   const heightDiff = actualHeight - expectedHeightWithBleed;
   
@@ -216,5 +257,6 @@ export function validatePdfDimensions(
     expected_width_mm: expectedWidthWithBleed,
     expected_height_mm: expectedHeightWithBleed,
     can_auto_crop,
+    box_used: 'mediabox',
   };
 }
