@@ -1,163 +1,102 @@
 
 
-# Fix Plan: PDF Previews, Validation, and AI Layout Creation
+# Fix Plan: PDF Previews, Validation Status & VPS Preflight Integration
 
 ## Summary
 
-Three interconnected issues are preventing the workflow from functioning properly:
+Three issues are preventing the PDF workflow from functioning:
 
-1. **PDF thumbnails not displaying** - Client-side generation works, but thumbnails aren't reaching the database
-2. **PDF analysis stuck at "Pending"** - Client-side validation isn't being persisted, and VPS preflight needs integration
-3. **AI Layout creation fails with 400 error** - Database type mismatch (integer column receiving decimal values)
+1. **PDF.js Worker Fails to Load** - The CDN URL is returning 404, blocking thumbnail generation
+2. **Thumbnails Not Accessible** - Using public URLs but user needs signed URLs for private bucket
+3. **VPS Preflight Not Running** - No integration triggers the VPS /preflight endpoint after item creation
 
 ---
 
-## Issue 1: PDF Thumbnails Not Displaying
+## Issue 1: PDF.js Worker Loading Failure (404)
 
 ### Root Cause
-The `LabelItemsDropZone` generates thumbnails and passes them to `onFilesUploaded`, but examining the database records shows `artwork_thumbnail_url: null`. The data flow is:
+The current worker configuration uses a dynamic CDN URL that constructs the path from `pdfjsLib.version`. The installed version is `4.0.379`, but CloudFlare CDN may not have this exact version available or the URL format has changed for v4.x.
 
-```text
-LabelItemsDropZone                 LabelOrderModal                  Database
-       |                                  |                             |
-  generates thumbnail ------>  handleFilesUploaded --------> artwork_thumbnail_url: null
-  uploads to storage             passes to createItem                    
-  returns { thumbnailUrl }       includes thumbnailUrl        
+Current problematic code:
+```typescript
+pdfjsLib.GlobalWorkerOptions.workerSrc = 
+  `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 ```
 
-The thumbnail upload to storage may be silently failing, or there's a storage permissions issue with the thumbnails subfolder.
+### Solution
+Use the local worker from `node_modules` bundled by Vite, or use a known working CDN path. The most reliable approach is to import the worker directly from the installed package.
 
-### Fix Strategy
-1. Add better error handling and logging for thumbnail upload failures
-2. Ensure storage policy allows uploading to subdirectories
-3. Fall back to data URL storage if thumbnail upload fails (store directly in the database as base64 for reliability)
+### Changes
+**File: `src/utils/pdf/thumbnailUtils.ts`**
+- Replace CDN URL with local import from pdfjs-dist
+- Add fallback error handling if worker fails
+- Log worker initialization status for debugging
+
+```typescript
+// Use local worker bundled with the package
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Import the worker entry from the package
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
+```
 
 ---
 
-## Issue 2: PDF Validation Not Persisting
+## Issue 2: Thumbnails Not Accessible (Signed URLs)
 
-### Current Behavior
-- Client-side validation runs via `validatePdfDimensions()`
-- Status is passed to `createItem` as `preflight_status`
-- Database shows `preflight_status: 'pending'` for all items
+### Root Cause  
+The code uses `getPublicUrl()` which generates a public URL, but the `label-files` bucket may be private. User confirmed they want **signed URLs**.
+
+### Solution
+Replace `getPublicUrl()` with `createSignedUrl()` for thumbnail retrieval. Signed URLs provide temporary access tokens for private bucket content.
+
+### Changes
+
+**File: `src/components/labels/items/LabelItemsDropZone.tsx`**
+- After uploading thumbnail, create a signed URL instead of public URL
+- Store the signed URL or the file path (path preferred, generate signed URL on render)
+
+**File: `src/components/labels/items/LabelItemCard.tsx`**  
+- If thumbnailUrl is a storage path (not full URL), generate signed URL on render
+- Add loading state while generating signed URL
+
+**File: `src/hooks/labels/useLabelItems.ts`**
+- Add helper to generate signed URLs for thumbnail paths
+- Consider creating a dedicated hook `useThumbnailUrl(path)` that handles signed URL generation
+
+**Alternative Approach (Recommended)**:
+Store only the relative path in `artwork_thumbnail_url` and generate signed URLs at display time in the component. This keeps URLs fresh and avoids expiration issues.
+
+---
+
+## Issue 3: VPS Preflight Not Triggered After Creation
 
 ### Root Cause
-The validation runs, but examining the code flow:
-- `LabelItemsDropZone` sets `preflightStatus` from validation result
-- `LabelOrderModal` passes it to `createItem` correctly
-- However, if thumbnail generation fails, the entire `try` block may be skipped
+No code calls the VPS `/preflight` endpoint after item creation. The `label-preflight` edge function exists and works, but nothing invokes it.
 
-Also, we should integrate with the VPS `/preflight` endpoint after item creation for deeper analysis (fonts, color spaces, DPI checks).
+### Solution
+After an item is created successfully, fire an async call to `runPreflight()` from `vpsApiService.ts`. Update the item record with the preflight results when complete.
 
-### Fix Strategy
-1. Ensure validation result is saved even if thumbnail generation fails
-2. After item creation, trigger VPS preflight check asynchronously
-3. Store validation details in `preflight_report` JSON field for the visual display
+### Changes
 
----
-
-## Issue 3: AI Layout Creation - 400 Error
-
-### Root Cause
-The Postgres logs show:
-```
-invalid input syntax for type integer: "61.33333333333333"
-```
-
-The `label_runs.frames_count` column is defined as `integer` in the database, but the layout optimizer calculates:
-```typescript
-frames: calculateFramesNeeded(...) // Returns decimal like 61.33
-```
-
-### Database Schema
-```sql
-frames_count: integer  -- Cannot store decimals
-estimated_duration_minutes: integer
-```
-
-The `calculateFramesNeeded` function returns decimal values that need to be rounded before insertion.
-
-### Fix Strategy
-Option A: Round values before database insertion (recommended - minimal change)
-Option B: Change database column to numeric (requires migration)
-
-Going with Option A - round the calculated values in the layout optimizer and run creation hook.
-
----
-
-## Implementation Details
-
-### File Changes
-
-| File | Change |
-|------|--------|
-| `src/components/labels/items/LabelItemsDropZone.tsx` | Improve thumbnail upload error handling; save validation even on thumbnail failure |
-| `src/components/labels/order/LabelOrderModal.tsx` | Add VPS preflight trigger after item creation |
-| `src/hooks/labels/useLabelRuns.ts` | Round `frames_count` and `estimated_duration_minutes` to integers |
-| `src/utils/labels/layoutOptimizer.ts` | Ensure `frames` values are always integers |
-| `src/components/labels/items/LabelItemCard.tsx` | Show validation details from database `preflight_report` |
-| `src/components/labels/items/LabelItemsGrid.tsx` | Map database validation data to card props |
-
-### 1. Fix Decimal-to-Integer Issue (AI Layout)
-
-In `src/utils/labels/layoutOptimizer.ts`, update `calculateFramesNeeded` and run creation:
+**File: `src/components/labels/order/LabelOrderModal.tsx`**
+Add async preflight trigger after item creation:
 
 ```typescript
-// Ensure frames is always an integer
-const frames = Math.ceil(quantity / labelsPerFrame);
-```
+import { runPreflight } from '@/services/labels/vpsApiService';
+import { useUpdateLabelItem } from '@/hooks/labels/useLabelItems';
 
-In `src/hooks/labels/useLabelRuns.ts`, sanitize values before insert:
-
-```typescript
-.insert({
-  ...
-  frames_count: input.frames_count ? Math.round(input.frames_count) : null,
-  estimated_duration_minutes: input.estimated_duration_minutes 
-    ? Math.round(input.estimated_duration_minutes) : null,
-  ...
-})
-```
-
-### 2. Improve Thumbnail Reliability
-
-In `LabelItemsDropZone.tsx`:
-- Add explicit error logging for storage upload failures
-- If storage upload fails, store a data URL directly (fallback)
-- Separate validation from thumbnail generation to ensure validation always saves
-
-### 3. Persist Validation Results
-
-Store the full validation result in `preflight_report`:
-
-```typescript
-await createItem.mutateAsync({
-  ...
-  preflight_status: validation?.preflightStatus || 'pending',
-  preflight_report: validation ? {
-    dimensions: {
-      actual_width_mm: validation.actual_width_mm,
-      actual_height_mm: validation.actual_height_mm,
-      expected_width_mm: validation.expected_width_mm,
-      expected_height_mm: validation.expected_height_mm,
-    },
-    status: validation.status,
-    issues: validation.issues,
-    can_auto_crop: validation.can_auto_crop,
-  } : undefined,
-});
-```
-
-### 4. Trigger VPS Preflight After Creation
-
-Add async preflight check in `LabelOrderModal.tsx`:
-
-```typescript
-// After item creation succeeds
+// Inside handleFilesUploaded, after createItem succeeds:
 if (result.artwork_pdf_url) {
-  runPreflight({ pdf_url: result.artwork_pdf_url, item_id: result.id })
+  // Fire async - don't await
+  runPreflight({ 
+    pdf_url: result.artwork_pdf_url, 
+    item_id: result.id 
+  })
     .then(preflightResult => {
-      // Update item with full preflight report
       updateItem.mutate({
         id: result.id,
         updates: {
@@ -165,43 +104,67 @@ if (result.artwork_pdf_url) {
           preflight_report: preflightResult.report,
           is_cmyk: preflightResult.report.has_cmyk,
           min_dpi: preflightResult.report.min_dpi,
+          has_bleed: preflightResult.report.has_bleed,
         }
       });
     })
-    .catch(err => console.warn('Preflight check failed:', err));
+    .catch(err => {
+      console.warn('VPS preflight failed, using client validation:', err);
+      // Keep existing client-side validation status
+    });
 }
 ```
 
-### 5. Display Validation in Cards
-
-Update `LabelItemsGrid.tsx` to read validation from the database item's `preflight_report`:
-
-```typescript
-const validationStatus = item.preflight_report?.status || 
-  (item.preflight_status as ValidationStatus) || 
-  'pending';
-
-const validationIssues = item.preflight_report?.issues || [];
-```
+**File: `src/hooks/labels/useLabelItems.ts`**
+- Ensure `useUpdateLabelItem` accepts all preflight fields
+- Add is_cmyk, min_dpi, has_bleed to update mutation
 
 ---
 
-## Order of Implementation
+## Issue 4: AI Layout Integer Fix Verification
 
-1. Fix decimal-to-integer issue in layout optimizer and run creation (unblocks AI layout)
-2. Improve thumbnail upload reliability with fallback
-3. Persist validation results to database
-4. Add VPS preflight trigger after item creation
-5. Update UI to read validation from database
+### Current Status
+The `useLabelRuns.ts` already rounds `frames_count` and `estimated_duration_minutes` to integers before database insertion. The `layoutOptimizer.ts` uses `Math.ceil()` for frame calculations.
+
+### Action
+Verify the fix is complete by checking all places where decimal values might be passed:
+- `createGangedRun()` function
+- `createSingleItemRun()` function  
+- `createOptimizedRuns()` function
+
+All should use `Math.ceil()` for frame counts to ensure integers.
+
+---
+
+## Implementation Files
+
+| File | Changes |
+|------|---------|
+| `src/utils/pdf/thumbnailUtils.ts` | Fix PDF.js worker path to use local package |
+| `src/components/labels/items/LabelItemsDropZone.tsx` | Generate signed URLs for thumbnails |
+| `src/components/labels/order/LabelOrderModal.tsx` | Add async VPS preflight trigger after item creation |
+| `src/hooks/labels/useLabelItems.ts` | Add signed URL helper, ensure all preflight fields in update |
+| `src/components/labels/items/LabelItemCard.tsx` | Handle signed URL thumbnail display |
+| `src/utils/labels/layoutOptimizer.ts` | Verify all frame calculations use Math.ceil |
+
+---
+
+## Implementation Sequence
+
+1. **Fix PDF.js worker path** - Enables thumbnail generation
+2. **Switch to signed URLs** - Makes thumbnails accessible
+3. **Add VPS preflight trigger** - Runs full preflight analysis async
+4. **Verify layout optimizer integers** - Ensures AI Layout works
 
 ---
 
 ## Expected Outcome
 
 After these fixes:
-- PDF thumbnails display reliably after upload
-- Dimension validation runs immediately and shows correct status badges
-- VPS preflight runs in background for deeper analysis
-- AI Layout "Apply" button works without 400 errors
-- Users get clear feedback on artwork issues before production
+- PDF thumbnails generate successfully (worker loads correctly)
+- Thumbnails display in the UI (signed URLs work for private bucket)
+- VPS preflight runs in background after upload
+- Items update with full preflight report (fonts, DPI, CMYK, bleed)
+- AI Layout "Apply" button creates runs without database errors
+- Users see clear validation feedback instantly (client-side) with enhanced VPS results appearing after a few seconds
 
