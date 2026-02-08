@@ -57,8 +57,10 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     url: string; 
     name: string; 
     thumbnailUrl?: string; 
-    preflightStatus?: 'pending' | 'passed' | 'failed' | 'warnings';
-    analysis?: unknown;
+    preflightStatus: 'pending' | 'passed' | 'failed' | 'warnings';
+    preflightReport?: Record<string, unknown>;
+    width_mm?: number;
+    height_mm?: number;
   }[]) => {
     if (!order) return;
 
@@ -70,16 +72,20 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           quantity: 1,
           artwork_pdf_url: file.url,
           artwork_thumbnail_url: file.thumbnailUrl,
-          width_mm: order.dieline?.label_width_mm,
-          height_mm: order.dieline?.label_height_mm,
+          width_mm: file.width_mm ?? order.dieline?.label_width_mm,
+          height_mm: file.height_mm ?? order.dieline?.label_height_mm,
           preflight_status: file.preflightStatus,
+          preflight_report: file.preflightReport,
         });
 
-        // Store analysis for the new item
-        if (file.analysis) {
+        // Store analysis for the new item (for immediate UI feedback)
+        if (file.preflightReport) {
           setItemAnalyses(prev => ({
             ...prev,
-            [result.id]: file.analysis,
+            [result.id]: {
+              validation: file.preflightReport,
+              thumbnail_url: file.thumbnailUrl,
+            },
           }));
         }
       } catch (error) {

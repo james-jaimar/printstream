@@ -273,6 +273,7 @@ export interface CreateLabelItemInput {
   width_mm?: number;
   height_mm?: number;
   preflight_status?: PreflightStatus;
+  preflight_report?: PreflightReport;
   notes?: string;
 }
 
