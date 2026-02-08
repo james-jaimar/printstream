@@ -1,114 +1,224 @@
 
-# Full CRM Implementation Plan for Labels Division
+# Enhanced Label Order Workflow Plan
 
-## Problem Summary
-There are critical bugs and missing functionality in the customer management system:
-
-1. **Data Visibility Bug**: When creating a new customer, the system incorrectly assigns your admin user ID to the customer's `user_id` field. This triggers the `is_label_client()` security function to treat you as a client instead of staff, hiding all other customers.
-
-2. **Missing CRUD Operations**: No ability to edit or delete customers.
-
-3. **Incomplete UI**: The details panel shows legacy fields and lacks proper editing capabilities.
+## Summary
+This plan transforms the label order creation and management experience into a streamlined, PDF-aware workflow with:
+1. Large modal-based UX (90% viewport) for both order creation and order management
+2. Intelligent PDF dimension validation against dieline specifications (including bleed requirements)
+3. Drag-and-drop multi-file upload for label items with automatic preflight analysis
+4. Visual preview grid with inline quantity editing
 
 ---
 
-## Technical Changes
+## 1. Modal Size Enhancement
 
-### 1. Database Schema Fix (Migration)
-Fix the `label_customers` table structure and RLS logic:
+### Current State
+- `NewLabelOrderDialog` uses `max-w-2xl` (672px max width)
+- Order detail is a full page route (`/labels/orders/:orderId`)
 
-- Make `user_id` column NULLABLE (it should only be set when a contact has portal access)
-- Make `contact_email` NULLABLE (legacy field - contacts are now in separate table)
-- Update the `is_label_client()` function to check `label_customer_contacts.user_id` instead of `label_customers.user_id`
-- Fix existing data by setting `user_id` to NULL for the problematic "Klint Scales CC" record
+### Changes Required
+**NewLabelOrderDialog.tsx**
+- Change `DialogContent` className to use 90vh/90vw sizing:
+  ```
+  className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto"
+  ```
 
-```text
-Database Changes:
-+------------------------------------------+
-|        label_customers                   |
-+------------------------------------------+
-| id                 UUID (PK)             |
-| company_name       TEXT (required)       |
-| billing_address    TEXT (optional)       |
-| notes              TEXT (optional)       |
-| is_active          BOOLEAN (default true)|
-| user_id            UUID (NOW NULLABLE)   | <-- FIX
-| contact_email      TEXT (NOW NULLABLE)   | <-- Legacy, now optional
-| created_by         UUID                  |
-| created_at/updated_at                    |
-+------------------------------------------+
-           |
-           | 1:N
-           v
-+------------------------------------------+
-|     label_customer_contacts              |
-+------------------------------------------+
-| id                 UUID (PK)             |
-| customer_id        UUID (FK)             |
-| user_id            UUID (auth link)      | <-- Portal access
-| name, email, phone, role                 |
-| receives_proofs, receives_notifications |
-| can_approve_proofs, is_primary           |
-+------------------------------------------+
+**Order Detail as Modal**
+- Create new `LabelOrderModal.tsx` component that wraps the order detail content
+- The modal opens from the orders list or after creating a new order
+- Uses same 90% viewport sizing
+- Retains all current functionality (items table, AI layout, runs, etc.)
+
+---
+
+## 2. Dieline Bleed Specification
+
+### Database Changes
+Add bleed fields to `label_dielines` table:
+- `bleed_left_mm` (numeric, default 1.5)
+- `bleed_right_mm` (numeric, default 1.5)
+- `bleed_top_mm` (numeric, default 1.5)
+- `bleed_bottom_mm` (numeric, default 1.5)
+
+This allows asymmetric bleed (e.g., 1.5mm on left, 2.5mm on right as mentioned).
+
+### Expected PDF Size Calculation
+When a dieline is selected for an order, the system calculates:
+- **Trim Size**: `label_width_mm` x `label_height_mm` (e.g., 100x50mm)
+- **Bleed Size**: Trim + bleeds (e.g., 103mm x 52.5mm with 1.5mm left + 2.5mm right, 1.5mm top/bottom)
+
+### Types Update
+Update `LabelDieline` interface to include:
+```typescript
+bleed_left_mm: number;
+bleed_right_mm: number;
+bleed_top_mm: number;
+bleed_bottom_mm: number;
 ```
 
-### 2. Hook Updates (`useClientPortal.ts`)
-Fix the create mutation and add update/delete capabilities:
+---
 
-- **Fix `useCreateLabelCustomer`**: Remove `user_id` assignment - set to NULL instead
-- **Add `useUpdateLabelCustomer`**: Update company details
-- **Add `useDeleteLabelCustomer`**: Soft delete (set `is_active = false`)
+## 3. PDF Dimension Validation System
 
-### 3. Enhanced Customer Detail Panel
-Rebuild the detail panel with full editing:
+### New Edge Function: `label-pdf-analyze`
+Creates a new edge function to analyze uploaded PDFs before full preflight:
 
-- Add "Edit" button to company details tab
-- Add customer edit form dialog
-- Add "Archive Customer" action with confirmation
-- Show order history summary
-- Display contact count with quick stats
+**Endpoint**: POST `/functions/v1/label-pdf-analyze`
 
-### 4. Improved Customer List Card
-Better list UI with more information:
+**Request**:
+```json
+{
+  "pdf_url": "https://...",
+  "expected_trim_width_mm": 100,
+  "expected_trim_height_mm": 50,
+  "expected_bleed_left_mm": 1.5,
+  "expected_bleed_right_mm": 2.5,
+  "expected_bleed_top_mm": 1.5,
+  "expected_bleed_bottom_mm": 1.5,
+  "tolerance_mm": 1.0
+}
+```
 
-- Show primary contact name/email if available
-- Show contact count badge
-- Add quick action menu (Edit, Archive)
-- Visual indicator for customers with no contacts
+**Response**:
+```json
+{
+  "success": true,
+  "dimensions": {
+    "mediabox_width_mm": 103,
+    "mediabox_height_mm": 52.5,
+    "trimbox_width_mm": 100,
+    "trimbox_height_mm": 50,
+    "bleedbox_width_mm": 103,
+    "bleedbox_height_mm": 52.5
+  },
+  "validation": {
+    "status": "passed" | "no_bleed" | "too_large" | "too_small" | "needs_crop",
+    "issues": ["No bleed detected - PDF matches trim size exactly"],
+    "can_auto_crop": true,
+    "crop_amount_mm": { "left": 1.5, "right": 1.5, "top": 0.5, "bottom": 0.5 }
+  }
+}
+```
 
-### 5. Customer Form Improvements
-Update the create/edit dialog:
-
-- Clear company-focused fields only
-- Proper validation with error messages
-- Optional shipping address field
+### Validation Logic
+- **Exactly trim size** (100x50mm): Flag "No bleed" - warning status
+- **Within tolerance** (up to ~1mm larger than needed): Flag "needs_crop", auto-crop on VPS
+- **Too large** (more than tolerance): Flag "too_large" - error, reject
+- **Has correct bleed** (103x52.5mm): "passed" - proceed normally
 
 ---
 
-## Files to Create/Modify
+## 4. Drag-and-Drop Label Items Upload
 
-| File | Action | Description |
-|------|--------|-------------|
-| `supabase/migrations/...` | Create | Fix schema + RLS + data |
-| `src/hooks/labels/useClientPortal.ts` | Modify | Add update/delete hooks, fix create |
-| `src/components/labels/customers/CustomerDetailPanel.tsx` | Modify | Add edit mode, order history |
-| `src/components/labels/customers/CustomerFormDialog.tsx` | Modify | Support edit mode |
-| `src/pages/labels/LabelsCustomers.tsx` | Modify | Add edit/archive handlers |
+### New Component: `LabelItemsDropZone.tsx`
+A comprehensive drag-and-drop zone for the Label Items section:
+
+**Features**:
+- Accept multiple PDF files (drag multiple or select multiple)
+- Visual drop zone with clear instructions
+- Processing indicator for each file
+- Grid layout for item cards
+
+**Flow**:
+1. User drops 3 PDFs onto the zone
+2. Each PDF is uploaded to `label-files` bucket (`label-artwork/orders/{order_id}/{filename}`)
+3. Edge function `label-pdf-analyze` is called for each with dieline specs
+4. Results displayed in a grid of preview cards
+
+### Item Preview Card Component: `LabelItemCard.tsx`
+Each uploaded PDF becomes a visual card showing:
+- **Thumbnail**: First page preview (generated via VPS API or pdf.js)
+- **File name**: Editable label
+- **Status badge**: Passed / No Bleed / Too Large / Processing
+- **Validation details**: Expandable to show dimension info
+- **Quantity input**: Number field below the preview
+- **Actions**: Delete, View full size
+
+**Card Layout** (for 24+ items):
+- Grid layout: 4-6 columns on desktop, 2-3 on tablet
+- Compact cards: ~150-200px wide
+- Thumbnail: ~120px height
+- Quantity input prominent below
 
 ---
 
-## Implementation Order
+## 5. Storage Bucket
 
-1. **Database migration first** - Fix the schema and repair corrupted data
-2. **Update hooks** - Add full CRUD with proper field handling  
-3. **Update UI components** - Edit dialogs and improved display
-4. **Test end-to-end** - Verify all customers are visible and editable
+### Create `label-files` Bucket
+The edge functions reference this bucket but it doesn't exist. Migration required:
+```sql
+INSERT INTO storage.buckets (id, name, public, allowed_mime_types)
+VALUES ('label-files', 'label-files', true, ARRAY['application/pdf']);
+```
+
+With RLS policies for authenticated upload access.
 
 ---
 
-## Expected Outcome
-After implementation:
-- All existing customers will be visible in the list
-- Full create, read, update, and archive functionality
-- Proper separation between company records and contacts
-- Staff users won't accidentally become treated as clients
+## Technical Implementation Details
+
+### File Structure Changes
+
+**New Files**:
+- `src/components/labels/order/LabelOrderModal.tsx` - 90% viewport modal wrapper for order detail
+- `src/components/labels/items/LabelItemsDropZone.tsx` - Drag-and-drop upload component
+- `src/components/labels/items/LabelItemCard.tsx` - Individual item preview card
+- `src/components/labels/items/LabelItemsGrid.tsx` - Grid container for item cards
+- `src/hooks/labels/usePdfAnalysis.ts` - Hook for PDF dimension analysis
+- `src/services/labels/pdfAnalysisService.ts` - Client-side service for PDF analysis API
+- `supabase/functions/label-pdf-analyze/index.ts` - New edge function for PDF dimension analysis
+
+**Modified Files**:
+- `src/components/labels/NewLabelOrderDialog.tsx` - Update modal sizing
+- `src/pages/labels/LabelsOrderDetail.tsx` - Refactor content into reusable component
+- `src/pages/labels/LabelsOrders.tsx` - Launch order modal instead of navigate
+- `src/types/labels.ts` - Add bleed fields to dieline interface
+- `src/hooks/labels/useLabelItems.ts` - Add batch create mutation
+
+### Dieline Form Updates
+- Add bleed input fields (left, right, top, bottom) to dieline creation/edit forms
+- Show calculated "Artwork size with bleed" preview
+
+### Upload Flow Sequence
+```
+User drops PDFs
+       |
+       v
+Upload to Supabase Storage
+       |
+       v
+Call label-pdf-analyze for each
+       |
+       v
+Show validation status on cards
+       |
+       v
+User enters quantities
+       |
+       v
+Create label_items records (batch)
+       |
+       v
+Optionally run full preflight
+```
+
+---
+
+## Migration Summary
+
+1. **Database**: Add bleed columns to `label_dielines`
+2. **Storage**: Create `label-files` bucket with policies
+3. **Edge Function**: Create `label-pdf-analyze` function
+4. **UI**: New modal-based workflow with drag-and-drop
+
+---
+
+## Order of Implementation
+
+1. Database migration for bleed fields and storage bucket
+2. Create `label-pdf-analyze` edge function
+3. Build `LabelItemsDropZone` with drag-and-drop
+4. Build `LabelItemCard` with previews and validation display
+5. Update `NewLabelOrderDialog` sizing
+6. Create `LabelOrderModal` for order detail view
+7. Wire up the complete flow and test
