@@ -1,173 +1,207 @@
 
-# Fix Plan: PDF Previews and Validation
 
-## Problem Summary
-Two main issues are preventing the PDF workflow from working:
+# Fix Plan: PDF Previews, Validation, and AI Layout Creation
 
-1. **Missing Previews**: Thumbnails ARE being generated client-side but are NOT being saved to the database - the data flow is broken between upload and database insert
-2. **Pending Analysis**: The VPS `/analyze-pdf` endpoint doesn't exist yet, so all items show "pending" status. We need client-side validation as the primary method.
+## Summary
+
+Three interconnected issues are preventing the workflow from functioning properly:
+
+1. **PDF thumbnails not displaying** - Client-side generation works, but thumbnails aren't reaching the database
+2. **PDF analysis stuck at "Pending"** - Client-side validation isn't being persisted, and VPS preflight needs integration
+3. **AI Layout creation fails with 400 error** - Database type mismatch (integer column receiving decimal values)
 
 ---
 
-## Root Cause Analysis
+## Issue 1: PDF Thumbnails Not Displaying
 
-### Thumbnail Data Flow (Currently Broken)
+### Root Cause
+The `LabelItemsDropZone` generates thumbnails and passes them to `onFilesUploaded`, but examining the database records shows `artwork_thumbnail_url: null`. The data flow is:
 
 ```text
-LabelItemsDropZone                    LabelOrderModal                   useLabelItems
-      |                                     |                               |
-  generates thumbnail ─→ passes to callback ─→ MISSING: doesn't pass    ─→ MISSING: doesn't
-  uploads to storage      onFilesUploaded       thumbnailUrl to            include in insert
-      |                                         createItem.mutateAsync()
-  returns { url, name, thumbnailUrl }           
+LabelItemsDropZone                 LabelOrderModal                  Database
+       |                                  |                             |
+  generates thumbnail ------>  handleFilesUploaded --------> artwork_thumbnail_url: null
+  uploads to storage             passes to createItem                    
+  returns { thumbnailUrl }       includes thumbnailUrl        
 ```
 
-### Validation Flow (Broken)
-- Edge function tries VPS API → 404 error → returns "pending" status
-- No client-side fallback for dimension validation
-- Items stuck at "pending" forever
+The thumbnail upload to storage may be silently failing, or there's a storage permissions issue with the thumbnails subfolder.
+
+### Fix Strategy
+1. Add better error handling and logging for thumbnail upload failures
+2. Ensure storage policy allows uploading to subdirectories
+3. Fall back to data URL storage if thumbnail upload fails (store directly in the database as base64 for reliability)
 
 ---
 
-## Fix 1: Complete the Thumbnail Data Flow
+## Issue 2: PDF Validation Not Persisting
 
-### Changes Required
+### Current Behavior
+- Client-side validation runs via `validatePdfDimensions()`
+- Status is passed to `createItem` as `preflight_status`
+- Database shows `preflight_status: 'pending'` for all items
 
-**1. Update Type: `src/types/labels.ts`**
-Add `artwork_thumbnail_url` to `CreateLabelItemInput`:
-```typescript
-export interface CreateLabelItemInput {
-  order_id: string;
-  name: string;
-  quantity: number;
-  artwork_pdf_url?: string;
-  artwork_thumbnail_url?: string;  // ADD THIS
-  width_mm?: number;
-  height_mm?: number;
-  notes?: string;
-}
+### Root Cause
+The validation runs, but examining the code flow:
+- `LabelItemsDropZone` sets `preflightStatus` from validation result
+- `LabelOrderModal` passes it to `createItem` correctly
+- However, if thumbnail generation fails, the entire `try` block may be skipped
+
+Also, we should integrate with the VPS `/preflight` endpoint after item creation for deeper analysis (fonts, color spaces, DPI checks).
+
+### Fix Strategy
+1. Ensure validation result is saved even if thumbnail generation fails
+2. After item creation, trigger VPS preflight check asynchronously
+3. Store validation details in `preflight_report` JSON field for the visual display
+
+---
+
+## Issue 3: AI Layout Creation - 400 Error
+
+### Root Cause
+The Postgres logs show:
+```
+invalid input syntax for type integer: "61.33333333333333"
 ```
 
-**2. Update Hook: `src/hooks/labels/useLabelItems.ts`**
-Include `artwork_thumbnail_url` in the insert statement:
+The `label_runs.frames_count` column is defined as `integer` in the database, but the layout optimizer calculates:
 ```typescript
-const { data, error } = await supabase
-  .from('label_items')
-  .insert({
-    ...
-    artwork_thumbnail_url: input.artwork_thumbnail_url,  // ADD THIS
-    ...
-  })
+frames: calculateFramesNeeded(...) // Returns decimal like 61.33
 ```
 
-**3. Update Modal: `src/components/labels/order/LabelOrderModal.tsx`**
-Pass `thumbnailUrl` to the create mutation:
+### Database Schema
+```sql
+frames_count: integer  -- Cannot store decimals
+estimated_duration_minutes: integer
+```
+
+The `calculateFramesNeeded` function returns decimal values that need to be rounded before insertion.
+
+### Fix Strategy
+Option A: Round values before database insertion (recommended - minimal change)
+Option B: Change database column to numeric (requires migration)
+
+Going with Option A - round the calculated values in the layout optimizer and run creation hook.
+
+---
+
+## Implementation Details
+
+### File Changes
+
+| File | Change |
+|------|--------|
+| `src/components/labels/items/LabelItemsDropZone.tsx` | Improve thumbnail upload error handling; save validation even on thumbnail failure |
+| `src/components/labels/order/LabelOrderModal.tsx` | Add VPS preflight trigger after item creation |
+| `src/hooks/labels/useLabelRuns.ts` | Round `frames_count` and `estimated_duration_minutes` to integers |
+| `src/utils/labels/layoutOptimizer.ts` | Ensure `frames` values are always integers |
+| `src/components/labels/items/LabelItemCard.tsx` | Show validation details from database `preflight_report` |
+| `src/components/labels/items/LabelItemsGrid.tsx` | Map database validation data to card props |
+
+### 1. Fix Decimal-to-Integer Issue (AI Layout)
+
+In `src/utils/labels/layoutOptimizer.ts`, update `calculateFramesNeeded` and run creation:
+
 ```typescript
-const result = await createItem.mutateAsync({
-  order_id: order.id,
-  name: file.name.replace('.pdf', ''),
-  quantity: 1,
-  artwork_pdf_url: file.url,
-  artwork_thumbnail_url: file.thumbnailUrl,  // ADD THIS
-  width_mm: order.dieline?.label_width_mm,
-  height_mm: order.dieline?.label_height_mm,
+// Ensure frames is always an integer
+const frames = Math.ceil(quantity / labelsPerFrame);
+```
+
+In `src/hooks/labels/useLabelRuns.ts`, sanitize values before insert:
+
+```typescript
+.insert({
+  ...
+  frames_count: input.frames_count ? Math.round(input.frames_count) : null,
+  estimated_duration_minutes: input.estimated_duration_minutes 
+    ? Math.round(input.estimated_duration_minutes) : null,
+  ...
+})
+```
+
+### 2. Improve Thumbnail Reliability
+
+In `LabelItemsDropZone.tsx`:
+- Add explicit error logging for storage upload failures
+- If storage upload fails, store a data URL directly (fallback)
+- Separate validation from thumbnail generation to ensure validation always saves
+
+### 3. Persist Validation Results
+
+Store the full validation result in `preflight_report`:
+
+```typescript
+await createItem.mutateAsync({
+  ...
+  preflight_status: validation?.preflightStatus || 'pending',
+  preflight_report: validation ? {
+    dimensions: {
+      actual_width_mm: validation.actual_width_mm,
+      actual_height_mm: validation.actual_height_mm,
+      expected_width_mm: validation.expected_width_mm,
+      expected_height_mm: validation.expected_height_mm,
+    },
+    status: validation.status,
+    issues: validation.issues,
+    can_auto_crop: validation.can_auto_crop,
+  } : undefined,
 });
 ```
 
----
+### 4. Trigger VPS Preflight After Creation
 
-## Fix 2: Client-Side PDF Dimension Validation
+Add async preflight check in `LabelOrderModal.tsx`:
 
-Since the VPS API doesn't exist yet, implement primary validation client-side using pdf.js (already available via `getPdfDimensionsMm()`).
-
-### Approach
-Move validation to the upload phase in `LabelItemsDropZone`:
-1. After generating thumbnail, read PDF dimensions using `getPdfDimensionsMm()`
-2. Compare against dieline specs (trim + bleed)
-3. Determine status: `passed`, `no_bleed`, `too_large`, `too_small`, `needs_crop`
-4. Pass validation result to callback
-5. Store in database (via `preflight_status` field or new field)
-
-### New Utility Function: `validatePdfDimensions()`
-Add to `src/utils/pdf/thumbnailUtils.ts`:
 ```typescript
-export interface ValidationResult {
-  status: 'passed' | 'no_bleed' | 'too_large' | 'too_small' | 'needs_crop';
-  issues: string[];
-  actual_width_mm: number;
-  actual_height_mm: number;
-  can_auto_crop: boolean;
+// After item creation succeeds
+if (result.artwork_pdf_url) {
+  runPreflight({ pdf_url: result.artwork_pdf_url, item_id: result.id })
+    .then(preflightResult => {
+      // Update item with full preflight report
+      updateItem.mutate({
+        id: result.id,
+        updates: {
+          preflight_status: preflightResult.status,
+          preflight_report: preflightResult.report,
+          is_cmyk: preflightResult.report.has_cmyk,
+          min_dpi: preflightResult.report.min_dpi,
+        }
+      });
+    })
+    .catch(err => console.warn('Preflight check failed:', err));
 }
-
-export function validatePdfDimensions(
-  actualWidth: number,
-  actualHeight: number,
-  expectedTrimWidth: number,
-  expectedTrimHeight: number,
-  bleedLeft: number,
-  bleedRight: number,
-  bleedTop: number,
-  bleedBottom: number,
-  toleranceMm: number = 1.0
-): ValidationResult
 ```
 
-### Update LabelItemsDropZone
-1. After thumbnail generation, call `getPdfDimensionsMm(file)`
-2. Run `validatePdfDimensions()` with dieline specs
-3. Include validation result in callback data
-4. Skip edge function call (or make it optional for VPS-side CMYK/preflight)
+### 5. Display Validation in Cards
 
-### Store Validation in Database
-Two options:
-- **Option A**: Use existing `preflight_status` field (map validation status to preflight status)
-- **Option B**: Store validation in `preflight_report` JSON field
+Update `LabelItemsGrid.tsx` to read validation from the database item's `preflight_report`:
 
-Recommend Option A for simplicity - map `passed` → `passed`, `no_bleed`/`needs_crop` → `warnings`, `too_large`/`too_small` → `failed`
-
----
-
-## Fix 3: Display Thumbnails from Database
-
-### Update LabelItemsGrid
-The current code already looks for `item.artwork_thumbnail_url`:
 ```typescript
-thumbnailUrl={analysis?.thumbnail_url || item.artwork_thumbnail_url || undefined}
+const validationStatus = item.preflight_report?.status || 
+  (item.preflight_status as ValidationStatus) || 
+  'pending';
+
+const validationIssues = item.preflight_report?.issues || [];
 ```
-This will work once thumbnails are saved to the database.
 
 ---
 
-## Files to Modify
+## Order of Implementation
 
-| File | Changes |
-|------|---------|
-| `src/types/labels.ts` | Add `artwork_thumbnail_url` to `CreateLabelItemInput` |
-| `src/hooks/labels/useLabelItems.ts` | Include `artwork_thumbnail_url` in insert statement |
-| `src/components/labels/order/LabelOrderModal.tsx` | Pass `thumbnailUrl` to createItem mutation |
-| `src/utils/pdf/thumbnailUtils.ts` | Add `validatePdfDimensions()` function |
-| `src/components/labels/items/LabelItemsDropZone.tsx` | Add client-side validation, pass preflight data |
-
----
-
-## Implementation Sequence
-
-1. **Quick win - Fix thumbnail saving** (3 files)
-   - Update type, hook, and modal to pass thumbnail URL through
-
-2. **Add client-side validation** (2 files)
-   - Add validation function to thumbnailUtils
-   - Integrate into LabelItemsDropZone
-
-3. **Map validation to preflight status** 
-   - Store status in database for persistence
+1. Fix decimal-to-integer issue in layout optimizer and run creation (unblocks AI layout)
+2. Improve thumbnail upload reliability with fallback
+3. Persist validation results to database
+4. Add VPS preflight trigger after item creation
+5. Update UI to read validation from database
 
 ---
 
 ## Expected Outcome
 
 After these fixes:
-- Thumbnails display immediately after upload
-- Dimension validation runs client-side (no VPS dependency)
-- Items show correct status badges (Passed, No Bleed, Too Large, etc.)
-- VPS can still be called later for advanced preflight (CMYK, fonts, etc.)
+- PDF thumbnails display reliably after upload
+- Dimension validation runs immediately and shows correct status badges
+- VPS preflight runs in background for deeper analysis
+- AI Layout "Apply" button works without 400 errors
+- Users get clear feedback on artwork issues before production
+
