@@ -7,3 +7,4 @@ export * from './parser';
 export * from './columnMapper';
 export * from './matcher';
 export * from './importService';
+export * from './layoutOptimizer';

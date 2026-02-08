@@ -6,10 +6,9 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { 
-  generateLayoutOptions, 
-  estimateProductionTime, 
-  validateLayout 
-} from '@/services/labels/layoutOptimizer';
+  generateLayoutOptions as generateOptions,
+  calculateProductionTime
+} from '@/utils/labels/layoutOptimizer';
 import { 
   type LabelItem, 
   type LabelDieline, 
@@ -18,7 +17,16 @@ import {
   DEFAULT_OPTIMIZATION_WEIGHTS 
 } from '@/types/labels';
 import { useCreateLabelRun } from './useLabelRuns';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+
+interface AISuggestion {
+  recommendation: 'ganged' | 'individual' | 'hybrid';
+  reasoning: string;
+  estimated_waste_percent: number;
+  suggested_run_count: number;
+  efficiency_tips?: string[];
+}
 
 interface UseLayoutOptimizerProps {
   orderId: string;
@@ -31,19 +39,29 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
   const [selectedOption, setSelectedOption] = useState<LayoutOption | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [weights, setWeights] = useState<OptimizationWeights>(DEFAULT_OPTIMIZATION_WEIGHTS);
+  const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
   
   const { mutateAsync: createRun, isPending: isCreating } = useCreateLabelRun();
 
   /**
    * Generate layout options based on current items and dieline
    */
-  const generateOptions = useCallback(() => {
-    if (!dieline) {
+  const generateLayoutOptions = useCallback((
+    customItems?: LabelItem[],
+    customDieline?: LabelDieline,
+    customWeights?: OptimizationWeights
+  ) => {
+    const itemsToUse = customItems ?? items;
+    const dielineToUse = customDieline ?? dieline;
+    const weightsToUse = customWeights ?? weights;
+    
+    if (!dielineToUse) {
       toast.error('Please select a dieline before generating layouts');
       return;
     }
     
-    if (items.length === 0) {
+    if (itemsToUse.length === 0) {
       toast.error('Please add items before generating layouts');
       return;
     }
@@ -51,10 +69,10 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
     setIsGenerating(true);
     
     try {
-      const generatedOptions = generateLayoutOptions({
-        items,
-        dieline,
-        weights
+      const generatedOptions = generateOptions({
+        items: itemsToUse,
+        dieline: dielineToUse,
+        weights: weightsToUse
       });
       
       setOptions(generatedOptions);
@@ -74,17 +92,58 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
   }, [items, dieline, weights]);
 
   /**
+   * Fetch AI suggestion for layout optimization
+   */
+  const fetchAISuggestion = useCallback(async (
+    customItems?: LabelItem[],
+    customDieline?: LabelDieline,
+    constraints?: { rush_job?: boolean; prefer_ganging?: boolean }
+  ) => {
+    const itemsToUse = customItems ?? items;
+    const dielineToUse = customDieline ?? dieline;
+    
+    if (!dielineToUse || itemsToUse.length === 0) {
+      toast.error('Please add items and select a dieline first');
+      return;
+    }
+    
+    setIsLoadingAI(true);
+    setAiSuggestion(null);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('label-optimize', {
+        body: { items: itemsToUse, dieline: dielineToUse, constraints }
+      });
+
+      if (error) throw error;
+
+      if (data?.suggestion) {
+        setAiSuggestion(data.suggestion);
+        toast.success('AI analysis complete');
+      } else {
+        toast.info('AI could not generate a suggestion');
+      }
+    } catch (error: any) {
+      console.error('AI optimization error:', error);
+      
+      if (error.message?.includes('429') || error.status === 429) {
+        toast.error('AI rate limit reached. Please try again later.');
+      } else if (error.message?.includes('402') || error.status === 402) {
+        toast.error('AI credits exhausted. Please add funds.');
+      } else {
+        toast.error('AI optimization failed');
+      }
+    } finally {
+      setIsLoadingAI(false);
+    }
+  }, [items, dieline]);
+
+  /**
    * Apply selected layout - creates runs in database
    */
   const applyLayout = useCallback(async () => {
     if (!selectedOption) {
       toast.error('Please select a layout option first');
-      return false;
-    }
-    
-    const validation = validateLayout(selectedOption, items);
-    if (!validation.valid) {
-      toast.error(`Layout validation failed: ${validation.errors.join(', ')}`);
       return false;
     }
     
@@ -96,10 +155,7 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
           slot_assignments: run.slot_assignments,
           meters_to_print: run.meters,
           frames_count: run.frames,
-          estimated_duration_minutes: estimateProductionTime({ 
-            ...selectedOption, 
-            runs: [run] 
-          }),
+          estimated_duration_minutes: calculateProductionTime([run]),
           ai_optimization_score: selectedOption.overall_score,
           ai_reasoning: selectedOption.reasoning,
         });
@@ -112,13 +168,13 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
       toast.error('Failed to create production runs');
       return false;
     }
-  }, [selectedOption, items, orderId, createRun]);
+  }, [selectedOption, orderId, createRun]);
 
   /**
    * Get production time estimate for an option
    */
   const getProductionTime = useCallback((option: LayoutOption) => {
-    return estimateProductionTime(option);
+    return calculateProductionTime(option.runs);
   }, []);
 
   /**
@@ -132,7 +188,7 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
       totalMeters: selectedOption.total_meters,
       totalFrames: selectedOption.total_frames,
       wasteMeters: selectedOption.total_waste_meters,
-      estimatedMinutes: estimateProductionTime(selectedOption),
+      estimatedMinutes: calculateProductionTime(selectedOption.runs),
       overallScore: selectedOption.overall_score
     };
   }, [selectedOption]);
@@ -150,12 +206,15 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
     weights,
     summary,
     canGenerate,
+    aiSuggestion,
+    isLoadingAI,
     
     // Actions
-    generateOptions,
+    generateOptions: generateLayoutOptions,
     selectOption: setSelectedOption,
     applyLayout,
     updateWeights: setWeights,
-    getProductionTime
+    getProductionTime,
+    fetchAISuggestion
   };
 }

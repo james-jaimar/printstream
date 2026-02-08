@@ -121,7 +121,7 @@ export function LayoutOptimizer({
 
         {/* Generate Button */}
         <Button 
-          onClick={generateOptions} 
+          onClick={() => generateOptions()} 
           disabled={!canGenerate || isGenerating}
           className="w-full"
           size="lg"
