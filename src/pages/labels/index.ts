@@ -6,3 +6,4 @@ export { default as LabelsDielines } from './LabelsDielines';
 export { default as LabelsStock } from './LabelsStock';
 export { default as LabelsSchedule } from './LabelsSchedule';
 export { default as LabelsSettings } from './LabelsSettings';
+export { default as LabelsReporting } from './LabelsReporting';

@@ -12,6 +12,7 @@ import {
   StockTransactionModal,
   StockBarcodeScanner 
 } from '@/components/labels/stock';
+import { LowStockAlert } from '@/components/labels/production';
 import type { LabelStock } from '@/types/labels';
 
 export default function LabelsStock() {
@@ -101,6 +102,9 @@ export default function LabelsStock() {
           onStockFound={handleStockFoundByScanner} 
         />
       )}
+
+      {/* Low Stock Alert */}
+      <LowStockAlert />
 
       {/* Stock Grid */}
       {isLoading ? (

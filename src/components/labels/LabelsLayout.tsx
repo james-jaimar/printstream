@@ -8,7 +8,8 @@ import {
   Calendar,
   Settings,
   ChevronLeft,
-  Boxes
+  Boxes,
+  BarChart3
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -40,6 +41,11 @@ const navItems = [
     to: '/labels/schedule', 
     label: 'Schedule Board', 
     icon: Calendar 
+  },
+  { 
+    to: '/labels/reports', 
+    label: 'Reports', 
+    icon: BarChart3 
   },
 ];
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { 
   Layers, 
   Play, 
@@ -10,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { RunDetailModal } from '@/components/labels/production';
 import type { LabelRun, LabelRunStatus, LabelItem } from '@/types/labels';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
 
@@ -32,8 +34,17 @@ const statusConfig: Record<LabelRunStatus, {
 };
 
 export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
+  const [selectedRun, setSelectedRun] = useState<LabelRun | null>(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  
   const getItemName = (itemId: string) => {
     return items.find(i => i.id === itemId)?.name || 'Unknown';
+  };
+
+  const handleRunClick = (run: LabelRun) => {
+    setSelectedRun(run);
+    setDetailModalOpen(true);
+    onViewRun?.(run);
   };
 
   const completedRuns = runs.filter(r => r.status === 'completed').length;
@@ -80,7 +91,7 @@ export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
                 <div
                   key={run.id}
                   className="flex items-center gap-4 p-3 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer"
-                  onClick={() => onViewRun?.(run)}
+                  onClick={() => handleRunClick(run)}
                 >
                   <div className={`w-2 h-12 rounded-full ${status.color}`} />
                   
@@ -123,6 +134,14 @@ export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
           </div>
         )}
       </CardContent>
+
+      {/* Run Detail Modal */}
+      <RunDetailModal
+        run={selectedRun}
+        items={items}
+        open={detailModalOpen}
+        onOpenChange={setDetailModalOpen}
+      />
     </Card>
   );
 }
