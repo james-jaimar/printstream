@@ -1,255 +1,195 @@
 
+# Plan: Add /page-boxes Endpoint to VPS
 
-# Plan: Extract PDF Page Boxes (TrimBox, BleedBox, ArtBox)
+## Problem Diagnosis
 
-## Summary
+The edge function `label-page-boxes` is calling `POST /page-boxes` on your VPS, but that endpoint doesn't exist yet (404). Your VPS currently has `/preflight/check` which DOES return page boxes, but it requires file upload (multipart/form-data) rather than accepting a URL.
 
-The current system only reads the **MediaBox** from uploaded PDFs (showing 123.28 × 73.28mm), but does not extract the **TrimBox** (100 × 50mm) or **BleedBox** which are essential for accurate dimension validation. This is causing PDFs to be flagged as "Too Large" when they are actually correctly formatted with proper trim and bleed areas.
+## Solution: Add /page-boxes Endpoint to VPS
 
----
-
-## Current Problem
-
-Looking at the uploaded screenshot:
-- **MediaBox (what we read)**: 123.28 × 73.28mm (full page including bleed margins)
-- **TrimBox (what we need)**: 100 × 50mm (actual label size)
-- **Bleed margins**: ~11.6mm on each side
-
-The PDF.js library's `getViewport()` method only returns the MediaBox dimensions. The TrimBox and BleedBox are stored in the PDF's page dictionary but are not exposed through PDF.js's public API.
+You need to add this endpoint to your Python FastAPI server at `pdf-api.jaimar.dev`:
 
 ---
 
-## Technical Analysis
-
-### Why PDF.js Can't Read TrimBox
-
-PDF.js is designed for rendering PDFs in browsers, not for prepress analysis. While the internal worker has access to page boxes via `this.pageDict.map.TrimBox`, this is:
-- Not exposed in the public API
-- Would require modifying the pdf.worker.js file
-- Not a recommended approach for production
-
-### The VPS Preflight Returns 404
-
-The edge function `label-preflight` calls `https://pdf-api.jaimar.dev/preflight`, but the VPS returns 404, meaning this endpoint doesn't exist on the Python FastAPI server yet.
-
----
-
-## Proposed Solution
-
-### 1. VPS API Enhancement (Backend - Your Python Server)
-
-Add a `/page-boxes` or update `/preflight` endpoint on the VPS that extracts all PDF page boxes:
+### VPS Endpoint Specification
 
 ```text
 POST /page-boxes
-Request: { "pdf_url": "..." }
-Response: {
-  "mediabox": { "width": 349.61, "height": 207.81 },  // in points
-  "cropbox": { "width": 349.61, "height": 207.81 },
-  "bleedbox": { "width": 349.61, "height": 207.81 },
-  "trimbox": { "width": 283.46, "height": 141.73 },   // 100 x 50mm
+Content-Type: application/json
+X-API-Key: <your-api-key>
+
+Request Body:
+{
+  "pdf_url": "https://example.com/path/to/file.pdf"
+}
+
+Response (200 OK):
+{
+  "mediabox": { "x1": 0, "y1": 0, "x2": 349.61, "y2": 207.81, "width": 349.61, "height": 207.81 },
+  "cropbox": { "x1": 0, "y1": 0, "x2": 349.61, "y2": 207.81, "width": 349.61, "height": 207.81 },
+  "bleedbox": { "x1": 0, "y1": 0, "x2": 349.61, "y2": 207.81, "width": 349.61, "height": 207.81 },
+  "trimbox": { "x1": 11.34, "y1": 11.34, "x2": 294.8, "y2": 153.07, "width": 283.46, "height": 141.73 },
   "artbox": null
 }
 ```
 
-Using `pikepdf` or `pypdf` on your VPS (both can read these boxes):
+All dimensions are in **PDF points** (1 point = 1/72 inch = 0.3528 mm).
 
-```text
-# Example with pikepdf
+---
+
+### Python Implementation (FastAPI + pikepdf)
+
+Add this to your FastAPI server:
+
+```python
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
 import pikepdf
-
-pdf = pikepdf.open(file_path)
-page = pdf.pages[0]
-
-mediabox = page.MediaBox  # Always present
-trimbox = page.TrimBox    # May be None
-bleedbox = page.BleedBox  # May be None
-artbox = page.ArtBox      # May be None
-```
-
-### 2. Edge Function Update
-
-Modify `label-preflight` or create a new `label-page-boxes` edge function to call the VPS and return structured box data.
-
-### 3. Client Integration
-
-Update the upload flow to:
-1. Upload PDF to storage
-2. Call edge function to get page boxes from VPS
-3. Use TrimBox (or fallback to MediaBox) for validation
-4. Display accurate dimensions with box type indicator
-
----
-
-## Implementation Steps
-
-### Step 1: VPS API Update (On Your Python Server)
-
-Add endpoint to extract PDF page boxes using `pikepdf`:
-
-| Endpoint | Method | Input | Output |
-|----------|--------|-------|--------|
-| `/page-boxes` | POST | `{ pdf_url: string }` | All box dimensions in points |
-
-### Step 2: Create/Update Edge Function
-
-Create `label-page-boxes` edge function that:
-- Receives PDF URL
-- Calls VPS `/page-boxes` endpoint
-- Converts points to mm (1 pt = 0.3528 mm)
-- Returns structured box data
-
-### Step 3: Update Client Validation
-
-Modify `LabelItemsDropZone.tsx` and validation logic to:
-- Call edge function after upload
-- Use TrimBox for validation (if available), otherwise fall back to MediaBox
-- Store box data in the database `preflight_report`
-
-### Step 4: Update UI Display
-
-Modify `LabelItemCard.tsx` to show:
-- Which box type was used for validation
-- All detected boxes with their dimensions
-- Clear status based on TrimBox vs expected dieline
-
----
-
-## Edge Function Code (New or Updated)
-
-```text
-File: supabase/functions/label-page-boxes/index.ts
-
-Endpoint: POST
-Input: { pdf_url: string }
-
-Flow:
-1. Call VPS /page-boxes with pdf_url
-2. Convert all box dimensions from points to mm
-3. Return structured response with all boxes
-
-Response Format:
-{
-  success: true,
-  boxes: {
-    mediabox: { width_mm: 123.28, height_mm: 73.28 },
-    trimbox: { width_mm: 100.0, height_mm: 50.0 },
-    bleedbox: { width_mm: 123.28, height_mm: 73.28 },
-    artbox: null
-  },
-  primary_box: "trimbox",  // The box used for validation
-  dimensions_mm: { width: 100.0, height: 50.0 }  // From primary box
-}
-```
-
----
-
-## Client-Side Changes
-
-### LabelItemsDropZone.tsx
-
-After PDF upload:
-1. Call `label-page-boxes` edge function
-2. Store box data in `preflight_report`
-3. Use trimbox dimensions (if present) for validation
-
-### thumbnailUtils.ts
-
-Update `validatePdfDimensions` to accept a `boxes` object and use the appropriate box for validation:
-- If TrimBox exists: validate against trim dimensions directly
-- If only MediaBox: calculate expected size with bleed
-
-### LabelItemCard.tsx
-
-Display box information clearly:
-- "TrimBox: 100 × 50mm ✓"
-- "BleedBox: 123.28 × 73.28mm"
-- Validation status based on correct box
-
----
-
-## Database Changes
-
-No schema changes required. The existing `preflight_report` JSON field can store:
-
-```text
-{
-  boxes: {
-    mediabox: { width_mm, height_mm },
-    trimbox: { width_mm, height_mm },
-    bleedbox: { width_mm, height_mm }
-  },
-  primary_box: "trimbox",
-  validation_status: "passed",
-  issues: []
-}
-```
-
----
-
-## Required VPS Work
-
-Before the client-side changes can be implemented, your VPS at `pdf-api.jaimar.dev` needs a new endpoint. Using `pikepdf`:
-
-```text
-from fastapi import FastAPI
-import pikepdf
-import requests
+import httpx
 import tempfile
+import os
 
-@app.post("/page-boxes")
-async def get_page_boxes(pdf_url: str):
-    # Download PDF
-    response = requests.get(pdf_url)
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+class PageBoxesRequest(BaseModel):
+    pdf_url: str
+
+class BoxDimensions(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    width: float
+    height: float
+
+class PageBoxesResponse(BaseModel):
+    mediabox: BoxDimensions | None
+    cropbox: BoxDimensions | None
+    bleedbox: BoxDimensions | None
+    trimbox: BoxDimensions | None
+    artbox: BoxDimensions | None
+
+
+def box_to_dict(box) -> dict | None:
+    """Convert pikepdf box array [x1, y1, x2, y2] to dict with dimensions."""
+    if box is None:
+        return None
+    try:
+        x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+        return {
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+            "width": abs(x2 - x1),
+            "height": abs(y2 - y1)
+        }
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+@app.post("/page-boxes", response_model=PageBoxesResponse, tags=["Page Boxes"])
+async def get_page_boxes(request: PageBoxesRequest):
+    """
+    Extract PDF page boxes (MediaBox, CropBox, BleedBox, TrimBox, ArtBox).
+    
+    Downloads PDF from URL and extracts all page box definitions from the first page.
+    Returns dimensions in PDF points (1 pt = 1/72 inch = 0.3528 mm).
+    """
+    # Download PDF from URL
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.get(request.pdf_url)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=400, detail=f"Failed to download PDF: {str(e)}")
+    
+    # Save to temp file and extract boxes
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(response.content)
-        tmp.flush()
-        
-        pdf = pikepdf.open(tmp.name)
+        tmp_path = tmp.name
+    
+    try:
+        pdf = pikepdf.open(tmp_path)
         page = pdf.pages[0]
         
-        def box_to_dict(box):
-            if box is None:
-                return None
-            return {
-                "x1": float(box[0]),
-                "y1": float(box[1]),
-                "x2": float(box[2]),
-                "y2": float(box[3]),
-                "width": float(box[2]) - float(box[0]),
-                "height": float(box[3]) - float(box[1])
-            }
-        
-        return {
+        # Extract all boxes (MediaBox is always present, others may be None)
+        result = {
             "mediabox": box_to_dict(page.MediaBox),
-            "cropbox": box_to_dict(getattr(page, 'CropBox', None)),
-            "bleedbox": box_to_dict(getattr(page, 'BleedBox', None)),
-            "trimbox": box_to_dict(getattr(page, 'TrimBox', None)),
-            "artbox": box_to_dict(getattr(page, 'ArtBox', None))
+            "cropbox": box_to_dict(getattr(page, 'CropBox', None) or page.get('/CropBox')),
+            "bleedbox": box_to_dict(getattr(page, 'BleedBox', None) or page.get('/BleedBox')),
+            "trimbox": box_to_dict(getattr(page, 'TrimBox', None) or page.get('/TrimBox')),
+            "artbox": box_to_dict(getattr(page, 'ArtBox', None) or page.get('/ArtBox')),
         }
+        
+        pdf.close()
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to extract page boxes: {str(e)}")
+    finally:
+        os.unlink(tmp_path)
 ```
 
 ---
 
-## Summary of Files to Create/Modify
+### Dependencies Required
 
-| File | Action | Purpose |
-|------|--------|---------|
-| VPS: `/page-boxes` endpoint | Create | Extract all PDF boxes using pikepdf |
-| `supabase/functions/label-page-boxes/index.ts` | Create | Edge function to call VPS and return box data |
-| `src/utils/pdf/thumbnailUtils.ts` | Modify | Update validation to use TrimBox when available |
-| `src/components/labels/items/LabelItemsDropZone.tsx` | Modify | Call page-boxes endpoint after upload |
-| `src/components/labels/items/LabelItemCard.tsx` | Modify | Display box information in UI |
-| `src/types/labels.ts` | Modify | Add box types to PreflightReport interface |
+Make sure your VPS has these packages:
+```
+pikepdf>=8.0.0
+httpx>=0.25.0
+```
 
 ---
 
-## Next Step Required
+### Expected Response for Your Test PDF
 
-Before I can implement the client-side changes, the VPS endpoint needs to be created. Please confirm:
+For a PDF with:
+- MediaBox: 349.61 x 207.81 pt (123.28 x 73.28 mm - full page with bleed)
+- TrimBox: 283.46 x 141.73 pt (100 x 50 mm - actual label size)
 
-1. Can you add the `/page-boxes` endpoint to your Python FastAPI server?
-2. Or would you like me to update the existing `/preflight` endpoint specification?
+The endpoint should return:
+```json
+{
+  "mediabox": { "x1": 0, "y1": 0, "x2": 349.61, "y2": 207.81, "width": 349.61, "height": 207.81 },
+  "cropbox": null,
+  "bleedbox": null,
+  "trimbox": { "x1": 33.07, "y1": 33.04, "x2": 316.53, "y2": 174.77, "width": 283.46, "height": 141.73 },
+  "artbox": null
+}
+```
 
-Once the VPS endpoint is available, I'll implement all the edge function and client-side changes.
+---
 
+### Testing the Endpoint
+
+After adding the endpoint, you can test it with:
+
+```bash
+curl -X POST https://pdf-api.jaimar.dev/page-boxes \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{"pdf_url": "https://kgizusgqexmlfcqfjopk.supabase.co/storage/v1/object/public/label-files/label-artwork/orders/b95f5c33-39f7-4811-acc4-7f21f509da82/1770554784133-Eazi_Tool_BROWN__3300__.pdf"}'
+```
+
+---
+
+## No Lovable Code Changes Required
+
+The edge function `label-page-boxes` is already correctly implemented and waiting for this VPS endpoint. Once you deploy the `/page-boxes` endpoint on your VPS:
+
+1. The edge function will call it successfully
+2. It will return TrimBox dimensions (100 x 50mm)
+3. The UI will show "Passed" instead of "Too Large"
+
+---
+
+## Summary
+
+| Component | Status | Action |
+|-----------|--------|--------|
+| Edge Function `label-page-boxes` | Ready | No changes needed |
+| VPS `/page-boxes` endpoint | Missing (404) | Add the Python code above |
+| Frontend validation | Ready | Will auto-use TrimBox when available |
+| UI display | Ready | Shows TrimBox indicator when detected |
+
+**Next Step**: Add the `/page-boxes` endpoint to your VPS and test it. Let me know when it's deployed and I can verify it works end-to-end.
