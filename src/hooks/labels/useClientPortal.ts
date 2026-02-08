@@ -274,9 +274,9 @@ export function useCreateLabelCustomer() {
           company_name: input.company_name,
           billing_address: input.billing_address || null,
           notes: input.notes || null,
-          // These are now optional/legacy - contacts are separate
-          user_id: user?.id || '',
-          contact_email: '',
+          // user_id is NULL for company records - only contacts have user_id
+          user_id: null,
+          contact_email: null,
           created_by: user?.id,
         })
         .select()
@@ -291,6 +291,73 @@ export function useCreateLabelCustomer() {
     },
     onError: (error) => {
       toast.error(`Failed to create customer: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Update an existing customer (admin only)
+ */
+export function useUpdateLabelCustomer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      company_name?: string;
+      billing_address?: string | null;
+      notes?: string | null;
+      is_active?: boolean;
+    }): Promise<LabelCustomer> => {
+      const { id, ...updates } = input;
+      
+      const { data, error } = await supabase
+        .from('label_customers')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as unknown as LabelCustomer;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CUSTOMER_QUERY_KEY });
+      toast.success('Customer updated');
+    },
+    onError: (error) => {
+      toast.error(`Failed to update customer: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Archive a customer (soft delete - sets is_active = false)
+ */
+export function useArchiveLabelCustomer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (customerId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('label_customers')
+        .update({
+          is_active: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', customerId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CUSTOMER_QUERY_KEY });
+      toast.success('Customer archived');
+    },
+    onError: (error) => {
+      toast.error(`Failed to archive customer: ${error.message}`);
     },
   });
 }

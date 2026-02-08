@@ -4903,7 +4903,7 @@ export type Database = {
         | { Args: { _user_id: string }; Returns: boolean }
       is_admin_simple: { Args: never; Returns: boolean }
       is_hp12000_stage: { Args: { stage_name: string }; Returns: boolean }
-      is_label_client: { Args: { check_user_id?: string }; Returns: boolean }
+      is_label_client: { Args: { check_user_id: string }; Returns: boolean }
       is_public_holiday: { Args: { check_date: string }; Returns: boolean }
       is_user_admin:
         | { Args: never; Returns: boolean }
