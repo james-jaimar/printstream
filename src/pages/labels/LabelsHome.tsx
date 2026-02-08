@@ -7,13 +7,13 @@ import {
   Tag, 
   Package, 
   Calendar, 
-  Plus,
   AlertTriangle,
   TrendingUp,
   Clock
 } from 'lucide-react';
 import { useLabelOrders } from '@/hooks/labels/useLabelOrders';
 import { useLabelStock, useLowStockAlerts } from '@/hooks/labels/useLabelStock';
+import { NewLabelOrderDialog } from '@/components/labels/NewLabelOrderDialog';
 
 export default function LabelsHome() {
   const { data: orders, isLoading: ordersLoading } = useLabelOrders();
@@ -71,12 +71,9 @@ export default function LabelsHome() {
             Manage label orders, dielines, stock, and production schedule
           </p>
         </div>
-        <Button asChild>
-          <Link to="/labels/orders/new">
-            <Plus className="h-4 w-4 mr-2" />
-            New Order
-          </Link>
-        </Button>
+        <NewLabelOrderDialog 
+          onSuccess={(orderId) => window.location.href = `/labels/orders/${orderId}`} 
+        />
       </div>
 
       {/* Stats Grid */}

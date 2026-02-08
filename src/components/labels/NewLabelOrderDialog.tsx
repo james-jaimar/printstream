@@ -41,9 +41,11 @@ import { cn } from '@/lib/utils';
 import { useCreateLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { useLabelDielines } from '@/hooks/labels/useLabelDielines';
 import { useLabelStock } from '@/hooks/labels/useLabelStock';
+import { useLabelCustomers } from '@/hooks/labels/useClientPortal';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
 
 const formSchema = z.object({
+  customer_id: z.string().optional(),
   customer_name: z.string().min(1, 'Customer name is required'),
   contact_name: z.string().optional(),
   contact_email: z.string().email().optional().or(z.literal('')),
@@ -66,6 +68,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
   const createOrder = useCreateLabelOrder();
   const { data: dielines } = useLabelDielines();
   const { data: stock } = useLabelStock();
+  const { data: customers } = useLabelCustomers();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -127,13 +130,33 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
-                  name="customer_name"
+                  name="customer_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Customer Name *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Company name" {...field} />
-                      </FormControl>
+                      <FormLabel>Customer *</FormLabel>
+                      <Select 
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          const customer = customers?.find(c => c.id === value);
+                          if (customer) {
+                            form.setValue('customer_name', customer.company_name);
+                          }
+                        }} 
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select customer" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {customers?.filter(c => c.is_active).map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              {customer.company_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -153,6 +176,15 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                   )}
                 />
               </div>
+
+              {/* Hidden field for customer_name - populated from selection */}
+              <FormField
+                control={form.control}
+                name="customer_name"
+                render={({ field }) => (
+                  <input type="hidden" {...field} />
+                )}
+              />
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField
