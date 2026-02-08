@@ -61,3 +61,7 @@ verify_jwt = false
 [functions.label-optimize]
 verify_jwt = false
 
+# LABELS DIVISION: Page Boxes Extraction
+[functions.label-page-boxes]
+verify_jwt = false
+

@@ -67,7 +67,48 @@ export async function runBatchPreflight(
 }
 
 // ============================================================================
-// CMYK CONVERSION SERVICE
+// PAGE BOXES SERVICE (TrimBox, BleedBox, etc.)
+// ============================================================================
+
+export interface PageBoxesMm {
+  width_mm: number;
+  height_mm: number;
+}
+
+export interface PageBoxesResponse {
+  success: boolean;
+  item_id?: string;
+  boxes: {
+    mediabox: PageBoxesMm | null;
+    cropbox: PageBoxesMm | null;
+    bleedbox: PageBoxesMm | null;
+    trimbox: PageBoxesMm | null;
+    artbox: PageBoxesMm | null;
+  };
+  primary_box: "trimbox" | "mediabox";
+  dimensions_mm: PageBoxesMm;
+  error?: string;
+}
+
+/**
+ * Get PDF page boxes (TrimBox, BleedBox, ArtBox) from VPS
+ * This returns the actual trim dimensions for accurate validation
+ */
+export async function getPageBoxes(
+  pdfUrl: string,
+  itemId?: string
+): Promise<PageBoxesResponse> {
+  const { data, error } = await supabase.functions.invoke("label-page-boxes", {
+    body: { pdf_url: pdfUrl, item_id: itemId },
+  });
+
+  if (error) {
+    console.error("Page boxes error:", error);
+    throw new Error(`Page boxes extraction failed: ${error.message}`);
+  }
+
+  return data as PageBoxesResponse;
+}
 // ============================================================================
 
 export interface CmykConversionRequest {

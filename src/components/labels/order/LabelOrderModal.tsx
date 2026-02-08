@@ -26,8 +26,9 @@ import { LabelItemsDropZone } from '../items/LabelItemsDropZone';
 import { LabelItemsGrid } from '../items/LabelItemsGrid';
 import { LabelRunsCard } from '../LabelRunsCard';
 import { LayoutOptimizer } from '../LayoutOptimizer';
-import { runPreflight } from '@/services/labels/vpsApiService';
-import type { LabelOrderStatus } from '@/types/labels';
+import { runPreflight, getPageBoxes } from '@/services/labels/vpsApiService';
+import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
+import type { LabelOrderStatus, PreflightReport, PdfBoxes } from '@/types/labels';
 
 const statusConfig: Record<LabelOrderStatus, { 
   label: string; 
@@ -91,25 +92,77 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           }));
         }
 
-        // Trigger async VPS preflight for deep analysis (fonts, DPI, color spaces)
+        // Fire async VPS calls for accurate analysis
         if (result.artwork_pdf_url) {
+          // 1. Get page boxes (TrimBox, BleedBox) for accurate dimension validation
+          getPageBoxes(result.artwork_pdf_url, result.id)
+            .then(boxResult => {
+              console.log('VPS page boxes complete for item:', result.id, boxResult);
+              
+              if (boxResult.success && order?.dieline) {
+                // Re-validate with TrimBox if available
+                const isTrimBox = boxResult.primary_box === 'trimbox';
+                const dims = boxResult.dimensions_mm;
+                
+                const validation = validatePdfDimensions(
+                  dims.width_mm,
+                  dims.height_mm,
+                  order.dieline.label_width_mm,
+                  order.dieline.label_height_mm,
+                  order.dieline.bleed_left_mm ?? 1.5,
+                  order.dieline.bleed_right_mm ?? 1.5,
+                  order.dieline.bleed_top_mm ?? 1.5,
+                  order.dieline.bleed_bottom_mm ?? 1.5,
+                  1.0,
+                  isTrimBox
+                );
+                
+                // Update item with accurate dimensions and box data
+                const updatedReport = {
+                  boxes: boxResult.boxes,
+                  primary_box: boxResult.primary_box,
+                  has_bleed: validation.status === 'passed' || validation.status === 'needs_crop',
+                  warnings: validation.issues.length > 0 && validation.preflightStatus !== 'failed' 
+                    ? validation.issues : undefined,
+                  errors: validation.preflightStatus === 'failed' ? validation.issues : undefined,
+                } as Record<string, unknown>;
+                
+                updateItem.mutate({
+                  id: result.id,
+                  updates: {
+                    width_mm: dims.width_mm,
+                    height_mm: dims.height_mm,
+                    preflight_status: validation.preflightStatus,
+                    preflight_report: updatedReport,
+                  }
+                });
+              }
+            })
+            .catch(err => {
+              console.warn('VPS page boxes failed, keeping client validation:', err);
+            });
+
+          // 2. Deep preflight analysis (fonts, DPI, color spaces)
           runPreflight({ 
             pdf_url: result.artwork_pdf_url, 
             item_id: result.id 
           })
             .then(preflightResult => {
               console.log('VPS preflight complete for item:', result.id, preflightResult);
-              updateItem.mutate({
-                id: result.id,
-                updates: {
-                  preflight_status: preflightResult.status,
-                  preflight_report: preflightResult.report as Record<string, unknown>,
-                }
-              });
+              // Only update if we got useful data (fonts, images, etc.)
+              if (preflightResult.report && Object.keys(preflightResult.report).length > 0) {
+                updateItem.mutate({
+                  id: result.id,
+                  updates: {
+                    is_cmyk: preflightResult.report.has_cmyk,
+                    min_dpi: preflightResult.report.min_dpi,
+                    has_bleed: preflightResult.report.has_bleed,
+                  }
+                });
+              }
             })
             .catch(err => {
               console.warn('VPS preflight failed, keeping client validation:', err);
-              // Keep existing client-side validation status
             });
         }
       } catch (error) {
