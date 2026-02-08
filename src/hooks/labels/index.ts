@@ -7,3 +7,4 @@ export * from './useLabelRuns';
 export * from './useLayoutOptimizer';
 export * from './useLabelImport';
 export * from './useLabelSchedule';
+export * from './useClientPortal';
