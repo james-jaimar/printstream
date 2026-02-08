@@ -8,3 +8,4 @@ export * from './useLayoutOptimizer';
 export * from './useLabelImport';
 export * from './useLabelSchedule';
 export * from './useClientPortal';
+export * from './useLabelNotifications';

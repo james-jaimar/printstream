@@ -95,7 +95,7 @@ import BackfillPaperSpecs from "@/pages/BackfillPaperSpecs";
 
 // Labels Division imports
 import LabelsLayout from "@/components/labels/LabelsLayout";
-import { LabelsHome, LabelsOrders, LabelsOrderDetail, LabelsDielines, LabelsStock, LabelsSchedule, LabelsSettings } from "@/pages/labels";
+import { LabelsHome, LabelsOrders, LabelsOrderDetail, LabelsDielines, LabelsStock, LabelsSchedule, LabelsSettings, LabelsReporting } from "@/pages/labels";
 import { ClientPortalLogin, ClientPortalDashboard, ClientOrderDetail } from "@/pages/labels/portal";
 
 // Removed legacy test components
@@ -253,6 +253,7 @@ function App() {
                   <Route path="stock" element={<LabelsStock />} />
                   <Route path="schedule" element={<LabelsSchedule />} />
                   <Route path="settings" element={<LabelsSettings />} />
+                  <Route path="reports" element={<LabelsReporting />} />
                 </Route>
                 
                 {/* Labels Client Portal - separate from admin area */}
