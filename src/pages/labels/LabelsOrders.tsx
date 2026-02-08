@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,8 +19,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Plus, Search, Filter, Eye, Upload } from 'lucide-react';
+import { Search, Filter, Eye, Upload } from 'lucide-react';
 import { useLabelOrders } from '@/hooks/labels/useLabelOrders';
+import { NewLabelOrderDialog } from '@/components/labels/NewLabelOrderDialog';
 import { format } from 'date-fns';
 import type { LabelOrderStatus } from '@/types/labels';
 
@@ -46,6 +47,7 @@ const statusColors: Record<LabelOrderStatus, string> = {
 export default function LabelsOrders() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
+  const navigate = useNavigate();
   
   const statusFilter = (searchParams.get('status') as LabelOrderStatus | null) || undefined;
   const { data: orders, isLoading } = useLabelOrders(statusFilter);
@@ -80,18 +82,13 @@ export default function LabelsOrders() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <Link to="/labels/orders/import">
-              <Upload className="h-4 w-4 mr-2" />
-              Import from Quickeasy
-            </Link>
+          <Button variant="outline">
+            <Upload className="h-4 w-4 mr-2" />
+            Import from Quickeasy
           </Button>
-          <Button asChild>
-            <Link to="/labels/orders/new">
-              <Plus className="h-4 w-4 mr-2" />
-              New Order
-            </Link>
-          </Button>
+          <NewLabelOrderDialog 
+            onSuccess={(orderId) => navigate(`/labels/orders/${orderId}`)} 
+          />
         </div>
       </div>
 
