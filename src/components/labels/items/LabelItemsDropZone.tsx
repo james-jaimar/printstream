@@ -3,19 +3,31 @@ import { Upload, FileText, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { generatePdfThumbnail, dataUrlToBlob } from '@/utils/pdf/thumbnailUtils';
+import { 
+  generatePdfThumbnail, 
+  dataUrlToBlob, 
+  getPdfDimensionsMm,
+  validatePdfDimensions,
+  type ValidationResult 
+} from '@/utils/pdf/thumbnailUtils';
 import type { LabelDieline } from '@/types/labels';
 
 interface UploadingFile {
   file: File;
-  progress: 'uploading' | 'generating_thumbnail' | 'analyzing' | 'complete' | 'error';
+  progress: 'uploading' | 'generating_thumbnail' | 'validating' | 'complete' | 'error';
   error?: string;
 }
 
 interface LabelItemsDropZoneProps {
   orderId: string;
   dieline: LabelDieline | null;
-  onFilesUploaded: (files: { url: string; name: string; thumbnailUrl?: string; analysis?: unknown }[]) => void;
+  onFilesUploaded: (files: { 
+    url: string; 
+    name: string; 
+    thumbnailUrl?: string; 
+    preflightStatus?: 'pending' | 'passed' | 'failed' | 'warnings';
+    analysis?: unknown;
+  }[]) => void;
   disabled?: boolean;
 }
 
@@ -80,7 +92,13 @@ export function LabelItemsDropZone({
     // Initialize uploading state
     setUploadingFiles(files.map(file => ({ file, progress: 'uploading' })));
 
-    const uploadedFiles: { url: string; name: string; thumbnailUrl?: string; analysis?: unknown }[] = [];
+    const uploadedFiles: { 
+      url: string; 
+      name: string; 
+      thumbnailUrl?: string; 
+      preflightStatus?: 'pending' | 'passed' | 'failed' | 'warnings';
+      analysis?: unknown;
+    }[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -131,40 +149,52 @@ export function LabelItemsDropZone({
           // Continue without thumbnail
         }
 
-        // Update progress to analyzing
+        // Update progress to validating
         setUploadingFiles(prev => 
           prev.map((uf, idx) => 
-            idx === i ? { ...uf, progress: 'analyzing' } : uf
+            idx === i ? { ...uf, progress: 'validating' } : uf
           )
         );
 
-        // Analyze PDF if dieline is selected
-        let analysis;
+        // Client-side PDF dimension validation
+        let preflightStatus: 'pending' | 'passed' | 'failed' | 'warnings' = 'pending';
+        let validation: ValidationResult | undefined;
+        
         if (dieline) {
           try {
-            const { data, error } = await supabase.functions.invoke('label-pdf-analyze', {
-              body: {
-                pdf_url: publicUrl,
-                expected_trim_width_mm: dieline.label_width_mm,
-                expected_trim_height_mm: dieline.label_height_mm,
-                expected_bleed_left_mm: dieline.bleed_left_mm ?? 1.5,
-                expected_bleed_right_mm: dieline.bleed_right_mm ?? 1.5,
-                expected_bleed_top_mm: dieline.bleed_top_mm ?? 1.5,
-                expected_bleed_bottom_mm: dieline.bleed_bottom_mm ?? 1.5,
-                tolerance_mm: 1.0,
-              },
-            });
-
-            if (!error && data?.success) {
-              analysis = data;
+            const dimensions = await getPdfDimensionsMm(file);
+            validation = validatePdfDimensions(
+              dimensions.width_mm,
+              dimensions.height_mm,
+              dieline.label_width_mm,
+              dieline.label_height_mm,
+              dieline.bleed_left_mm ?? 1.5,
+              dieline.bleed_right_mm ?? 1.5,
+              dieline.bleed_top_mm ?? 1.5,
+              dieline.bleed_bottom_mm ?? 1.5,
+              1.0
+            );
+            preflightStatus = validation.preflightStatus;
+            
+            // Show toast for validation issues
+            if (validation.status !== 'passed') {
+              toast.info(`${file.name}: ${validation.issues[0]}`, {
+                duration: 4000,
+              });
             }
-          } catch (analyzeError) {
-            console.warn('PDF analysis failed:', analyzeError);
-            // Continue without analysis - don't block upload
+          } catch (validationError) {
+            console.warn('PDF validation failed:', validationError);
+            // Leave as pending if validation fails
           }
         }
 
-        uploadedFiles.push({ url: publicUrl, name: file.name, thumbnailUrl, analysis });
+        uploadedFiles.push({ 
+          url: publicUrl, 
+          name: file.name, 
+          thumbnailUrl, 
+          preflightStatus,
+          analysis: validation ? { validation } : undefined,
+        });
 
         // Mark as complete
         setUploadingFiles(prev => 
@@ -194,7 +224,7 @@ export function LabelItemsDropZone({
   };
 
   const isProcessing = uploadingFiles.some(f => 
-    f.progress === 'uploading' || f.progress === 'generating_thumbnail' || f.progress === 'analyzing'
+    f.progress === 'uploading' || f.progress === 'generating_thumbnail' || f.progress === 'validating'
   );
   return (
     <div className="space-y-4">
@@ -227,8 +257,8 @@ export function LabelItemsDropZone({
               <p className="font-medium">Processing {uploadingFiles.length} file(s)...</p>
               <p className="text-sm text-muted-foreground">
                 {uploadingFiles.filter(f => f.progress === 'uploading').length > 0 && 'Uploading... '}
-                {uploadingFiles.filter(f => f.progress === 'generating_thumbnail').length > 0 && 'Generating thumbnails... '}
-                {uploadingFiles.filter(f => f.progress === 'analyzing').length > 0 && 'Analyzing PDFs...'}
+                {uploadingFiles.filter(f => f.progress === 'generating_thumbnail').length > 0 && 'Generating previews... '}
+                {uploadingFiles.filter(f => f.progress === 'validating').length > 0 && 'Validating dimensions...'}
               </p>
             </div>
           </>
@@ -266,10 +296,10 @@ export function LabelItemsDropZone({
                 "flex items-center gap-3 p-3 rounded-lg border text-sm",
                 uf.progress === 'error' && "border-destructive bg-destructive/10",
                 uf.progress === 'complete' && "border-primary bg-primary/10",
-                (uf.progress === 'uploading' || uf.progress === 'analyzing') && "border-accent bg-accent/10"
+                (uf.progress === 'uploading' || uf.progress === 'validating') && "border-accent bg-accent/10"
               )}
             >
-              {uf.progress === 'uploading' || uf.progress === 'generating_thumbnail' || uf.progress === 'analyzing' ? (
+              {uf.progress === 'uploading' || uf.progress === 'generating_thumbnail' || uf.progress === 'validating' ? (
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
               ) : uf.progress === 'complete' ? (
                 <div className="h-4 w-4 rounded-full bg-primary flex items-center justify-center">
@@ -283,7 +313,7 @@ export function LabelItemsDropZone({
               <span className="flex-1 truncate">{uf.file.name}</span>
               <span className="text-muted-foreground capitalize">
                 {uf.progress === 'generating_thumbnail' ? 'Generating preview...' : 
-                 uf.progress === 'analyzing' ? 'Analyzing...' : uf.progress}
+                 uf.progress === 'validating' ? 'Validating...' : uf.progress}
               </span>
             </div>
           ))}

@@ -269,8 +269,10 @@ export interface CreateLabelItemInput {
   name: string;
   quantity: number;
   artwork_pdf_url?: string;
+  artwork_thumbnail_url?: string;
   width_mm?: number;
   height_mm?: number;
+  preflight_status?: PreflightStatus;
   notes?: string;
 }
 

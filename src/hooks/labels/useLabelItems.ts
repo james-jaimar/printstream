@@ -74,10 +74,11 @@ export function useCreateLabelItem() {
           name: input.name,
           quantity: input.quantity,
           artwork_pdf_url: input.artwork_pdf_url,
+          artwork_thumbnail_url: input.artwork_thumbnail_url,
           width_mm: input.width_mm,
           height_mm: input.height_mm,
           notes: input.notes,
-          preflight_status: 'pending',
+          preflight_status: input.preflight_status || 'pending',
         })
         .select()
         .single();

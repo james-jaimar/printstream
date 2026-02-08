@@ -114,3 +114,104 @@ export async function getPdfDimensionsMm(file: File): Promise<{ width_mm: number
     height_mm: viewport.height * PT_TO_MM,
   };
 }
+
+/**
+ * Validation result from PDF dimension check
+ */
+export interface ValidationResult {
+  status: 'passed' | 'no_bleed' | 'too_large' | 'too_small' | 'needs_crop';
+  preflightStatus: 'passed' | 'warnings' | 'failed';
+  issues: string[];
+  actual_width_mm: number;
+  actual_height_mm: number;
+  expected_width_mm: number;
+  expected_height_mm: number;
+  can_auto_crop: boolean;
+}
+
+/**
+ * Validate PDF dimensions against expected dieline specs
+ * @param actualWidth - Actual PDF width in mm
+ * @param actualHeight - Actual PDF height in mm
+ * @param expectedTrimWidth - Expected trim width in mm
+ * @param expectedTrimHeight - Expected trim height in mm
+ * @param bleedLeft - Left bleed in mm
+ * @param bleedRight - Right bleed in mm
+ * @param bleedTop - Top bleed in mm
+ * @param bleedBottom - Bottom bleed in mm
+ * @param toleranceMm - Tolerance in mm (default 1.0)
+ * @returns ValidationResult with status and issues
+ */
+export function validatePdfDimensions(
+  actualWidth: number,
+  actualHeight: number,
+  expectedTrimWidth: number,
+  expectedTrimHeight: number,
+  bleedLeft: number = 1.5,
+  bleedRight: number = 1.5,
+  bleedTop: number = 1.5,
+  bleedBottom: number = 1.5,
+  toleranceMm: number = 1.0
+): ValidationResult {
+  const expectedWidthWithBleed = expectedTrimWidth + bleedLeft + bleedRight;
+  const expectedHeightWithBleed = expectedTrimHeight + bleedTop + bleedBottom;
+  
+  const issues: string[] = [];
+  let status: ValidationResult['status'] = 'passed';
+  let can_auto_crop = false;
+
+  const widthDiff = actualWidth - expectedWidthWithBleed;
+  const heightDiff = actualHeight - expectedHeightWithBleed;
+  
+  const widthDiffFromTrim = actualWidth - expectedTrimWidth;
+  const heightDiffFromTrim = actualHeight - expectedTrimHeight;
+
+  // Check if it matches with bleed (within tolerance)
+  if (Math.abs(widthDiff) <= toleranceMm && Math.abs(heightDiff) <= toleranceMm) {
+    status = 'passed';
+  }
+  // Check if it matches trim size exactly (no bleed)
+  else if (Math.abs(widthDiffFromTrim) <= toleranceMm && Math.abs(heightDiffFromTrim) <= toleranceMm) {
+    status = 'no_bleed';
+    issues.push(`PDF is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm (trim size only, no bleed)`);
+    issues.push(`Expected ${expectedWidthWithBleed.toFixed(1)}×${expectedHeightWithBleed.toFixed(1)}mm with bleed`);
+  }
+  // Check if too large but can be cropped
+  else if (widthDiff > toleranceMm || heightDiff > toleranceMm) {
+    if (widthDiff <= 10 && heightDiff <= 10) {
+      status = 'needs_crop';
+      can_auto_crop = true;
+      issues.push(`PDF is ${(widthDiff).toFixed(1)}mm wider and ${(heightDiff).toFixed(1)}mm taller than expected`);
+      issues.push('Can be auto-cropped to fit');
+    } else {
+      status = 'too_large';
+      issues.push(`PDF is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
+      issues.push(`Expected ${expectedWidthWithBleed.toFixed(1)}×${expectedHeightWithBleed.toFixed(1)}mm`);
+      issues.push('Too large to auto-crop safely');
+    }
+  }
+  // Too small
+  else {
+    status = 'too_small';
+    issues.push(`PDF is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
+    issues.push(`Expected ${expectedWidthWithBleed.toFixed(1)}×${expectedHeightWithBleed.toFixed(1)}mm with bleed`);
+    issues.push('Artwork is too small');
+  }
+
+  // Map status to preflight status
+  const preflightStatus: ValidationResult['preflightStatus'] = 
+    status === 'passed' ? 'passed' :
+    status === 'needs_crop' || status === 'no_bleed' ? 'warnings' :
+    'failed';
+
+  return {
+    status,
+    preflightStatus,
+    issues,
+    actual_width_mm: actualWidth,
+    actual_height_mm: actualHeight,
+    expected_width_mm: expectedWidthWithBleed,
+    expected_height_mm: expectedHeightWithBleed,
+    can_auto_crop,
+  };
+}
