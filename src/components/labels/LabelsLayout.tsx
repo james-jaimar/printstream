@@ -9,7 +9,8 @@ import {
   Settings,
   ChevronLeft,
   Boxes,
-  BarChart3
+  BarChart3,
+  Building2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -26,6 +27,11 @@ const navItems = [
     to: '/labels/orders', 
     label: 'Orders', 
     icon: ClipboardList 
+  },
+  { 
+    to: '/labels/customers', 
+    label: 'Customers', 
+    icon: Building2 
   },
   { 
     to: '/labels/dielines', 

@@ -1207,6 +1207,68 @@ export type Database = {
           },
         ]
       }
+      label_customer_contacts: {
+        Row: {
+          can_approve_proofs: boolean | null
+          created_at: string
+          customer_id: string
+          email: string
+          id: string
+          is_active: boolean | null
+          is_primary: boolean | null
+          name: string
+          notes: string | null
+          phone: string | null
+          receives_notifications: boolean | null
+          receives_proofs: boolean | null
+          role: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          can_approve_proofs?: boolean | null
+          created_at?: string
+          customer_id: string
+          email: string
+          id?: string
+          is_active?: boolean | null
+          is_primary?: boolean | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          receives_notifications?: boolean | null
+          receives_proofs?: boolean | null
+          role?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          can_approve_proofs?: boolean | null
+          created_at?: string
+          customer_id?: string
+          email?: string
+          id?: string
+          is_active?: boolean | null
+          is_primary?: boolean | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          receives_notifications?: boolean | null
+          receives_proofs?: boolean | null
+          role?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_customer_contacts_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "label_customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       label_customers: {
         Row: {
           billing_address: string | null
