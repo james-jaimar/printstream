@@ -61,6 +61,13 @@ export function RunLayoutDiagram({
     slotMap.set(assignment.slot, assignment);
   });
 
+  // Detect single-item runs - these use ALL slots for the same item
+  const isSingleItemRun = slotAssignments.length === 1;
+  const singleItemAssignment = isSingleItemRun ? slotAssignments[0] : null;
+  const singleItem = singleItemAssignment 
+    ? items.find(i => i.id === singleItemAssignment.item_id) 
+    : null;
+
   const columnsAcross = dieline.columns_across;
   const rowsAround = dieline.rows_around;
 
@@ -158,8 +165,9 @@ export function RunLayoutDiagram({
                     >
                       {Array.from({ length: columnsAcross * rowsAround }).map((_, cellIndex) => {
                         const slotNumber = cellIndex % columnsAcross;
-                        const assignment = slotMap.get(slotNumber);
-                        const item = assignment ? items.find(i => i.id === assignment.item_id) : null;
+                        // For single-item runs, ALL slots use the same item
+                        const assignment = isSingleItemRun ? singleItemAssignment : slotMap.get(slotNumber);
+                        const item = isSingleItemRun ? singleItem : (assignment ? items.find(i => i.id === assignment.item_id) : null);
                         const colors = item ? itemColorMap.get(item.id) : null;
                         const isFirstRow = Math.floor(cellIndex / columnsAcross) === 0;
 
@@ -170,14 +178,14 @@ export function RunLayoutDiagram({
                                 className={cn(
                                   "rounded transition-all flex items-center justify-center border",
                                   compact ? "min-h-[24px] text-[9px]" : "min-h-[32px] text-xs",
-                                  assignment && colors
+                                  item && colors
                                     ? cn(colors.bg, colors.text, colors.border)
                                     : "bg-muted border-dashed border-muted-foreground/30"
                                 )}
                               >
-                                {assignment ? (
+                                {item ? (
                                   <span className="font-medium truncate px-1">
-                                    {isFirstRow ? `S${slotNumber + 1}` : ''}
+                                    {isFirstRow ? (isSingleItemRun ? item.name.substring(0, 8) : `S${slotNumber + 1}`) : ''}
                                   </span>
                                 ) : (
                                   <span className="text-muted-foreground/50">
@@ -187,11 +195,14 @@ export function RunLayoutDiagram({
                               </div>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="max-w-xs">
-                              {assignment && item ? (
+                              {item && assignment ? (
                                 <div className="text-sm">
                                   <p className="font-medium">{item.name}</p>
                                   <p className="text-muted-foreground">
-                                    Slot {slotNumber + 1} • {assignment.quantity_in_slot.toLocaleString()} labels
+                                    {isSingleItemRun 
+                                      ? `Full roll • ${assignment.quantity_in_slot.toLocaleString()} labels total`
+                                      : `Slot ${slotNumber + 1} • ${assignment.quantity_in_slot.toLocaleString()} labels`
+                                    }
                                   </p>
                                 </div>
                               ) : (
@@ -234,20 +245,29 @@ export function RunLayoutDiagram({
             <div className="mt-4 pt-3 border-t">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-muted-foreground">Legend:</span>
-                {slotAssignments.map((assignment) => {
-                  const item = items.find(i => i.id === assignment.item_id);
-                  const colors = item ? itemColorMap.get(item.id) : null;
-                  if (!item || !colors) return null;
-                  
-                  return (
-                    <div key={assignment.slot} className="flex items-center gap-1.5">
-                      <div className={cn("w-3 h-3 rounded", colors.bg)} />
-                      <span className="text-xs">
-                        S{assignment.slot + 1}: {item.name} ({assignment.quantity_in_slot.toLocaleString()})
-                      </span>
-                    </div>
-                  );
-                })}
+                {isSingleItemRun && singleItem && singleItemAssignment ? (
+                  <div className="flex items-center gap-1.5">
+                    <div className={cn("w-3 h-3 rounded", itemColorMap.get(singleItem.id)?.bg)} />
+                    <span className="text-xs">
+                      {singleItem.name} (Full roll • {singleItemAssignment.quantity_in_slot.toLocaleString()} labels)
+                    </span>
+                  </div>
+                ) : (
+                  slotAssignments.map((assignment) => {
+                    const item = items.find(i => i.id === assignment.item_id);
+                    const colors = item ? itemColorMap.get(item.id) : null;
+                    if (!item || !colors) return null;
+                    
+                    return (
+                      <div key={assignment.slot} className="flex items-center gap-1.5">
+                        <div className={cn("w-3 h-3 rounded", colors.bg)} />
+                        <span className="text-xs">
+                          S{assignment.slot + 1}: {item.name} ({assignment.quantity_in_slot.toLocaleString()})
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
