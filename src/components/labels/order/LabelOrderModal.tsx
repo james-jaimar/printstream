@@ -21,11 +21,12 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useLabelOrder } from '@/hooks/labels/useLabelOrders';
-import { useCreateLabelItem } from '@/hooks/labels/useLabelItems';
+import { useCreateLabelItem, useUpdateLabelItem } from '@/hooks/labels/useLabelItems';
 import { LabelItemsDropZone } from '../items/LabelItemsDropZone';
 import { LabelItemsGrid } from '../items/LabelItemsGrid';
 import { LabelRunsCard } from '../LabelRunsCard';
 import { LayoutOptimizer } from '../LayoutOptimizer';
+import { runPreflight } from '@/services/labels/vpsApiService';
 import type { LabelOrderStatus } from '@/types/labels';
 
 const statusConfig: Record<LabelOrderStatus, { 
@@ -50,6 +51,7 @@ interface LabelOrderModalProps {
 export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModalProps) {
   const { data: order, isLoading, error, refetch } = useLabelOrder(orderId);
   const createItem = useCreateLabelItem();
+  const updateItem = useUpdateLabelItem();
   const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
 
@@ -88,11 +90,33 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             },
           }));
         }
+
+        // Trigger async VPS preflight for deep analysis (fonts, DPI, color spaces)
+        if (result.artwork_pdf_url) {
+          runPreflight({ 
+            pdf_url: result.artwork_pdf_url, 
+            item_id: result.id 
+          })
+            .then(preflightResult => {
+              console.log('VPS preflight complete for item:', result.id, preflightResult);
+              updateItem.mutate({
+                id: result.id,
+                updates: {
+                  preflight_status: preflightResult.status,
+                  preflight_report: preflightResult.report as Record<string, unknown>,
+                }
+              });
+            })
+            .catch(err => {
+              console.warn('VPS preflight failed, keeping client validation:', err);
+              // Keep existing client-side validation status
+            });
+        }
       } catch (error) {
         console.error('Error creating label item:', error);
       }
     }
-  }, [order, createItem]);
+  }, [order, createItem, updateItem]);
 
   if (!open) return null;
 
