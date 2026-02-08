@@ -161,6 +161,39 @@ export function LayoutOptimizer({
           </div>
         )}
 
+        {/* Selected Layout Preview */}
+        {selectedOption && dieline && (
+          <Collapsible open={showPreview} onOpenChange={setShowPreview}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm" className="w-full justify-between">
+                <span className="flex items-center gap-2">
+                  <LayoutGrid className="h-4 w-4" />
+                  Preview Layout Diagram
+                </span>
+                {showPreview ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-4">
+              <ScrollArea className="max-h-[400px]">
+                <div className="space-y-4">
+                  {selectedOption.runs.map((run, idx) => (
+                    <RunLayoutDiagram
+                      key={idx}
+                      runNumber={run.run_number}
+                      slotAssignments={run.slot_assignments}
+                      dieline={dieline}
+                      items={items}
+                      meters={run.meters}
+                      frames={run.frames}
+                      showStats={true}
+                    />
+                  ))}
+                </div>
+              </ScrollArea>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
         {/* Summary & Apply */}
         {summary && selectedOption && (
           <div className="border-t pt-4 space-y-4">
