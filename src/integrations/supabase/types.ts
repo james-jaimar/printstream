@@ -1316,6 +1316,10 @@ export type Database = {
       }
       label_dielines: {
         Row: {
+          bleed_bottom_mm: number | null
+          bleed_left_mm: number | null
+          bleed_right_mm: number | null
+          bleed_top_mm: number | null
           columns_across: number
           corner_radius_mm: number | null
           created_at: string
@@ -1334,6 +1338,10 @@ export type Database = {
           vertical_gap_mm: number
         }
         Insert: {
+          bleed_bottom_mm?: number | null
+          bleed_left_mm?: number | null
+          bleed_right_mm?: number | null
+          bleed_top_mm?: number | null
           columns_across?: number
           corner_radius_mm?: number | null
           created_at?: string
@@ -1352,6 +1360,10 @@ export type Database = {
           vertical_gap_mm?: number
         }
         Update: {
+          bleed_bottom_mm?: number | null
+          bleed_left_mm?: number | null
+          bleed_right_mm?: number | null
+          bleed_top_mm?: number | null
           columns_across?: number
           corner_radius_mm?: number | null
           created_at?: string

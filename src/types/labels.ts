@@ -83,6 +83,11 @@ export interface LabelDieline {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Bleed specifications for asymmetric bleed support
+  bleed_left_mm: number | null;
+  bleed_right_mm: number | null;
+  bleed_top_mm: number | null;
+  bleed_bottom_mm: number | null;
 }
 
 export interface LabelStock {
