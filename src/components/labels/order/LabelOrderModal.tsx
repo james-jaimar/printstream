@@ -19,7 +19,8 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
+import { VisuallyHidden } from '@/components/ui/visually-hidden';
 import { useLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { useCreateLabelItem, useUpdateLabelItem } from '@/hooks/labels/useLabelItems';
 import { LabelItemsDropZone } from '../items/LabelItemsDropZone';
@@ -176,6 +177,10 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto p-0">
+        <VisuallyHidden>
+          <DialogTitle>Label Order Details</DialogTitle>
+          <DialogDescription>View and manage label order details, items, and production runs</DialogDescription>
+        </VisuallyHidden>
         {isLoading ? (
           <div className="p-6 space-y-6">
             <Skeleton className="h-8 w-64" />
@@ -364,7 +369,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     AI-optimized print runs and production schedule
                   </p>
                 </div>
-                <LabelRunsCard runs={order.runs || []} items={order.items || []} />
+                <LabelRunsCard runs={order.runs || []} items={order.items || []} dieline={order.dieline} />
               </div>
 
               {/* Timestamps */}
