@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +22,7 @@ import {
 import { Search, Filter, Eye, Upload } from 'lucide-react';
 import { useLabelOrders } from '@/hooks/labels/useLabelOrders';
 import { NewLabelOrderDialog } from '@/components/labels/NewLabelOrderDialog';
+import { LabelOrderModal } from '@/components/labels/order/LabelOrderModal';
 import { format } from 'date-fns';
 import type { LabelOrderStatus } from '@/types/labels';
 
@@ -47,6 +48,7 @@ const statusColors: Record<LabelOrderStatus, string> = {
 export default function LabelsOrders() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const navigate = useNavigate();
   
   const statusFilter = (searchParams.get('status') as LabelOrderStatus | null) || undefined;
@@ -87,7 +89,7 @@ export default function LabelsOrders() {
             Import from Quickeasy
           </Button>
           <NewLabelOrderDialog 
-            onSuccess={(orderId) => navigate(`/labels/orders/${orderId}`)} 
+            onSuccess={(orderId) => setSelectedOrderId(orderId)} 
           />
         </div>
       </div>
@@ -150,14 +152,15 @@ export default function LabelsOrders() {
               </TableHeader>
               <TableBody>
                 {filteredOrders?.map((order) => (
-                  <TableRow key={order.id}>
+                  <TableRow 
+                    key={order.id} 
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => setSelectedOrderId(order.id)}
+                  >
                     <TableCell className="font-medium">
-                      <Link 
-                        to={`/labels/orders/${order.id}`}
-                        className="text-primary hover:underline"
-                      >
+                      <span className="text-primary hover:underline">
                         {order.order_number}
-                      </Link>
+                      </span>
                     </TableCell>
                     <TableCell>
                       <div>
@@ -187,10 +190,15 @@ export default function LabelsOrders() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link to={`/labels/orders/${order.id}`}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedOrderId(order.id);
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -200,6 +208,13 @@ export default function LabelsOrders() {
           )}
         </CardContent>
       </Card>
+
+      {/* Order Detail Modal */}
+      <LabelOrderModal
+        orderId={selectedOrderId || ''}
+        open={!!selectedOrderId}
+        onOpenChange={(open) => !open && setSelectedOrderId(null)}
+      />
     </div>
   );
 }
