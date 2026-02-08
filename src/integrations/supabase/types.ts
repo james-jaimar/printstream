@@ -1273,7 +1273,7 @@ export type Database = {
         Row: {
           billing_address: string | null
           company_name: string
-          contact_email: string
+          contact_email: string | null
           contact_name: string | null
           contact_phone: string | null
           created_at: string
@@ -1282,12 +1282,12 @@ export type Database = {
           is_active: boolean | null
           notes: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           billing_address?: string | null
           company_name: string
-          contact_email: string
+          contact_email?: string | null
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string
@@ -1296,12 +1296,12 @@ export type Database = {
           is_active?: boolean | null
           notes?: string | null
           updated_at?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           billing_address?: string | null
           company_name?: string
-          contact_email?: string
+          contact_email?: string | null
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string
@@ -1310,7 +1310,7 @@ export type Database = {
           is_active?: boolean | null
           notes?: string | null
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
