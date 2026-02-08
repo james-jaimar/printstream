@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   Sparkles, 
   Play, 
@@ -20,7 +21,8 @@ import {
   Settings2,
   ChevronDown,
   ChevronUp,
-  Zap
+  Zap,
+  LayoutGrid
 } from 'lucide-react';
 import { 
   Collapsible, 
@@ -28,6 +30,7 @@ import {
   CollapsibleTrigger 
 } from '@/components/ui/collapsible';
 import { useLayoutOptimizer } from '@/hooks/labels/useLayoutOptimizer';
+import { RunLayoutDiagram } from './optimizer/RunLayoutDiagram';
 import { type LabelItem, type LabelDieline, type LayoutOption } from '@/types/labels';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +48,7 @@ export function LayoutOptimizer({
   onLayoutApplied 
 }: LayoutOptimizerProps) {
   const [showWeights, setShowWeights] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   
   const {
     options,

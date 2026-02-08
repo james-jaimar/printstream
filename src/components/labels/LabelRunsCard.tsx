@@ -5,19 +5,23 @@ import {
   CheckCircle2, 
   Clock, 
   XCircle,
-  ChevronRight
+  ChevronRight,
+  LayoutGrid
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { RunDetailModal } from '@/components/labels/production';
-import type { LabelRun, LabelRunStatus, LabelItem } from '@/types/labels';
+import { RunLayoutDiagram } from '@/components/labels/optimizer/RunLayoutDiagram';
+import type { LabelRun, LabelRunStatus, LabelItem, LabelDieline } from '@/types/labels';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
 
 interface LabelRunsCardProps {
   runs: LabelRun[];
   items: LabelItem[];
+  dieline?: LabelDieline | null;
   onViewRun?: (run: LabelRun) => void;
 }
 
@@ -33,9 +37,11 @@ const statusConfig: Record<LabelRunStatus, {
   cancelled: { icon: XCircle, label: 'Cancelled', color: 'bg-red-500' },
 };
 
-export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
+export function LabelRunsCard({ runs, items, dieline, onViewRun }: LabelRunsCardProps) {
   const [selectedRun, setSelectedRun] = useState<LabelRun | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [layoutPreviewOpen, setLayoutPreviewOpen] = useState(false);
+  const [layoutPreviewRun, setLayoutPreviewRun] = useState<LabelRun | null>(null);
   
   const getItemName = (itemId: string) => {
     return items.find(i => i.id === itemId)?.name || 'Unknown';
@@ -45,6 +51,12 @@ export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
     setSelectedRun(run);
     setDetailModalOpen(true);
     onViewRun?.(run);
+  };
+
+  const handleViewLayout = (run: LabelRun, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLayoutPreviewRun(run);
+    setLayoutPreviewOpen(true);
   };
 
   const completedRuns = runs.filter(r => r.status === 'completed').length;
@@ -127,6 +139,19 @@ export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
                     )}
                   </div>
 
+                  {/* View Layout Button */}
+                  {dieline && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1"
+                      onClick={(e) => handleViewLayout(run, e)}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                      <span className="hidden sm:inline">Layout</span>
+                    </Button>
+                  )}
+
                   <ChevronRight className="h-5 w-5 text-muted-foreground" />
                 </div>
               );
@@ -142,6 +167,33 @@ export function LabelRunsCard({ runs, items, onViewRun }: LabelRunsCardProps) {
         open={detailModalOpen}
         onOpenChange={setDetailModalOpen}
       />
+
+      {/* Layout Preview Dialog */}
+      {dieline && (
+        <Dialog open={layoutPreviewOpen} onOpenChange={setLayoutPreviewOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Run {layoutPreviewRun?.run_number} - Layout Diagram</DialogTitle>
+              <DialogDescription>
+                Visual representation of label arrangement on the press roll
+              </DialogDescription>
+            </DialogHeader>
+            {layoutPreviewRun && (
+              <RunLayoutDiagram
+                runNumber={layoutPreviewRun.run_number}
+                status={layoutPreviewRun.status}
+                slotAssignments={layoutPreviewRun.slot_assignments || []}
+                dieline={dieline}
+                items={items}
+                meters={layoutPreviewRun.meters_to_print}
+                frames={layoutPreviewRun.frames_count}
+                estimatedMinutes={layoutPreviewRun.estimated_duration_minutes}
+                aiScore={layoutPreviewRun.ai_optimization_score}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
     </Card>
   );
 }
