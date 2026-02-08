@@ -174,8 +174,8 @@ export function LayoutOptimizer({
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-4">
-              <ScrollArea className="max-h-[600px]">
-                <div className="space-y-6">
+              <ScrollArea className="h-[50vh]">
+                <div className="space-y-6 pr-4">
                   {selectedOption.runs.map((run, idx) => (
                     <RunLayoutDiagram
                       key={idx}
