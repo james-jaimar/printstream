@@ -110,9 +110,19 @@ Deno.serve(async (req) => {
       artbox: convertBoxToMm(vpsData.artbox),
     };
 
-    // Determine primary box for validation (prefer TrimBox, fallback to MediaBox)
+    // Determine which box to use for validation.
+    // Priority:
+    // 1) TrimBox (exact finished size)
+    // 2) BleedBox (finished size + bleed)  <-- Acrobat "104x54mm" is typically this
+    // 3) CropBox (sometimes used instead of Trim/Bleed)
+    // 4) MediaBox (last resort)
     const primaryBox = boxes.trimbox ? "trimbox" : "mediabox";
-    const dimensionsMm = boxes.trimbox || boxes.mediabox || { width_mm: 0, height_mm: 0 };
+    const dimensionsMm =
+      boxes.trimbox ||
+      boxes.bleedbox ||
+      boxes.cropbox ||
+      boxes.mediabox ||
+      { width_mm: 0, height_mm: 0 };
 
     const response: PageBoxesResponse = {
       success: true,
