@@ -1,328 +1,447 @@
 
-# Plan: Reduce Database Egress with Optimized Polling, Queries, and Tab Visibility
+# Labels Division - Complete Implementation Plan
 
 ## Executive Summary
 
-This plan addresses the excessive Postgres egress (up to 1.8GB/day) through four key optimizations:
-1. **Reduce polling intervals** - Change aggressive 10s/30s to 60s/120s
-2. **Replace SELECT * with specific columns** - Reduce payload per request by 60-80%
-3. **Add tab visibility detection** - Pause ALL polling/subscriptions when tab is hidden
-4. **Cache job specifications** - Eliminate repeated RPC calls in usePersonalOperatorQueue
+This plan creates a **completely isolated Labels Division** within Printstream that shares foundational infrastructure (auth, components, database patterns) but operates in its own namespace to avoid any risk to the production Digital Division.
+
+The key innovation: **Only new divisional tables get a `division` field** - the existing Digital Division data remains untouched with no schema changes.
 
 ---
 
-## Problem Analysis
+## Architecture Overview
 
-### Current Egress Sources Identified
-
-| Hook/Context | Polling | Real-Time | Query Size | Daily Egress (est.) |
-|--------------|---------|-----------|------------|---------------------|
-| `usePersonalOperatorQueue` | 10s + 30s | Yes | ~50KB/fetch | 400MB+ |
-| `KanbanDataContext` | N/A | Yes (cascades) | ~17MB/fetch | 200MB+ |
-| `useEnhancedProductionJobs` | N/A | Yes (cascades) | ~17MB/fetch | 200MB+ |
-| `useDataManager` | 5 min | N/A | ~17MB/fetch | 50MB |
-| `useAutoApprovedJobs` | 5 min | Yes | ~2MB/fetch | 25MB |
-| 59+ files with SELECT * | Various | Various | Varies | 100MB+ |
-
-**Total estimated egress sources: ~1GB+ per day from a single browser tab**
-
----
-
-## Solution Architecture
-
-### Phase 1: Create Tab Visibility Hook (Foundation)
-
-Create a new utility hook that all polling/subscription hooks will use:
-
-**New File: `src/hooks/useTabVisibility.ts`**
-
-```typescript
-import { useState, useEffect, useCallback } from 'react';
-
-export const useTabVisibility = () => {
-  const [isVisible, setIsVisible] = useState(!document.hidden);
-  
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      setIsVisible(!document.hidden);
-      console.log(`📱 Tab visibility: ${!document.hidden ? 'visible' : 'hidden'}`);
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-  
-  return { isVisible };
-};
-```
-
-This hook will be imported by all polling hooks to pause activity when the tab is hidden.
-
----
-
-### Phase 2: Optimize usePersonalOperatorQueue (Biggest Offender)
-
-**Current State:**
-- Polls every 10 seconds for active jobs
-- Polls every 30 seconds for next jobs
-- Makes 2 RPC calls per job for specifications
-- Real-time subscription triggers additional refetches
-
-**Changes to `src/hooks/tracker/usePersonalOperatorQueue.tsx`:**
-
-1. **Increase polling intervals:**
-   - Active jobs: 10s → 60s
-   - Next jobs: 30s → 120s
-
-2. **Add tab visibility check:**
-   ```typescript
-   const { isVisible } = useTabVisibility();
-   
-   refetchInterval: isVisible ? 60000 : false, // Pause when hidden
-   ```
-
-3. **Cache specifications with proper query key:**
-   ```typescript
-   const { data: specs } = useQuery({
-     queryKey: ['job-specifications', job.job_id],
-     queryFn: () => fetchJobSpecifications(job.job_id),
-     staleTime: 5 * 60 * 1000, // 5 minutes
-     gcTime: 10 * 60 * 1000, // 10 minutes
-   });
-   ```
-
-4. **Use specific columns instead of full select:**
-   ```typescript
-   .select(`
-     id,
-     job_id,
-     status,
-     scheduled_start_at,
-     estimated_duration_minutes,
-     production_jobs!inner(wo_no, customer, due_date, reference),
-     production_stages!inner(name),
-     categories(name, color)
-   `)
-   ```
-
----
-
-### Phase 3: Optimize KanbanDataContext
-
-**Current State:**
-- Real-time subscription triggers full refetch on ANY production_jobs change
-- Fetches `SELECT *` from production_jobs (~17MB)
-
-**Changes to `src/contexts/KanbanDataContext.tsx`:**
-
-1. **Add tab visibility pause:**
-   ```typescript
-   const [isTabVisible, setIsTabVisible] = useState(!document.hidden);
-   
-   useEffect(() => {
-     const handler = () => setIsTabVisible(!document.hidden);
-     document.addEventListener('visibilitychange', handler);
-     return () => document.removeEventListener('visibilitychange', handler);
-   }, []);
-   ```
-
-2. **Debounce real-time refetches:**
-   ```typescript
-   const debouncedFetch = useRef<NodeJS.Timeout | null>(null);
-   
-   const handleRealtimeChange = useCallback(() => {
-     if (!isTabVisible) return; // Skip if tab hidden
-     
-     if (debouncedFetch.current) clearTimeout(debouncedFetch.current);
-     debouncedFetch.current = setTimeout(() => fetchKanbanData(true), 2000);
-   }, [isTabVisible, fetchKanbanData]);
-   ```
-
-3. **Select specific columns:**
-   ```typescript
-   .select(`
-     id, wo_no, customer, status, due_date, reference, 
-     category_id, created_at, is_expedited
-   `)
-   ```
-
----
-
-### Phase 4: Optimize useEnhancedProductionJobs
-
-**Current State:**
-- Real-time subscription on production_jobs AND job_stage_instances
-- Full refetch on every change (can cascade 5-10x per minute)
-- Fetches `SELECT *` from both tables
-
-**Changes to `src/hooks/tracker/useEnhancedProductionJobs.tsx`:**
-
-1. **Add tab visibility check:**
-   ```typescript
-   const { isVisible } = useTabVisibility();
-   ```
-
-2. **Debounce real-time with 3-second window:**
-   ```typescript
-   const pendingRefetch = useRef<NodeJS.Timeout | null>(null);
-   
-   const debouncedRefetch = useCallback(() => {
-     if (!isVisible) return;
-     
-     if (pendingRefetch.current) clearTimeout(pendingRefetch.current);
-     pendingRefetch.current = setTimeout(fetchJobs, 3000);
-   }, [isVisible, fetchJobs]);
-   ```
-
-3. **Use subscription only when tab is visible:**
-   ```typescript
-   useEffect(() => {
-     if (!isVisible) return; // Don't subscribe when hidden
-     
-     const channel = supabase.channel(...)...;
-     return () => supabase.removeChannel(channel);
-   }, [isVisible, debouncedRefetch]);
-   ```
-
-4. **Select specific columns for production_jobs:**
-   ```typescript
-   .select(`
-     id, wo_no, customer, status, due_date, reference,
-     created_at, updated_at, is_expedited, has_custom_workflow,
-     manual_due_date, proof_approved_at, category_id, user_id,
-     categories(id, name, color, sla_target_days)
-   `)
-   ```
-
-5. **Select specific columns for job_stage_instances:**
-   ```typescript
-   .select(`
-     id, job_id, status, stage_order, started_at, completed_at,
-     scheduled_start_at, estimated_duration_minutes, part_assignment,
-     production_stage_id,
-     production_stages(id, name, color, supports_parts)
-   `)
-   ```
-
----
-
-### Phase 5: Optimize useDataManager
-
-**Current State:**
-- Auto-refreshes every 5 minutes
-- Fetches `SELECT *` with categories join
-
-**Changes to `src/hooks/tracker/useDataManager.tsx`:**
-
-1. **Add tab visibility pause:**
-   ```typescript
-   const { isVisible } = useTabVisibility();
-   
-   useEffect(() => {
-     if (!user?.id || !isVisible) return;
-     
-     loadData(false);
-     autoRefreshIntervalRef.current = setInterval(() => {
-       if (isVisible) loadData(false);
-     }, AUTO_REFRESH_INTERVAL);
-     // ...
-   }, [user?.id, loadData, isVisible]);
-   ```
-
-2. **Use specific columns:**
-   ```typescript
-   .select(`
-     id, wo_no, customer, status, due_date, reference,
-     created_at, is_expedited, category_id,
-     categories(id, name, color, sla_target_days)
-   `)
-   ```
-
----
-
-### Phase 6: Fix Real-Time Cascade Problem
-
-The root cause of cascading refreshes is that multiple hooks subscribe to the same tables and all trigger full refetches.
-
-**Create centralized subscription manager:**
-
-**New File: `src/hooks/useRealtimeSubscriptionManager.ts`**
-
-This hook will:
-1. Maintain a single subscription per table
-2. Debounce updates across all consumers
-3. Only notify consumers when tab is visible
-4. Batch multiple rapid changes into single update
-
-```typescript
-// Singleton pattern for subscriptions
-const subscriptionManager = {
-  subscribers: new Map<string, Set<() => void>>(),
-  channels: new Map<string, any>(),
-  
-  subscribe(table: string, callback: () => void) {
-    // Add subscriber
-    // Create channel if first subscriber
-    // Return unsubscribe function
-  },
-  
-  notify(table: string) {
-    // Debounce 2 seconds
-    // Only notify if tab visible
-    // Call all subscribers
-  }
-};
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           PRINTSTREAM APP                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌─────────────────────┐              ┌─────────────────────┐          │
+│   │   DIGITAL DIVISION  │              │   LABELS DIVISION   │          │
+│   │   (Existing - NO    │              │   (New - Isolated)  │          │
+│   │    changes needed)  │              │                     │          │
+│   │                     │              │                     │          │
+│   │ • production_jobs   │              │ • label_orders      │          │
+│   │ • categories        │              │ • label_items       │          │
+│   │ • job_stage_inst... │              │ • label_dielines    │          │
+│   │ • Excel Import      │              │ • label_runs        │          │
+│   │ • Tracker/Kanban    │              │ • label_rolls       │          │
+│   │ • Schedule Board    │              │ • label_stock       │          │
+│   │                     │              │ • AI Layout Engine  │          │
+│   └─────────────────────┘              └─────────────────────┘          │
+│                                                                          │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │                    SHARED INFRASTRUCTURE                         │   │
+│   │  • Auth/Permissions  • UI Components  • PDF Viewer              │   │
+│   │  • VPS PDF API       • Proof System   • Barcode Generator       │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │      VPS PDF API              │
+                    │  pdf-api.jaimar.dev           │
+                    │  • Ghostscript CMYK           │
+                    │  • pdfcpu Imposition          │
+                    │  • pikepdf Preflight          │
+                    └───────────────────────────────┘
 ```
 
 ---
 
-### Phase 7: Batch SELECT * Replacements
+## Phase 1: Database Foundation (Labels-Specific Tables)
 
-**Priority files to update (based on frequency of use):**
+All new tables are prefixed with `label_` to ensure complete isolation.
 
-| File | Current | Optimized Columns |
-|------|---------|-------------------|
-| `useProductionJobs.tsx` | `select('*')` | `id, wo_no, customer, status, due_date, reference, created_at, is_expedited, category_id` |
-| `useAutoApprovedJobs.ts` | `select('*')` | `id, wo_no, customer, due_date, proof_approved_at, category_id` |
-| `useScheduledJobs.tsx` | `select('*')` | `id, wo_no, customer, due_date, is_expedited, status` |
-| `usePrinters.tsx` | `select('*')` | `id, name, type, status, is_active` |
-| `useCategories.tsx` | `select('*')` | `id, name, color, sla_target_days` |
-| `useDepartments.tsx` | `select('*')` | `id, name, description, is_active` |
+### Core Tables
 
-Continue for remaining 53 files...
+**1. `label_dielines` - Die Template Library**
+```text
+Columns:
+- id (uuid, PK)
+- name (text) - "6 Across x 4 Around - 50x30mm"
+- roll_width_mm (numeric) - 250, 280, 320, 330
+- label_width_mm (numeric)
+- label_height_mm (numeric)
+- columns_across (integer) - Number of slots across
+- rows_around (integer) - Number of labels in roll direction
+- horizontal_gap_mm (numeric) - Gap between columns
+- vertical_gap_mm (numeric) - Gap between rows
+- corner_radius_mm (numeric, nullable)
+- dieline_pdf_url (text, nullable) - Customer-supplied dieline
+- is_custom (boolean) - Customer-supplied vs standard
+- created_by (uuid, FK profiles)
+- created_at, updated_at
+```
+
+**2. `label_orders` - Main Order/Quote Record**
+```text
+Columns:
+- id (uuid, PK)
+- order_number (text, unique) - "LBL-2026-0001"
+- quickeasy_wo_no (text, nullable) - Link to MIS
+- customer_id (uuid, FK) - Link to customer/profile
+- customer_name (text)
+- contact_name (text, nullable)
+- contact_email (text, nullable)
+- status (enum) - 'quote', 'pending_approval', 'approved', 'in_production', 'completed', 'cancelled'
+- dieline_id (uuid, FK label_dielines)
+- roll_width_mm (numeric)
+- substrate_id (uuid, FK label_stock)
+- total_label_count (integer) - Sum of all items
+- estimated_meters (numeric) - Calculated
+- estimated_sheets (integer) - HP Indigo frames
+- due_date (date)
+- client_approved_at (timestamptz)
+- client_approved_by (text)
+- proof_token (text, nullable) - For client portal
+- created_by (uuid, FK profiles)
+- created_at, updated_at
+```
+
+**3. `label_items` - Individual Label Artworks within Order**
+```text
+Columns:
+- id (uuid, PK)
+- order_id (uuid, FK label_orders)
+- item_number (integer) - 1, 2, 3... within order
+- name (text) - "SKU-12345" or "Flavour: Vanilla"
+- artwork_pdf_url (text)
+- artwork_thumbnail_url (text, nullable)
+- quantity (integer) - How many of this label
+- width_mm (numeric, nullable) - Can override dieline
+- height_mm (numeric, nullable)
+- preflight_status (enum) - 'pending', 'passed', 'failed', 'warnings'
+- preflight_report (jsonb) - Full preflight data
+- is_cmyk (boolean)
+- min_dpi (numeric, nullable)
+- has_bleed (boolean, nullable)
+- created_at, updated_at
+```
+
+**4. `label_runs` - AI-Calculated Production Runs**
+```text
+Columns:
+- id (uuid, PK)
+- order_id (uuid, FK label_orders)
+- run_number (integer) - Run sequence
+- slot_assignments (jsonb) - Array of {slot: 1-6, item_id: uuid, quantity_in_slot: int}
+- meters_to_print (numeric)
+- frames_count (integer) - HP Indigo frames (960mm max)
+- estimated_duration_minutes (integer)
+- status (enum) - 'planned', 'approved', 'printing', 'completed'
+- ai_optimization_score (numeric) - 0-100 efficiency rating
+- ai_reasoning (text) - Why AI chose this layout
+- imposed_pdf_url (text, nullable) - Generated imposition
+- imposed_pdf_with_dielines_url (text, nullable) - For proofing
+- created_at, updated_at
+```
+
+**5. `label_stock` - Roll Stock Inventory**
+```text
+Columns:
+- id (uuid, PK)
+- name (text) - "PP White Gloss 80gsm"
+- substrate_type (text) - 'Paper', 'PP', 'PE', 'PET', 'Vinyl'
+- finish (text) - 'Gloss', 'Matt', 'Uncoated'
+- width_mm (numeric)
+- gsm (integer, nullable)
+- roll_length_meters (numeric) - Full roll length
+- current_stock_meters (numeric) - Available stock
+- reorder_level_meters (numeric)
+- cost_per_meter (numeric, nullable)
+- supplier (text, nullable)
+- last_stock_take (timestamptz)
+- barcode (text, nullable) - For scanning
+- created_at, updated_at
+```
+
+**6. `label_schedule` - Production Schedule Board**
+```text
+Columns:
+- id (uuid, PK)
+- run_id (uuid, FK label_runs)
+- scheduled_date (date)
+- scheduled_start_time (time)
+- scheduled_end_time (time)
+- printer_id (uuid, FK printers)
+- operator_id (uuid, FK profiles, nullable)
+- status (enum) - 'scheduled', 'in_progress', 'completed', 'cancelled'
+- actual_start_time (timestamptz, nullable)
+- actual_end_time (timestamptz, nullable)
+- notes (text, nullable)
+- created_at, updated_at
+```
 
 ---
 
-## Implementation Order
+## Phase 2: Client Portal Architecture
 
-| Step | Files | Egress Reduction |
-|------|-------|------------------|
-| 1 | Create `useTabVisibility.ts` | Foundation |
-| 2 | Fix `usePersonalOperatorQueue.tsx` | ~400MB/day |
-| 3 | Fix `KanbanDataContext.tsx` | ~200MB/day |
-| 4 | Fix `useEnhancedProductionJobs.tsx` | ~200MB/day |
-| 5 | Fix `useDataManager.tsx` | ~50MB/day |
-| 6 | Create `useRealtimeSubscriptionManager.ts` | Prevents cascades |
-| 7 | Update high-frequency SELECT * queries | ~100MB/day |
+### Public Routes (No Auth Required)
+```text
+/labels/proof/:token     - Client proof approval (like existing ProofViewer)
+/labels/status/:token    - Order status tracking
+```
 
-**Expected total reduction: 70-85% of current egress**
+### Protected Client Routes
+```text
+/labels/portal           - Client dashboard
+/labels/portal/new-quote - Start new quote/order
+/labels/portal/orders    - View orders
+/labels/portal/orders/:id - Order detail with approval
+```
+
+### Admin/Staff Routes
+```text
+/labels                  - Labels Division dashboard
+/labels/orders           - All orders list
+/labels/orders/:id       - Order detail (staff view)
+/labels/dielines         - Dieline template library
+/labels/schedule         - Production schedule board
+/labels/stock            - Stock management
+/labels/ai-layout/:id    - AI layout configuration
+```
 
 ---
 
-## Testing Strategy
+## Phase 3: AI Layout Engine (Game Changer)
 
-1. **Before changes:**
-   - Note current egress in Supabase dashboard
-   - Monitor network tab for request frequency
+### The Problem You Described
+- 24 different artworks, varying quantities
+- 6 across x 4 around dieline
+- Currently takes 30-45 minutes manually to optimize
 
-2. **After each phase:**
-   - Verify tab hidden pauses polling
-   - Verify debouncing works
-   - Check payload sizes reduced
+### AI Solution Architecture
 
-3. **Validation:**
-   - Leave app open for 24 hours
-   - Compare egress to previous day
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                    AI LAYOUT OPTIMIZER                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  INPUTS:                                                         │
+│  ├─ Label items with quantities                                  │
+│  ├─ Dieline specs (6 across, 4 around)                          │
+│  ├─ Optimization weights:                                        │
+│  │   • Material efficiency (minimize waste)                      │
+│  │   • Print efficiency (minimize runs/frames)                   │
+│  │   • Labour efficiency (minimize handling)                     │
+│  │                                                               │
+│  ALGORITHM:                                                      │
+│  1. Sort labels by quantity (largest first)                      │
+│  2. Calculate slot requirements per label                        │
+│  3. Bin-packing algorithm to fill slots optimally               │
+│  4. Split high-quantity labels across runs if beneficial         │
+│  5. Score multiple layout options                                │
+│  6. Return top 3 options with cost/efficiency comparisons       │
+│                                                                  │
+│  OUTPUTS:                                                        │
+│  ├─ Recommended layout with scoring                              │
+│  ├─ Alternative layouts for comparison                           │
+│  ├─ Cost breakdown (material, estimated labor)                   │
+│  ├─ Visual preview of each run                                   │
+│  └─ AI reasoning explanation                                     │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Calculation
+Your scenario: 6 slots, 24 labels, varying quantities
+
+```text
+Label A: 15,000 → Needs 2.5 runs at 6 slots = Use 3 slots × 5,000 run
+Label B: 8,000  → Needs 1.33 runs = Use 2 slots × 4,000 run
+Label C: 3,000  → Needs 0.5 runs = Use 1 slot × 3,000 run
+
+AI PROPOSED RUN 1: 
+  Slots 1-3: Label A (5,000 each = 15,000)
+  Slots 4-5: Label B (5,000 each = 10,000 - 2,000 overflow)
+  Slot 6: Label C (5,000 - 2,000 needed = 3,000 waste or...)
+
+AI adjusts: Run 1 at 3,000 length instead:
+  Slots 1-3: Label A @ 3,000 = 9,000
+  Slots 4-5: Label B @ 3,000 = 6,000  
+  Slot 6: Label C @ 3,000 = 3,000 ✓ EXACT
+
+Run 2 at 2,000:
+  Slots 1-3: Label A @ 2,000 = 6,000 (total 15,000 ✓)
+  Slots 4-5: Label B @ 2,000 = 4,000 (total 10,000 - needs 2,000 more)
+  Slot 6: Label D...
+
+And so on until all quantities satisfied with minimum waste.
+```
+
+---
+
+## Phase 4: VPS PDF API Integration
+
+### Edge Function: `labels-pdf-process`
+
+This edge function proxies requests to your VPS PDF API.
+
+```text
+Endpoints to call:
+POST /imposition/step-repeat  - Generate imposed PDFs
+POST /color/rgb-to-cmyk       - Convert artwork to CMYK
+POST /preflight/check         - Full preflight report
+POST /preflight/images        - Check resolution
+POST /preflight/spot-colors   - Extract spot colors
+```
+
+### Workflow for Label Artwork
+```text
+1. Client uploads artwork
+2. Edge function → VPS API /preflight/check
+3. Store preflight results in label_items.preflight_report
+4. If RGB detected → offer CMYK conversion
+5. On approval → generate imposition via VPS API
+6. Two PDFs generated:
+   - With die-lines (for client proof)
+   - Without die-lines (for production)
+7. Store both URLs in label_runs
+```
+
+---
+
+## Phase 5: Quickeasy Integration
+
+### Excel Import Extension (Labels-Specific)
+
+Create a new component `LabelsExcelUpload.tsx` that:
+1. Parses Quickeasy export with labels-specific column detection
+2. Maps to `label_orders` and `label_items` tables
+3. Detects dieline from size specifications
+4. Auto-creates order records in 'pending' status
+
+### Column Mapping for Labels
+```text
+WO No        → label_orders.quickeasy_wo_no
+Customer     → label_orders.customer_name
+Reference    → label_orders.order_number
+Due Date     → label_orders.due_date
+Size         → Match to label_dielines
+Qty          → Distributed to label_items
+Substrate    → Match to label_stock
+```
+
+---
+
+## Phase 6: Stock Management
+
+### Features
+1. **Roll Tracking**: Each roll has unique barcode
+2. **Usage Deduction**: When run completes, deduct meters from stock
+3. **Reorder Alerts**: When stock falls below threshold
+4. **End-of-Roll Labels**: Generate barcode label for partial rolls
+5. **Stock Take**: Scan barcodes to reconcile
+
+### Barcode Label Generation
+Reuse existing `barcodeLabelGenerator.ts` but extend for:
+```text
+Roll ID: ROLL-2026-001
+Substrate: PP White Gloss 80gsm
+Width: 320mm
+Remaining: 247.5m
+Last Used: 2026-02-08
+```
+
+---
+
+## Phase 7: Schedule Board (Drag & Drop)
+
+### Design
+A Kanban-style board specific to labels:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ LABELS SCHEDULE BOARD                      [+ New Run]       │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  UNSCHEDULED    │   MON 10    │   TUE 11    │   WED 12     │
+│  ┌───────────┐  │  ┌───────┐  │  ┌───────┐  │  ┌───────┐   │
+│  │ Order 45  │  │  │Run 1  │  │  │Run 4  │  │  │Run 7  │   │
+│  │ 3 runs    │←→│  │Order42│  │  │Order44│  │  │Order45│   │
+│  └───────────┘  │  │45 min │  │  │60 min │  │  │30 min │   │
+│  ┌───────────┐  │  └───────┘  │  └───────┘  │  └───────┘   │
+│  │ Order 46  │  │  ┌───────┐  │  ┌───────┐  │              │
+│  │ 2 runs    │  │  │Run 2  │  │  │Run 5  │  │              │
+│  └───────────┘  │  │Order42│  │  │Order44│  │              │
+│                 │  │30 min │  │  │45 min │  │              │
+│                 │  └───────┘  │  └───────┘  │              │
+│                 │  ┌───────┐  │  ┌───────┐  │              │
+│                 │  │Run 3  │  │  │Run 6  │  │              │
+│                 │  │Order43│  │  │Order44│  │              │
+│                 │  │60 min │  │  │35 min │  │              │
+│                 │  └───────┘  │  └───────┘  │              │
+│                 │             │             │              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Uses `@dnd-kit` (already installed) for drag-and-drop.
+
+---
+
+## Phase 8: Client Portal Workflow
+
+### Quote/Order Flow
+```text
+1. Client logs in → /labels/portal
+2. Clicks "New Quote" → /labels/portal/new-quote
+3. Step 1: Select dieline (from library or custom upload)
+4. Step 2: Upload artworks with quantities
+5. Step 3: System runs preflight + AI layout
+6. Step 4: Review proposed layout options
+7. Step 5: Select layout, submit for approval
+8. Email sent with proof link
+9. Client approves or requests changes
+10. On approval → moves to production queue
+```
+
+### Client Dashboard Shows
+- Active orders with status
+- Historical orders
+- Pending approvals
+- Stock on order (if applicable)
+
+---
+
+## Implementation Phases
+
+### Phase A: Foundation (Week 1)
+1. Create database migrations for all `label_*` tables
+2. Add `/labels` route structure to App.tsx
+3. Create LabelsLayout component
+4. Create basic hooks: `useLabelsOrders`, `useLabels`, etc.
+
+### Phase B: Order Management (Week 2)
+1. Labels order list page
+2. Order detail page
+3. Quickeasy Excel import for labels
+4. Dieline library management
+
+### Phase C: VPS Integration (Week 3)
+1. Edge function `labels-pdf-process`
+2. Artwork upload with preflight
+3. CMYK conversion workflow
+4. Imposition generation
+
+### Phase D: AI Layout Engine (Week 4)
+1. Layout optimization algorithm
+2. Multiple layout comparison UI
+3. Slot assignment visualization
+4. Cost/efficiency scoring
+
+### Phase E: Client Portal (Week 5)
+1. Public proof viewer for labels
+2. Client dashboard
+3. New quote wizard
+4. Approval workflow
+
+### Phase F: Production (Week 6)
+1. Schedule board with D&D
+2. Stock management
+3. Run tracking
+4. Barcode label generation
 
 ---
 
@@ -330,35 +449,91 @@ Continue for remaining 53 files...
 
 | Risk | Mitigation |
 |------|------------|
-| Data staleness | Keep manual refresh buttons working |
-| Real-time updates missed | Resume subscription immediately when tab visible |
-| User confusion | Data still updates, just not when tab hidden |
+| Breaking existing app | All new tables prefixed `label_`. Zero changes to existing tables. |
+| Route conflicts | New route tree `/labels/*` completely separate from `/printstream/*` and `/tracker/*` |
+| Shared component issues | Create Labels-specific versions where needed, use shared components for UI primitives |
+| Database performance | Labels tables are isolated; indexes on key query columns |
+| VPS API failures | Implement retry logic and fallback to local pdf-lib for basic operations |
 
 ---
 
-## Summary of Changes
+## What Gets Reused from Existing App
 
-### New Files
-1. `src/hooks/useTabVisibility.ts` - Tab visibility detection
-2. `src/hooks/useRealtimeSubscriptionManager.ts` - Centralized subscription management
-
-### Modified Files (Phase 2-5)
-1. `src/hooks/tracker/usePersonalOperatorQueue.tsx`
-2. `src/contexts/KanbanDataContext.tsx`
-3. `src/hooks/tracker/useEnhancedProductionJobs.tsx`
-4. `src/hooks/tracker/useDataManager.tsx`
-
-### Modified Files (Phase 7 - SELECT * replacements)
-- 59 files with SELECT * patterns will be updated to use specific columns
+| Component/System | Reuse Strategy |
+|------------------|----------------|
+| Authentication | Use existing `useAuth`, `ProtectedRoute` |
+| User Roles | Extend `useUserRole` with labels-specific permissions |
+| PDF Viewer | Reuse `PdfViewer` component |
+| Proof System | Adapt `ProofViewer` pattern for labels |
+| Barcode Generation | Extend `barcodeLabelGenerator.ts` |
+| UI Components | All shadcn/ui components |
+| Toast/Notifications | Existing `sonner` setup |
+| Supabase Client | Shared client instance |
 
 ---
 
-## Expected Outcomes
+## New Components to Create
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Daily Postgres egress | 1.5-2GB | 200-400MB |
-| Requests per minute (tab active) | 20-30 | 2-5 |
-| Requests per minute (tab hidden) | 20-30 | 0 |
-| Payload size per request | 17MB | 2-3MB |
-| Real-time cascade frequency | 5-10x | 1x (debounced) |
+### Hooks
+- `useLabelOrders` - CRUD for label orders
+- `useLabelItems` - CRUD for label items
+- `useLabelDielines` - Dieline library management
+- `useLabelStock` - Stock inventory
+- `useLabelRuns` - Production runs
+- `useLabelSchedule` - Schedule board
+- `useAILayoutOptimizer` - AI layout engine
+- `useLabelPreflight` - VPS preflight integration
+
+### Pages
+- `LabelsHome.tsx` - Division dashboard
+- `LabelsOrders.tsx` - Order list
+- `LabelsOrderDetail.tsx` - Single order view
+- `LabelsDielines.tsx` - Template library
+- `LabelsStock.tsx` - Inventory management
+- `LabelsSchedule.tsx` - Production schedule
+- `LabelsPortal.tsx` - Client dashboard
+- `LabelsNewQuote.tsx` - Quote wizard
+- `LabelsProofViewer.tsx` - Client approval
+
+### Components
+- `LabelsDiagnostic.tsx` - AI layout preview
+- `LabelsSlotVisualizer.tsx` - Slot assignment display
+- `LabelsRunCard.tsx` - Run card for schedule
+- `LabelsStockCard.tsx` - Stock item display
+- `LabelsArtworkUpload.tsx` - Multi-file upload with preflight
+
+---
+
+## Technical Specifications
+
+### HP Indigo Label Printing Constants
+```typescript
+const LABEL_PRINT_CONSTANTS = {
+  MAX_FRAME_LENGTH_MM: 960,        // HP Indigo max print length
+  ROLL_WIDTHS_MM: [250, 280, 320, 330],
+  FRAME_CHANGEOVER_MINUTES: 2,     // Time between frames
+  SETUP_TIME_MINUTES: 15,          // Initial job setup
+  METERS_PER_FRAME: 0.96,          // 960mm = 0.96m per frame
+};
+```
+
+### AI Optimization Weights (Configurable)
+```typescript
+const DEFAULT_OPTIMIZATION_WEIGHTS = {
+  material_efficiency: 0.4,   // Minimize substrate waste
+  print_efficiency: 0.35,     // Minimize number of runs/frames
+  labor_efficiency: 0.25,     // Minimize handling/changeovers
+};
+```
+
+---
+
+## Success Criteria
+
+1. **Zero impact on Digital Division** - All existing functionality works unchanged
+2. **Order creation under 5 minutes** - Quick workflow from Quickeasy import to production-ready
+3. **AI layout saves 30+ minutes per complex order** - Your game-changer metric
+4. **Client self-service** - Clients can create quotes and approve proofs without staff intervention
+5. **Real-time stock visibility** - Know exactly what's available
+6. **Schedule clarity** - Visual board shows all production at a glance
+7. **2x volume capacity** - System supports double current throughput
