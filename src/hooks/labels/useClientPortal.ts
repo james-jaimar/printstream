@@ -262,11 +262,7 @@ export function useCreateLabelCustomer() {
 
   return useMutation({
     mutationFn: async (input: {
-      user_id: string;
       company_name: string;
-      contact_name?: string;
-      contact_email: string;
-      contact_phone?: string;
       billing_address?: string;
       notes?: string;
     }): Promise<LabelCustomer> => {
@@ -275,7 +271,12 @@ export function useCreateLabelCustomer() {
       const { data, error } = await supabase
         .from('label_customers')
         .insert({
-          ...input,
+          company_name: input.company_name,
+          billing_address: input.billing_address || null,
+          notes: input.notes || null,
+          // These are now optional/legacy - contacts are separate
+          user_id: user?.id || '',
+          contact_email: '',
           created_by: user?.id,
         })
         .select()
