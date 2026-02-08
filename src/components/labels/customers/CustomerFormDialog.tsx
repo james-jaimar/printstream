@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -14,15 +14,25 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+interface LabelCustomer {
+  id: string;
+  company_name: string;
+  billing_address: string | null;
+  notes: string | null;
+  is_active: boolean;
+}
+
 interface CustomerFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: {
+    id?: string;
     company_name: string;
     billing_address?: string;
     notes?: string;
   }) => Promise<void>;
   isSubmitting: boolean;
+  customer?: LabelCustomer | null;
 }
 
 export function CustomerFormDialog({
@@ -30,12 +40,32 @@ export function CustomerFormDialog({
   onOpenChange,
   onSubmit,
   isSubmitting,
+  customer,
 }: CustomerFormDialogProps) {
   const [formData, setFormData] = useState({
     company_name: '',
     billing_address: '',
     notes: '',
   });
+
+  const isEditing = !!customer;
+
+  // Populate form when editing
+  useEffect(() => {
+    if (customer) {
+      setFormData({
+        company_name: customer.company_name || '',
+        billing_address: customer.billing_address || '',
+        notes: customer.notes || '',
+      });
+    } else {
+      setFormData({
+        company_name: '',
+        billing_address: '',
+        notes: '',
+      });
+    }
+  }, [customer, open]);
 
   const handleSubmit = async () => {
     if (!formData.company_name.trim()) {
@@ -45,20 +75,23 @@ export function CustomerFormDialog({
 
     try {
       await onSubmit({
+        id: customer?.id,
         company_name: formData.company_name.trim(),
         billing_address: formData.billing_address.trim() || undefined,
         notes: formData.notes.trim() || undefined,
       });
 
-      // Reset form
-      setFormData({
-        company_name: '',
-        billing_address: '',
-        notes: '',
-      });
+      // Reset form only on create
+      if (!isEditing) {
+        setFormData({
+          company_name: '',
+          billing_address: '',
+          notes: '',
+        });
+      }
     } catch (error: any) {
-      console.error('Error creating customer:', error);
-      toast.error(error.message || 'Failed to create customer');
+      console.error('Error saving customer:', error);
+      toast.error(error.message || 'Failed to save customer');
     }
   };
 
@@ -66,9 +99,11 @@ export function CustomerFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Customer</DialogTitle>
+          <DialogTitle>{isEditing ? 'Edit Customer' : 'Create Customer'}</DialogTitle>
           <DialogDescription>
-            Add a new customer company. You can add contacts after creation.
+            {isEditing
+              ? 'Update the company details below.'
+              : 'Add a new customer company. You can add contacts after creation.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -112,10 +147,10 @@ export function CustomerFormDialog({
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Creating...
+                {isEditing ? 'Saving...' : 'Creating...'}
               </>
             ) : (
-              'Create Customer'
+              isEditing ? 'Save Changes' : 'Create Customer'
             )}
           </Button>
         </DialogFooter>

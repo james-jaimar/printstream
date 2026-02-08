@@ -8,18 +8,29 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Building2, Mail, Phone, MapPin, Plus, MoreHorizontal, Pencil, Trash2, User, Bell, CheckCircle, X } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Building2, Mail, Phone, MapPin, Plus, MoreHorizontal, Pencil, Trash2, User, Bell, CheckCircle, X, Archive } from 'lucide-react';
 import { useCustomerContacts, useDeleteCustomerContact, CustomerContact } from '@/hooks/labels/useCustomerContacts';
 import { ContactFormDialog } from './ContactFormDialog';
 
 interface LabelCustomer {
   id: string;
-  user_id: string;
+  user_id: string | null;
   company_name: string;
   contact_name: string | null;
-  contact_email: string;
+  contact_email: string | null;
   contact_phone: string | null;
   billing_address: string | null;
   notes: string | null;
@@ -31,14 +42,19 @@ interface LabelCustomer {
 interface CustomerDetailPanelProps {
   customer: LabelCustomer;
   onClose: () => void;
+  onEdit?: (customer: LabelCustomer) => void;
+  onArchive?: (customerId: string) => void;
 }
 
-export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelProps) {
+export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive }: CustomerDetailPanelProps) {
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<CustomerContact | null>(null);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
 
   const { data: contacts, isLoading: contactsLoading } = useCustomerContacts(customer.id);
   const deleteContactMutation = useDeleteCustomerContact();
+
+  const primaryContact = contacts?.find(c => c.is_primary);
 
   const handleEditContact = (contact: CustomerContact) => {
     setEditingContact(contact);
@@ -51,6 +67,13 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
     }
   };
 
+  const handleArchiveConfirm = () => {
+    if (onArchive) {
+      onArchive(customer.id);
+    }
+    setArchiveDialogOpen(false);
+  };
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -60,14 +83,57 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
               <Building2 className="h-5 w-5" />
               {customer.company_name}
             </CardTitle>
-            <Badge variant={customer.is_active ? 'default' : 'secondary'} className="mt-2">
-              {customer.is_active ? 'Active' : 'Inactive'}
-            </Badge>
+            <div className="flex items-center gap-2 mt-2">
+              <Badge variant={customer.is_active ? 'default' : 'secondary'}>
+                {customer.is_active ? 'Active' : 'Archived'}
+              </Badge>
+              <Badge variant="outline" className="text-muted-foreground">
+                {contacts?.length || 0} contacts
+              </Badge>
+            </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {onEdit && (
+                  <DropdownMenuItem onClick={() => onEdit(customer)}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Edit Company
+                  </DropdownMenuItem>
+                )}
+                {onArchive && customer.is_active && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive"
+                      onClick={() => setArchiveDialogOpen(true)}
+                    >
+                      <Archive className="h-4 w-4 mr-2" />
+                      Archive Customer
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
+
+        {/* Quick summary */}
+        {primaryContact && (
+          <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+            <p className="text-xs text-muted-foreground mb-1">Primary Contact</p>
+            <p className="font-medium">{primaryContact.name}</p>
+            <p className="text-sm text-muted-foreground">{primaryContact.email}</p>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent>
@@ -77,7 +143,7 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
               Contacts ({contacts?.length || 0})
             </TabsTrigger>
             <TabsTrigger value="details" className="flex-1">
-              Details
+              Company Details
             </TabsTrigger>
           </TabsList>
 
@@ -190,35 +256,16 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
           </TabsContent>
 
           <TabsContent value="details" className="mt-4 space-y-4">
+            <div className="flex justify-end">
+              {onEdit && (
+                <Button variant="outline" size="sm" onClick={() => onEdit(customer)}>
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Edit Details
+                </Button>
+              )}
+            </div>
+            
             <div className="grid gap-4">
-              <div className="flex items-start gap-3">
-                <Mail className="h-5 w-5 text-muted-foreground mt-0.5" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Primary Email</p>
-                  <p>{customer.contact_email}</p>
-                </div>
-              </div>
-
-              {customer.contact_name && (
-                <div className="flex items-start gap-3">
-                  <User className="h-5 w-5 text-muted-foreground mt-0.5" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Primary Contact</p>
-                    <p>{customer.contact_name}</p>
-                  </div>
-                </div>
-              )}
-
-              {customer.contact_phone && (
-                <div className="flex items-start gap-3">
-                  <Phone className="h-5 w-5 text-muted-foreground mt-0.5" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Phone</p>
-                    <p>{customer.contact_phone}</p>
-                  </div>
-                </div>
-              )}
-
               {customer.billing_address && (
                 <div className="flex items-start gap-3">
                   <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
@@ -238,6 +285,7 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
 
               <div className="pt-4 border-t text-sm text-muted-foreground">
                 <p>Created: {new Date(customer.created_at).toLocaleDateString()}</p>
+                <p>Last Updated: {new Date(customer.updated_at).toLocaleDateString()}</p>
               </div>
             </div>
           </TabsContent>
@@ -250,6 +298,24 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
         customerId={customer.id}
         contact={editingContact}
       />
+
+      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive Customer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will archive "{customer.company_name}" and hide it from the active customers list.
+              The customer and all their contacts will still be available in the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleArchiveConfirm}>
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
