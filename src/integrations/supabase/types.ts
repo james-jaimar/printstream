@@ -1207,6 +1207,51 @@ export type Database = {
           },
         ]
       }
+      label_customers: {
+        Row: {
+          billing_address: string | null
+          company_name: string
+          contact_email: string
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean | null
+          notes: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          billing_address?: string | null
+          company_name: string
+          contact_email: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean | null
+          notes?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          billing_address?: string | null
+          company_name?: string
+          contact_email?: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean | null
+          notes?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       label_dielines: {
         Row: {
           columns_across: number
@@ -1342,6 +1387,7 @@ export type Database = {
           created_by: string | null
           customer_id: string | null
           customer_name: string
+          customer_user_id: string | null
           dieline_id: string | null
           due_date: string | null
           estimated_frames: number | null
@@ -1366,6 +1412,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string | null
           customer_name: string
+          customer_user_id?: string | null
           dieline_id?: string | null
           due_date?: string | null
           estimated_frames?: number | null
@@ -1390,6 +1437,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string | null
           customer_name?: string
+          customer_user_id?: string | null
           dieline_id?: string | null
           due_date?: string | null
           estimated_frames?: number | null
@@ -1418,6 +1466,41 @@ export type Database = {
             columns: ["substrate_id"]
             isOneToOne: false
             referencedRelation: "label_stock"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_proof_approvals: {
+        Row: {
+          action: string
+          approved_by: string | null
+          comment: string | null
+          created_at: string
+          id: string
+          order_id: string
+        }
+        Insert: {
+          action: string
+          approved_by?: string | null
+          comment?: string | null
+          created_at?: string
+          id?: string
+          order_id: string
+        }
+        Update: {
+          action?: string
+          approved_by?: string | null
+          comment?: string | null
+          created_at?: string
+          id?: string
+          order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_proof_approvals_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
             referencedColumns: ["id"]
           },
         ]

@@ -95,7 +95,8 @@ import BackfillPaperSpecs from "@/pages/BackfillPaperSpecs";
 
 // Labels Division imports
 import LabelsLayout from "@/components/labels/LabelsLayout";
-import { LabelsHome, LabelsOrders, LabelsOrderDetail, LabelsDielines, LabelsStock, LabelsSchedule } from "@/pages/labels";
+import { LabelsHome, LabelsOrders, LabelsOrderDetail, LabelsDielines, LabelsStock, LabelsSchedule, LabelsSettings } from "@/pages/labels";
+import { ClientPortalLogin, ClientPortalDashboard, ClientOrderDetail } from "@/pages/labels/portal";
 
 // Removed legacy test components
 // Removed scheduler components
@@ -251,7 +252,21 @@ function App() {
                   <Route path="dielines" element={<LabelsDielines />} />
                   <Route path="stock" element={<LabelsStock />} />
                   <Route path="schedule" element={<LabelsSchedule />} />
+                  <Route path="settings" element={<LabelsSettings />} />
                 </Route>
+                
+                {/* Labels Client Portal - separate from admin area */}
+                <Route path="/labels/portal/login" element={<ClientPortalLogin />} />
+                <Route path="/labels/portal" element={
+                  <ProtectedRoute>
+                    <ClientPortalDashboard />
+                  </ProtectedRoute>
+                } />
+                <Route path="/labels/portal/order/:orderId" element={
+                  <ProtectedRoute>
+                    <ClientOrderDetail />
+                  </ProtectedRoute>
+                } />
                 
                 {/* Schedule Board standalone route */}
                 <Route path="/schedule-board" element={
