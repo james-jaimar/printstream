@@ -175,27 +175,27 @@ export function LabelItemsDropZone({
         );
 
         // Generate thumbnail client-side with robust error handling
-        let thumbnailUrl: string | undefined;
+        // Store the PATH (not URL) so we can generate signed URLs at display time
+        let thumbnailPath: string | undefined;
         let thumbnailDataUrl: string | undefined;
         
         try {
           thumbnailDataUrl = await generatePdfThumbnail(file, 300);
           const thumbnailBlob = dataUrlToBlob(thumbnailDataUrl);
-          const thumbnailPath = `label-artwork/orders/${orderId}/thumbnails/${fileName.replace('.pdf', '.png')}`;
+          const thumbPath = `label-artwork/orders/${orderId}/thumbnails/${fileName.replace('.pdf', '.png')}`;
           
           const { error: thumbError } = await supabase.storage
             .from('label-files')
-            .upload(thumbnailPath, thumbnailBlob, { contentType: 'image/png' });
+            .upload(thumbPath, thumbnailBlob, { contentType: 'image/png' });
           
           if (thumbError) {
-            console.warn('Thumbnail upload failed:', thumbError.message);
-            // Fall back to data URL (stored directly in DB)
-            thumbnailUrl = thumbnailDataUrl;
+            console.warn('Thumbnail upload to storage failed:', thumbError.message);
+            // Fall back to data URL (stored directly in DB as base64)
+            thumbnailPath = thumbnailDataUrl;
           } else {
-            const { data: { publicUrl: thumbPublicUrl } } = supabase.storage
-              .from('label-files')
-              .getPublicUrl(thumbnailPath);
-            thumbnailUrl = thumbPublicUrl;
+            // Store the path for signed URL generation at render time
+            thumbnailPath = thumbPath;
+            console.log('Thumbnail uploaded to storage:', thumbPath);
           }
         } catch (thumbError) {
           console.warn('Thumbnail generation failed:', thumbError);
@@ -213,7 +213,7 @@ export function LabelItemsDropZone({
         uploadedFiles.push({ 
           url: publicUrl, 
           name: file.name, 
-          thumbnailUrl, 
+          thumbnailUrl: thumbnailPath, // Store path (or data URL fallback)
           preflightStatus,
           preflightReport,
           width_mm: pdfDimensions?.width_mm,

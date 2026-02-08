@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import { useThumbnailUrl } from '@/hooks/labels/useThumbnailUrl';
 import type { LabelItem } from '@/types/labels';
 
 type ValidationStatus = 'passed' | 'no_bleed' | 'too_large' | 'too_small' | 'needs_crop' | 'pending';
@@ -45,12 +46,15 @@ export function LabelItemCard({
   onNameChange,
   validationStatus = 'pending',
   validationIssues = [],
-  thumbnailUrl,
+  thumbnailUrl: thumbnailPath,
 }: LabelItemCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(item.name);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [localQuantity, setLocalQuantity] = useState(item.quantity);
+
+  // Generate signed URL for thumbnail (handles paths, full URLs, and data URLs)
+  const { url: thumbnailUrl, isLoading: thumbnailLoading } = useThumbnailUrl(thumbnailPath);
 
   // Sync local quantity when item.quantity changes from external source
   useEffect(() => {
@@ -79,7 +83,9 @@ export function LabelItemCard({
       <CardContent className="p-0">
         {/* Thumbnail / Preview */}
         <div className="relative aspect-[4/3] bg-muted flex items-center justify-center border-b">
-          {thumbnailUrl ? (
+          {thumbnailLoading ? (
+            <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
+          ) : thumbnailUrl ? (
             <img
               src={thumbnailUrl}
               alt={item.name}
