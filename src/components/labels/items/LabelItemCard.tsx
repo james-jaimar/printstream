@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,6 +50,12 @@ export function LabelItemCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(item.name);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [localQuantity, setLocalQuantity] = useState(item.quantity);
+
+  // Sync local quantity when item.quantity changes from external source
+  useEffect(() => {
+    setLocalQuantity(item.quantity);
+  }, [item.quantity]);
 
   const status = statusConfig[validationStatus];
   const StatusIcon = status.icon;
@@ -59,6 +65,13 @@ export function LabelItemCard({
       onNameChange(editName.trim());
     }
     setIsEditing(false);
+  };
+
+  const handleQuantitySave = () => {
+    const qty = Math.max(1, localQuantity);
+    if (qty !== item.quantity) {
+      onQuantityChange(qty);
+    }
   };
 
   return (
@@ -128,8 +141,10 @@ export function LabelItemCard({
             <Input
               type="number"
               min={1}
-              value={item.quantity}
-              onChange={(e) => onQuantityChange(Math.max(1, parseInt(e.target.value) || 1))}
+              value={localQuantity}
+              onChange={(e) => setLocalQuantity(parseInt(e.target.value) || 1)}
+              onBlur={handleQuantitySave}
+              onKeyDown={(e) => e.key === 'Enter' && handleQuantitySave()}
               className="h-8 text-sm w-24"
             />
           </div>
