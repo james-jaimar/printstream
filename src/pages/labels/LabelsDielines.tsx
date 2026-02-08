@@ -1,70 +1,99 @@
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Plus, Search, Grid3X3, Ruler, Trash2 } from 'lucide-react';
-import { useLabelDielines, useCreateLabelDieline, useDeleteLabelDieline } from '@/hooks/labels/useLabelDielines';
-import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Plus, Search } from 'lucide-react';
+import { 
+  useLabelDielines, 
+  useCreateLabelDieline, 
+  useUpdateLabelDieline,
+  useDeleteLabelDieline 
+} from '@/hooks/labels/useLabelDielines';
+import { DielineFormDialog, DielineCard } from '@/components/labels/dielines';
+import type { LabelDieline, CreateLabelDielineInput } from '@/types/labels';
+import { toast } from 'sonner';
 
 export default function LabelsDielines() {
   const [search, setSearch] = useState('');
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [newDieline, setNewDieline] = useState({
-    name: '',
-    roll_width_mm: 320,
-    label_width_mm: 50,
-    label_height_mm: 30,
-    columns_across: 6,
-    rows_around: 4,
-    horizontal_gap_mm: 3,
-    vertical_gap_mm: 2.5,
-    corner_radius_mm: 0,
-  });
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingDieline, setEditingDieline] = useState<LabelDieline | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const { data: dielines, isLoading } = useLabelDielines();
+  const { data: dielines, isLoading } = useLabelDielines(false); // Show all, including inactive
   const createMutation = useCreateLabelDieline();
+  const updateMutation = useUpdateLabelDieline();
   const deleteMutation = useDeleteLabelDieline();
 
-  const filteredDielines = dielines?.filter((d) =>
+  const activeDielines = dielines?.filter(d => d.is_active) || [];
+  const filteredDielines = activeDielines.filter((d) =>
     d.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleCreate = async () => {
-    await createMutation.mutateAsync(newDieline);
-    setIsCreateOpen(false);
-    setNewDieline({
-      name: '',
-      roll_width_mm: 320,
-      label_width_mm: 50,
-      label_height_mm: 30,
-      columns_across: 6,
-      rows_around: 4,
-      horizontal_gap_mm: 3,
-      vertical_gap_mm: 2.5,
-      corner_radius_mm: 0,
-    });
+  const handleCreate = async (data: CreateLabelDielineInput) => {
+    await createMutation.mutateAsync(data);
+    setIsFormOpen(false);
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Are you sure you want to archive this dieline?')) {
-      await deleteMutation.mutateAsync(id);
+  const handleEdit = (dieline: LabelDieline) => {
+    setEditingDieline(dieline);
+    setIsFormOpen(true);
+  };
+
+  const handleUpdate = async (data: CreateLabelDielineInput) => {
+    if (!editingDieline) return;
+    await updateMutation.mutateAsync({
+      id: editingDieline.id,
+      updates: data,
+    });
+    setIsFormOpen(false);
+    setEditingDieline(null);
+  };
+
+  const handleDuplicate = (dieline: LabelDieline) => {
+    setEditingDieline(null);
+    setIsFormOpen(true);
+    // Pre-fill with duplicated data after dialog opens
+    setTimeout(() => {
+      const duplicateData: LabelDieline = {
+        ...dieline,
+        id: '',
+        name: `${dieline.name} (Copy)`,
+        is_custom: true,
+        created_at: '',
+        updated_at: '',
+      };
+      setEditingDieline(duplicateData);
+    }, 0);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteConfirm) return;
+    await deleteMutation.mutateAsync(deleteConfirm);
+    setDeleteConfirm(null);
+  };
+
+  const handleFormClose = (open: boolean) => {
+    setIsFormOpen(open);
+    if (!open) {
+      setEditingDieline(null);
     }
   };
 
-  // Auto-generate name when dimensions change
-  const generateName = () => {
-    return `${newDieline.columns_across} Across x ${newDieline.rows_around} Around - ${newDieline.label_width_mm}x${newDieline.label_height_mm}mm (${newDieline.roll_width_mm}mm roll)`;
+  const handleSubmit = async (data: CreateLabelDielineInput) => {
+    if (editingDieline?.id) {
+      await handleUpdate(data);
+    } else {
+      await handleCreate(data);
+    }
   };
 
   return (
@@ -74,173 +103,13 @@ export default function LabelsDielines() {
         <div>
           <h1 className="text-2xl font-bold">Dieline Library</h1>
           <p className="text-muted-foreground">
-            Standard label layouts and die templates
+            Standard label layouts and die templates ({activeDielines.length} active)
           </p>
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Dieline
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Create New Dieline Template</DialogTitle>
-              <DialogDescription>
-                Define the label dimensions and layout for the die.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Roll Width (mm)</Label>
-                  <select
-                    className="w-full p-2 border rounded"
-                    value={newDieline.roll_width_mm}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, roll_width_mm: Number(e.target.value) })
-                    }
-                  >
-                    {LABEL_PRINT_CONSTANTS.ROLL_WIDTHS_MM.map((w) => (
-                      <option key={w} value={w}>{w}mm</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Corner Radius (mm)</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.corner_radius_mm}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, corner_radius_mm: Number(e.target.value) })
-                    }
-                    min={0}
-                    step={0.5}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Label Width (mm)</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.label_width_mm}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, label_width_mm: Number(e.target.value) })
-                    }
-                    min={10}
-                    step={1}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Label Height (mm)</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.label_height_mm}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, label_height_mm: Number(e.target.value) })
-                    }
-                    min={10}
-                    step={1}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Columns Across</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.columns_across}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, columns_across: Number(e.target.value) })
-                    }
-                    min={1}
-                    max={20}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Rows Around</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.rows_around}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, rows_around: Number(e.target.value) })
-                    }
-                    min={1}
-                    max={20}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Horizontal Gap (mm)</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.horizontal_gap_mm}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, horizontal_gap_mm: Number(e.target.value) })
-                    }
-                    min={0}
-                    step={0.5}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Vertical Gap (mm)</Label>
-                  <Input
-                    type="number"
-                    value={newDieline.vertical_gap_mm}
-                    onChange={(e) =>
-                      setNewDieline({ ...newDieline, vertical_gap_mm: Number(e.target.value) })
-                    }
-                    min={0}
-                    step={0.5}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Template Name</Label>
-                <Input
-                  value={newDieline.name || generateName()}
-                  onChange={(e) =>
-                    setNewDieline({ ...newDieline, name: e.target.value })
-                  }
-                  placeholder="Auto-generated from dimensions"
-                />
-              </div>
-
-              {/* Preview */}
-              <div className="p-4 bg-muted rounded-lg">
-                <p className="text-sm font-medium mb-2">Layout Preview</p>
-                <div className="flex gap-4 text-sm text-muted-foreground">
-                  <span>
-                    Labels per frame: {newDieline.columns_across * newDieline.rows_around}
-                  </span>
-                  <span>|</span>
-                  <span>
-                    Total width: {newDieline.columns_across * newDieline.label_width_mm + 
-                      (newDieline.columns_across - 1) * newDieline.horizontal_gap_mm}mm
-                  </span>
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleCreate} 
-                disabled={createMutation.isPending}
-              >
-                {createMutation.isPending ? 'Creating...' : 'Create Dieline'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={() => { setEditingDieline(null); setIsFormOpen(true); }}>
+          <Plus className="h-4 w-4 mr-2" />
+          New Dieline
+        </Button>
       </div>
 
       {/* Search */}
@@ -256,53 +125,64 @@ export default function LabelsDielines() {
 
       {/* Dielines Grid */}
       {isLoading ? (
-        <p className="text-muted-foreground text-center py-8">Loading dielines...</p>
-      ) : filteredDielines?.length === 0 ? (
-        <p className="text-muted-foreground text-center py-8">No dielines found</p>
+        <div className="text-muted-foreground text-center py-8">Loading dielines...</div>
+      ) : filteredDielines.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground mb-4">
+            {search ? 'No dielines match your search' : 'No dielines configured yet'}
+          </p>
+          {!search && (
+            <Button onClick={() => setIsFormOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create your first dieline
+            </Button>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredDielines?.map((dieline) => (
-            <Card key={dieline.id}>
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <CardTitle className="text-base">{dieline.name}</CardTitle>
-                  {dieline.is_custom && (
-                    <Badge variant="outline">Custom</Badge>
-                  )}
-                </div>
-                <CardDescription>
-                  {dieline.roll_width_mm}mm roll width
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Ruler className="h-4 w-4" />
-                    <span>{dieline.label_width_mm} x {dieline.label_height_mm}mm</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Grid3X3 className="h-4 w-4" />
-                    <span>{dieline.columns_across} x {dieline.rows_around}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between mt-4">
-                  <span className="text-sm text-muted-foreground">
-                    Gaps: {dieline.horizontal_gap_mm}mm H, {dieline.vertical_gap_mm}mm V
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(dieline.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          {filteredDielines.map((dieline) => (
+            <DielineCard
+              key={dieline.id}
+              dieline={dieline}
+              onEdit={handleEdit}
+              onDelete={(id) => setDeleteConfirm(id)}
+              onDuplicate={handleDuplicate}
+              isDeleting={deleteMutation.isPending}
+            />
           ))}
         </div>
       )}
+
+      {/* Create/Edit Dialog */}
+      <DielineFormDialog
+        open={isFormOpen}
+        onOpenChange={handleFormClose}
+        dieline={editingDieline}
+        onSubmit={handleSubmit}
+        isPending={createMutation.isPending || updateMutation.isPending}
+      />
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive this dieline?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This dieline will be archived and hidden from the library. 
+              It can be restored later if needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
