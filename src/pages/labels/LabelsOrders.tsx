@@ -19,8 +19,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Search, Filter, Eye, Upload } from 'lucide-react';
-import { useLabelOrders } from '@/hooks/labels/useLabelOrders';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Search, Filter, Eye, Trash2, Upload, Loader2 } from 'lucide-react';
+import { useLabelOrders, useDeleteLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { NewLabelOrderDialog } from '@/components/labels/NewLabelOrderDialog';
 import { LabelOrderModal } from '@/components/labels/order/LabelOrderModal';
 import { format } from 'date-fns';
@@ -49,7 +60,10 @@ export default function LabelsOrders() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const navigate = useNavigate();
+  
+  const deleteOrder = useDeleteLabelOrder();
   
   const statusFilter = (searchParams.get('status') as LabelOrderStatus | null) || undefined;
   const { data: orders, isLoading } = useLabelOrders(statusFilter);
@@ -190,16 +204,60 @@ export default function LabelsOrders() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedOrderId(order.id);
-                        }}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedOrderId(order.id);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {deletingOrderId === order.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Order?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete order <strong>{order.order_number}</strong> 
+                                {order.customer_name && ` for ${order.customer_name}`}.
+                                All associated items, runs, and files will also be deleted.
+                                This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingOrderId(order.id);
+                                  deleteOrder.mutate(order.id, {
+                                    onSettled: () => setDeletingOrderId(null),
+                                  });
+                                }}
+                              >
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
