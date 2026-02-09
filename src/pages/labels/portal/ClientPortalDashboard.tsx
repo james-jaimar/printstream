@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { Package, Eye, Clock, CheckCircle, AlertCircle, LogOut, Boxes } from 'lucide-react';
-import { useClientOrders, useClientProfile } from '@/hooks/labels/useClientPortal';
-import { supabase } from '@/integrations/supabase/client';
+import { useClientAuth } from '@/hooks/labels/useClientAuth';
+import { useClientPortalOrders } from '@/hooks/labels/useClientPortalData';
 import type { LabelOrderStatus } from '@/types/labels';
 
 const statusConfig: Record<LabelOrderStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
@@ -20,11 +20,11 @@ const statusConfig: Record<LabelOrderStatus, { label: string; variant: 'default'
 
 export default function ClientPortalDashboard() {
   const navigate = useNavigate();
-  const { data: profile } = useClientProfile();
-  const { data: orders, isLoading } = useClientOrders();
+  const { contact, logout } = useClientAuth();
+  const { data: orders, isLoading } = useClientPortalOrders();
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
+    logout();
     navigate('/labels/portal/login');
   };
 
@@ -41,7 +41,7 @@ export default function ClientPortalDashboard() {
             <div>
               <h1 className="font-semibold">Label Client Portal</h1>
               <p className="text-sm text-muted-foreground">
-                {profile?.company_name || 'Welcome'}
+                {contact?.company_name || 'Welcome'}
               </p>
             </div>
           </div>

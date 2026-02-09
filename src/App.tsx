@@ -97,6 +97,8 @@ import BackfillPaperSpecs from "@/pages/BackfillPaperSpecs";
 import LabelsLayout from "@/components/labels/LabelsLayout";
 import { LabelsHome, LabelsOrders, LabelsOrderDetail, LabelsDielines, LabelsStock, LabelsSchedule, LabelsSettings, LabelsReporting, LabelsCustomers } from "@/pages/labels";
 import { ClientPortalLogin, ClientPortalDashboard, ClientOrderDetail } from "@/pages/labels/portal";
+import { ClientAuthProvider } from "@/hooks/labels/useClientAuth";
+import ClientPortalGuard from "@/components/labels/portal/ClientPortalGuard";
 
 // Removed legacy test components
 // Removed scheduler components
@@ -257,17 +259,25 @@ function App() {
                   <Route path="reports" element={<LabelsReporting />} />
                 </Route>
                 
-                {/* Labels Client Portal - separate from admin area */}
-                <Route path="/labels/portal/login" element={<ClientPortalLogin />} />
+                {/* Labels Client Portal - independent auth, NOT using staff ProtectedRoute */}
+                <Route path="/labels/portal/login" element={
+                  <ClientAuthProvider>
+                    <ClientPortalLogin />
+                  </ClientAuthProvider>
+                } />
                 <Route path="/labels/portal" element={
-                  <ProtectedRoute>
-                    <ClientPortalDashboard />
-                  </ProtectedRoute>
+                  <ClientAuthProvider>
+                    <ClientPortalGuard>
+                      <ClientPortalDashboard />
+                    </ClientPortalGuard>
+                  </ClientAuthProvider>
                 } />
                 <Route path="/labels/portal/order/:orderId" element={
-                  <ProtectedRoute>
-                    <ClientOrderDetail />
-                  </ProtectedRoute>
+                  <ClientAuthProvider>
+                    <ClientPortalGuard>
+                      <ClientOrderDetail />
+                    </ClientPortalGuard>
+                  </ClientAuthProvider>
                 } />
                 
                 {/* Schedule Board standalone route */}

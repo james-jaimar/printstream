@@ -1207,6 +1207,44 @@ export type Database = {
           },
         ]
       }
+      label_client_auth: {
+        Row: {
+          contact_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          last_login_at: string | null
+          password_hash: string
+          updated_at: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_login_at?: string | null
+          password_hash: string
+          updated_at?: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_login_at?: string | null
+          password_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_client_auth_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: true
+            referencedRelation: "label_customer_contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       label_customer_contacts: {
         Row: {
           can_approve_proofs: boolean | null

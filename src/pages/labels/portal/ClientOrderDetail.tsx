@@ -22,11 +22,9 @@ import {
   XCircle, 
   Image as ImageIcon, 
   FileText, 
-  Clock, 
-  Package,
   Loader2
 } from 'lucide-react';
-import { useClientOrder, useOrderApprovals, useSubmitProofApproval } from '@/hooks/labels/useClientPortal';
+import { useClientPortalOrder, useClientPortalApprovals, useClientPortalApprove } from '@/hooks/labels/useClientPortalData';
 
 export default function ClientOrderDetail() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -35,9 +33,9 @@ export default function ClientOrderDetail() {
   const [rejectComment, setRejectComment] = useState('');
   const [confirmApproveOpen, setConfirmApproveOpen] = useState(false);
 
-  const { data: order, isLoading } = useClientOrder(orderId);
-  const { data: approvals } = useOrderApprovals(orderId);
-  const submitApprovalMutation = useSubmitProofApproval();
+  const { data: order, isLoading } = useClientPortalOrder(orderId);
+  const { data: approvals } = useClientPortalApprovals(orderId);
+  const submitApprovalMutation = useClientPortalApprove();
 
   const handleApprove = async () => {
     if (!orderId) return;
@@ -132,7 +130,7 @@ export default function ClientOrderDetail() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {order.items?.map((item, idx) => (
+                  {order.items?.map((item) => (
                     <div key={item.id} className="flex gap-4 p-4 border rounded-lg">
                       <div className="w-20 h-20 bg-muted rounded flex items-center justify-center flex-shrink-0">
                         {item.artwork_thumbnail_url ? (
@@ -186,7 +184,7 @@ export default function ClientOrderDetail() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {order.runs.map((run, idx) => (
+                    {order.runs.map((run) => (
                       <div key={run.id} className="p-4 border rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-medium">Run {run.run_number}</span>
@@ -271,7 +269,7 @@ export default function ClientOrderDetail() {
                 <CardContent>
                   <ScrollArea className="h-[200px]">
                     <div className="space-y-3">
-                      {approvals.map((approval) => (
+                      {approvals.map((approval: any) => (
                         <div key={approval.id} className="flex gap-3 text-sm">
                           {approval.action === 'approved' ? (
                             <CheckCircle className="h-4 w-4 text-green-500 mt-0.5" />

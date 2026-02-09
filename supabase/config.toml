@@ -65,3 +65,10 @@ verify_jwt = false
 [functions.label-page-boxes]
 verify_jwt = false
 
+# LABELS DIVISION: Client Portal Auth (independent from staff auth)
+[functions.label-client-auth]
+verify_jwt = false
+
+[functions.label-client-data]
+verify_jwt = false
+
