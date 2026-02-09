@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -88,25 +88,46 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
   const selectedCustomerId = form.watch('customer_id');
   const { data: contacts, isLoading: contactsLoading } = useCustomerContacts(selectedCustomerId);
 
-  // Reset selected contacts when customer changes
+  // Track which customer we've already auto-initialized to prevent re-running
+  const autoSelectedCustomerRef = useRef<string | null>(null);
+
+  // Stable reference to setValue to avoid dependency on entire form object
+  const setValue = useCallback(form.setValue, []);
+
+  // Reset selected contacts when customer changes - runs once per customer
   useEffect(() => {
+    // If no customer selected, clear everything
     if (!selectedCustomerId) {
       setSelectedContacts([]);
+      autoSelectedCustomerRef.current = null;
+      return;
+    }
+
+    // Skip if we've already auto-selected for this customer
+    if (autoSelectedCustomerRef.current === selectedCustomerId) {
       return;
     }
     
-    // Only auto-select once contacts have loaded
-    if (!contactsLoading && contacts) {
-      const primaryContact = contacts.find(c => c.is_primary && c.is_active);
-      if (primaryContact) {
-        setSelectedContacts([primaryContact.id]);
-        form.setValue('contact_name', primaryContact.name);
-        form.setValue('contact_email', primaryContact.email);
-      } else {
-        setSelectedContacts([]);
-      }
+    // Wait for contacts to finish loading
+    if (contactsLoading) {
+      return;
     }
-  }, [selectedCustomerId, contacts, contactsLoading, form]);
+
+    // Mark this customer as initialized (do this before setting values)
+    autoSelectedCustomerRef.current = selectedCustomerId;
+
+    // Find and auto-select primary contact
+    const primaryContact = contacts?.find(c => c.is_primary && c.is_active);
+    if (primaryContact) {
+      setSelectedContacts([primaryContact.id]);
+      setValue('contact_name', primaryContact.name);
+      setValue('contact_email', primaryContact.email);
+    } else {
+      setSelectedContacts([]);
+      setValue('contact_name', '');
+      setValue('contact_email', '');
+    }
+  }, [selectedCustomerId, contacts, contactsLoading, setValue]);
 
   const toggleContact = (contactId: string) => {
     setSelectedContacts(prev => 
@@ -238,10 +259,12 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                         onClick={() => toggleContact(contact.id)}
                       >
                         <div className="flex items-center gap-3">
-                          <Checkbox 
-                            checked={selectedContacts.includes(contact.id)}
-                            onCheckedChange={() => toggleContact(contact.id)}
-                          />
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <Checkbox 
+                              checked={selectedContacts.includes(contact.id)}
+                              onCheckedChange={() => toggleContact(contact.id)}
+                            />
+                          </div>
                           <div className="flex items-center gap-2">
                             <User className="h-4 w-4 text-muted-foreground" />
                             <div>
