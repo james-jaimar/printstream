@@ -1,0 +1,100 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { useClientAuth } from './useClientAuth';
+import { toast } from 'sonner';
+import type { LabelOrder } from '@/types/labels';
+
+const CLIENT_ORDERS_KEY = ['label_client_orders'];
+
+function useClientFetch() {
+  const { token } = useClientAuth();
+
+  return async (path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown }) => {
+    const { data, error } = await supabase.functions.invoke(`label-client-data${path}`, {
+      method: (options?.method || 'GET') as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+      body: options?.body,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (error) throw new Error('Request failed');
+    if (data?.error) throw new Error(data.error);
+    return data;
+  };
+}
+
+export function useClientPortalOrders() {
+  const { token } = useClientAuth();
+  const clientFetch = useClientFetch();
+
+  return useQuery({
+    queryKey: CLIENT_ORDERS_KEY,
+    queryFn: async (): Promise<LabelOrder[]> => {
+      const data = await clientFetch('/orders');
+      return (data?.orders || []) as unknown as LabelOrder[];
+    },
+    enabled: !!token,
+  });
+}
+
+export function useClientPortalOrder(orderId: string | undefined) {
+  const { token } = useClientAuth();
+  const clientFetch = useClientFetch();
+
+  return useQuery({
+    queryKey: [...CLIENT_ORDERS_KEY, orderId],
+    queryFn: async (): Promise<LabelOrder | null> => {
+      if (!orderId) return null;
+      const data = await clientFetch(`/order/${orderId}`);
+      return (data?.order || null) as unknown as LabelOrder | null;
+    },
+    enabled: !!token && !!orderId,
+  });
+}
+
+export function useClientPortalApprovals(orderId: string | undefined) {
+  const { token } = useClientAuth();
+  const clientFetch = useClientFetch();
+
+  return useQuery({
+    queryKey: ['label_proof_approvals', orderId],
+    queryFn: async () => {
+      if (!orderId) return [];
+      const data = await clientFetch(`/approvals/${orderId}`);
+      return data?.approvals || [];
+    },
+    enabled: !!token && !!orderId,
+  });
+}
+
+export function useClientPortalApprove() {
+  const queryClient = useQueryClient();
+  const clientFetch = useClientFetch();
+
+  return useMutation({
+    mutationFn: async (input: {
+      order_id: string;
+      action: 'approved' | 'rejected';
+      comment?: string;
+    }) => {
+      await clientFetch('/approve', {
+        method: 'POST',
+        body: input,
+      });
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: CLIENT_ORDERS_KEY });
+      queryClient.invalidateQueries({ queryKey: ['label_proof_approvals', variables.order_id] });
+      toast.success(
+        variables.action === 'approved'
+          ? 'Proof approved successfully'
+          : 'Proof rejected - feedback sent'
+      );
+    },
+    onError: (error) => {
+      console.error('Approval error:', error);
+      toast.error('Failed to submit approval');
+    },
+  });
+}

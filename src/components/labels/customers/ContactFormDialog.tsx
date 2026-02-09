@@ -12,8 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2 } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Loader2, KeyRound } from 'lucide-react';
 import { useCreateCustomerContact, useUpdateCustomerContact, CustomerContact } from '@/hooks/labels/useCustomerContacts';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface ContactFormDialogProps {
@@ -40,6 +42,8 @@ export function ContactFormDialog({
     is_primary: false,
     notes: '',
   });
+  const [portalPassword, setPortalPassword] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
 
   const createMutation = useCreateCustomerContact();
   const updateMutation = useUpdateCustomerContact();
@@ -72,7 +76,33 @@ export function ContactFormDialog({
         notes: '',
       });
     }
+    setPortalPassword('');
   }, [contact, open]);
+
+  const handleSetPortalPassword = async () => {
+    if (!contact || !portalPassword || portalPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    setIsSavingPassword(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('label-client-auth/set-password', {
+        body: { contact_id: contact.id, password: portalPassword },
+      });
+
+      if (error || data?.error) {
+        throw new Error(data?.error || 'Failed to set password');
+      }
+
+      toast.success('Portal password set successfully');
+      setPortalPassword('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to set portal password');
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!formData.name || !formData.email) {
@@ -233,6 +263,43 @@ export function ContactFormDialog({
               rows={2}
             />
           </div>
+
+          {/* Portal Access - only shown when editing an existing contact */}
+          {isEditing && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-sm font-medium">Portal Access</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Set a password to allow this contact to log in to the client portal and view orders/approve proofs.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    value={portalPassword}
+                    onChange={(e) => setPortalPassword(e.target.value)}
+                    placeholder="Set portal password (min 6 chars)"
+                    className="flex-1"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleSetPortalPassword}
+                    disabled={isSavingPassword || portalPassword.length < 6}
+                  >
+                    {isSavingPassword ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      'Set Password'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>

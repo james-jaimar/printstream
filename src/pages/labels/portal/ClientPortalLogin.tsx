@@ -5,11 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Boxes, Loader2 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { useClientAuth } from '@/hooks/labels/useClientAuth';
 import { toast } from 'sonner';
 
 export default function ClientPortalLogin() {
   const navigate = useNavigate();
+  const { login } = useClientAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -19,29 +20,7 @@ export default function ClientPortalLogin() {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) throw error;
-
-      // Check if user is a label customer
-      const { data: customer, error: customerError } = await supabase
-        .from('label_customers')
-        .select('id')
-        .eq('user_id', data.user.id)
-        .maybeSingle();
-
-      if (customerError) throw customerError;
-
-      if (!customer) {
-        // Not a label customer - sign them out and show error
-        await supabase.auth.signOut();
-        toast.error('Access denied. This portal is for label customers only.');
-        return;
-      }
-
+      await login(email, password);
       toast.success('Welcome to the Client Portal');
       navigate('/labels/portal');
     } catch (error: any) {
