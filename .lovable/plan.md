@@ -1,82 +1,90 @@
 
-# Fix Plan: Proof Area Buttons & AI Layout Flexibility
+# Fix: Customer ID Not Saved with Label Orders
 
 ## Problem Summary
 
-**Issue 1**: The "Use as Print" buttons appear in the Proof Artwork section. These buttons shouldn't show here as it confuses the workflow - the proof area is for client-facing files, and preparation actions belong in a separate context.
+When you create a label order and select a customer from the dropdown, the **customer_id is never saved to the database**. The order only stores `customer_name`, `contact_name`, and `contact_email` - but not the actual link to the customer record.
 
-**Issue 2**: The AI Layout Optimizer shows "Artwork Not Ready for Production" and blocks layout generation when items only have proof files. The system should allow previewing/generating layouts with proof files while only enforcing print-ready status at the final "Apply Layout" stage.
+Later, when you open "Send Proof for Approval," the dialog tries to look up contacts via `useCustomerContacts(order.customer_id)`. Since `customer_id` is `null`, it returns no contacts - even though the customer definitely has contacts configured.
+
+**Database evidence:**
+```
+Order LBL-2026-0001: customer_id = NULL, contact_email = james@jaimar.dev
+Customer "Jaimar": id = 9d7ac83b-7c14-40f9-b23c-36c8e378bfeb
+Contact "James Hawkins": customer_id = 9d7ac83b-7c14-40f9-b23c-36c8e378bfeb
+```
+
+The customer and contact exist, but the order has no link to them.
 
 ---
 
 ## Solution
 
-### 1. Remove "Use as Print" buttons from Proof Area
+### 1. Add `customer_id` to the create order input type
 
-**What changes**: The item cards displayed in the main order view will no longer show the "Use as Print" or "Auto-Crop" buttons.
+Update `CreateLabelOrderInput` in `src/types/labels.ts` to include `customer_id`:
 
-**Why**: These preparation actions are better suited to the AI Layout workflow where there's a clear "Prepare Items" action. Showing them on every card in the proof area clutters the interface and creates confusion about the workflow.
+```typescript
+export interface CreateLabelOrderInput {
+  customer_id?: string;           // ← ADD THIS
+  customer_name: string;
+  contact_name?: string;
+  // ... rest unchanged
+}
+```
 
-**Technical approach**:
-- Modify `LabelItemsGrid` to NOT pass `onPrepareArtwork` to `LabelItemCard`
-- The preparation actions will remain available in the AI Layout Optimizer panel via the "Prepare X Items" button
+### 2. Update the order creation hook to save `customer_id`
 
----
+Modify `useCreateLabelOrder` in `src/hooks/labels/useLabelOrders.ts` to include `customer_id` in the insert:
 
-### 2. Allow AI Layout to Generate Options with Proof Files
+```typescript
+const { data, error } = await supabase
+  .from('label_orders')
+  .insert({
+    order_number: orderNumber,
+    customer_id: input.customer_id,      // ← ADD THIS
+    customer_name: input.customer_name,
+    // ... rest unchanged
+  })
+```
 
-**What changes**: 
-- Layout generation will work when items have proof files (not just print-ready)
-- The warning will change from blocking to informational ("X items will need print files before production")
-- The "Apply Layout" button will remain locked until all items are print-ready
+### 3. Pass `customer_id` from the dialog form to the mutation
 
-**Why**: This allows admins to plan production layouts during the proofing phase, optimizing the workflow and providing earlier visibility into production schedules.
+Update `NewLabelOrderDialog.tsx` `onSubmit` to include `customer_id`:
 
-**Technical approach**:
-- Update the artwork readiness check in `LayoutOptimizer` to distinguish between:
-  - Items with NO artwork (blocking)
-  - Items with proof artwork but no print file (allow generation, warn at apply)
-  - Items with print-ready files (fully ready)
-- Change the alert from blocking to informational when items have proof but not print
-- Move the "Prepare Items" action to be more prominent
+```typescript
+const result = await createOrder.mutateAsync({
+  customer_id: data.customer_id,         // ← ADD THIS
+  customer_name: data.customer_name,
+  // ... rest unchanged
+});
+```
+
+### 4. (Optional) Fix existing orders
+
+Since LBL-2026-0001 already exists without a `customer_id`, you may want to manually update it:
+
+```sql
+UPDATE label_orders 
+SET customer_id = '9d7ac83b-7c14-40f9-b23c-36c8e378bfeb' 
+WHERE order_number = 'LBL-2026-0001';
+```
+
+(Or re-create the order after the fix is deployed)
 
 ---
 
 ## Files to Change
 
-1. **`src/components/labels/items/LabelItemsGrid.tsx`**
-   - Remove the `onPrepareArtwork` handler from `LabelItemCard` calls
-
-2. **`src/components/labels/LayoutOptimizer.tsx`**
-   - Update `artworkReadiness` logic to check for ANY artwork (proof or print)
-   - Add separate tracking for "has artwork" vs "is print-ready"
-   - Change alert to informational when items have proof files
-   - Keep "Apply Layout" disabled only when items aren't print-ready
+1. **`src/types/labels.ts`** - Add `customer_id?: string` to `CreateLabelOrderInput`
+2. **`src/hooks/labels/useLabelOrders.ts`** - Insert `customer_id` in the database call
+3. **`src/components/labels/NewLabelOrderDialog.tsx`** - Pass `customer_id` from form data to mutation
 
 ---
 
 ## Expected Result
 
-After these changes:
-- The order view will show clean item cards without action buttons
-- AI Layout can generate options for orders where items have proof artwork
-- The "Prepare Items" button in the AI Layout dialog handles artwork preparation
-- Final layout application remains blocked until artwork is print-ready, maintaining production safety
-
----
-
-## Technical Details
-
-```text
-Artwork State Machine:
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   No Artwork    │ -> │   Proof Only    │ -> │  Print Ready    │
-│  (blocks all)   │    │ (allows layout) │    │ (allows apply)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-**`artworkReadiness` updated logic**:
-- `hasArtwork`: Item has `proof_pdf_url` OR `artwork_pdf_url` OR `print_pdf_url`
-- `isPrintReady`: Item has `print_pdf_status === 'ready'`
-- `canGenerateLayout`: All items have artwork (proof or print)
-- `canApplyLayout`: All items are print-ready
+After this fix:
+- New orders will correctly link to the customer record via `customer_id`
+- "Send Proof for Approval" will find and display all configured contacts
+- The entire proofing notification workflow will function as designed
