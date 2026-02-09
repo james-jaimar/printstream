@@ -17,6 +17,7 @@ interface ItemAnalysis {
 interface LabelItemsGridProps {
   items: LabelItem[];
   orderId: string;
+  viewMode?: 'proof' | 'print';
   itemAnalyses?: Record<string, ItemAnalysis>;
 }
 
@@ -75,7 +76,7 @@ function getValidationIssues(item: LabelItem, analysis?: ItemAnalysis): string[]
   return [];
 }
 
-export function LabelItemsGrid({ items, orderId, itemAnalyses = {} }: LabelItemsGridProps) {
+export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyses = {} }: LabelItemsGridProps) {
   const updateItem = useUpdateLabelItem();
   const deleteItem = useDeleteLabelItem();
 
@@ -107,7 +108,11 @@ export function LabelItemsGrid({ items, orderId, itemAnalyses = {} }: LabelItems
         const analysis = itemAnalyses[item.id];
         const validationStatus = getValidationStatus(item, analysis);
         const validationIssues = getValidationIssues(item, analysis);
-        const thumbnailUrl = analysis?.thumbnail_url || item.artwork_thumbnail_url || undefined;
+        
+        // Choose thumbnail based on view mode
+        const thumbnailUrl = viewMode === 'print'
+          ? analysis?.thumbnail_url || item.artwork_thumbnail_url || undefined
+          : analysis?.thumbnail_url || item.proof_thumbnail_url || item.artwork_thumbnail_url || undefined;
         
         return (
           <LabelItemCard

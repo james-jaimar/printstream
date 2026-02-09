@@ -40,6 +40,9 @@ interface DualArtworkUploadZoneProps {
   dieline: LabelDieline | null;
   onFilesUploaded: (files: UploadedFileResult[]) => void;
   disabled?: boolean;
+  // External tab control (optional - for parent synchronization)
+  activeTab?: 'proof' | 'print';
+  onTabChange?: (tab: 'proof' | 'print') => void;
 }
 
 export function DualArtworkUploadZone({
@@ -47,10 +50,16 @@ export function DualArtworkUploadZone({
   dieline,
   onFilesUploaded,
   disabled = false,
+  activeTab: externalActiveTab,
+  onTabChange: externalOnTabChange,
 }: DualArtworkUploadZoneProps) {
-  const [activeTab, setActiveTab] = useState<'proof' | 'print'>('proof');
+  const [internalActiveTab, setInternalActiveTab] = useState<'proof' | 'print'>('proof');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
+  
+  // Use external tab control if provided, otherwise use internal state
+  const activeTab = externalActiveTab ?? internalActiveTab;
+  const setActiveTab = externalOnTabChange ?? setInternalActiveTab;
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
