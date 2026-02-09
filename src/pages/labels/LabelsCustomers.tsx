@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Plus, Building2, Search, ChevronRight, Users, AlertCircle } from 'lucide-react';
-import { useLabelCustomers, useCreateLabelCustomer, useUpdateLabelCustomer, useArchiveLabelCustomer } from '@/hooks/labels/useClientPortal';
+import { useLabelCustomers, useCreateLabelCustomer, useUpdateLabelCustomer, useArchiveLabelCustomer, useDeleteLabelCustomer } from '@/hooks/labels/useClientPortal';
 import { useCustomerContacts } from '@/hooks/labels/useCustomerContacts';
 import { CustomerFormDialog } from '@/components/labels/customers/CustomerFormDialog';
 import { CustomerDetailPanel } from '@/components/labels/customers/CustomerDetailPanel';
@@ -82,6 +82,7 @@ export default function LabelsCustomers() {
   const createCustomerMutation = useCreateLabelCustomer();
   const updateCustomerMutation = useUpdateLabelCustomer();
   const archiveCustomerMutation = useArchiveLabelCustomer();
+  const deleteCustomerMutation = useDeleteLabelCustomer();
 
   const filteredCustomers = customers?.filter(c => {
     const matchesSearch = 
@@ -100,6 +101,11 @@ export default function LabelsCustomers() {
 
   const handleArchive = async (customerId: string) => {
     await archiveCustomerMutation.mutateAsync(customerId);
+    setSelectedCustomerId(null);
+  };
+
+  const handleDelete = async (customerId: string) => {
+    await deleteCustomerMutation.mutateAsync(customerId);
     setSelectedCustomerId(null);
   };
 
@@ -197,6 +203,7 @@ export default function LabelsCustomers() {
               onClose={() => setSelectedCustomerId(null)}
               onEdit={handleEdit}
               onArchive={handleArchive}
+              onDelete={handleDelete}
             />
           ) : (
             <Card className="h-full flex items-center justify-center">

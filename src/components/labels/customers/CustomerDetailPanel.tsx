@@ -44,12 +44,14 @@ interface CustomerDetailPanelProps {
   onClose: () => void;
   onEdit?: (customer: LabelCustomer) => void;
   onArchive?: (customerId: string) => void;
+  onDelete?: (customerId: string) => void;
 }
 
-export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive }: CustomerDetailPanelProps) {
+export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive, onDelete }: CustomerDetailPanelProps) {
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<CustomerContact | null>(null);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const { data: contacts, isLoading: contactsLoading } = useCustomerContacts(customer.id);
   const deleteContactMutation = useDeleteCustomerContact();
@@ -72,6 +74,13 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive }: Cu
       onArchive(customer.id);
     }
     setArchiveDialogOpen(false);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (onDelete) {
+      onDelete(customer.id);
+    }
+    setDeleteDialogOpen(false);
   };
 
   return (
@@ -117,6 +126,15 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive }: Cu
                       Archive Customer
                     </DropdownMenuItem>
                   </>
+                )}
+                {onDelete && (
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => setDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Permanently
+                  </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -312,6 +330,24 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive }: Cu
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleArchiveConfirm}>
               Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Customer Permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete "{customer.company_name}" and all their contacts.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete Permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
