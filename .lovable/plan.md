@@ -1,86 +1,82 @@
 
-Goal: Fix the crash (“Minified React error #185” = maximum update depth exceeded) that happens immediately when selecting a customer in **New Label Order**. This is almost certainly an infinite render loop triggered by the `useEffect` that auto-selects the primary contact and calls `form.setValue(...)`.
+# Fix Plan: Proof Area Buttons & AI Layout Flexibility
 
-## What’s happening (root cause)
-In `src/components/labels/NewLabelOrderDialog.tsx`, this effect runs:
+## Problem Summary
 
-- It depends on `form` (the entire object) in the dependency array.
-- Inside the effect it calls:
-  - `setSelectedContacts(...)`
-  - `form.setValue('contact_name', ...)`
-  - `form.setValue('contact_email', ...)`
+**Issue 1**: The "Use as Print" buttons appear in the Proof Artwork section. These buttons shouldn't show here as it confuses the workflow - the proof area is for client-facing files, and preparation actions belong in a separate context.
 
-Those updates trigger a re-render, which (because `form` is in the dependency array and/or because the effect’s conditions are still true) causes the effect to run again, repeating indefinitely until React throws #185.
+**Issue 2**: The AI Layout Optimizer shows "Artwork Not Ready for Production" and blocks layout generation when items only have proof files. The system should allow previewing/generating layouts with proof files while only enforcing print-ready status at the final "Apply Layout" stage.
 
-This aligns with your report:
-- Crash happens **on customer selection**, before you even click a contact.
-- The contact query then resolves and the effect starts “auto setting” values repeatedly.
+---
 
-## Implementation approach (safe + consistent)
-We will make the auto-primary-contact behavior “run once per customer selection” and ensure the effect can’t re-trigger itself endlessly.
+## Solution
 
-### 1) Stabilize effect dependencies
-Change the effect dependency list to avoid the full `form` object. Use stable references only:
-- `selectedCustomerId`
-- `contactsLoading`
-- `contacts` (or better: `contacts?.map(c => c.id).join(',')` / `contacts?.length` to avoid unnecessary triggers)
-- `form.setValue` (method ref) rather than `form`
+### 1. Remove "Use as Print" buttons from Proof Area
 
-### 2) Add a “run-once per customer” guard
-Use a `useRef` to remember which customerId we already initialized:
-- `const autoSelectedCustomerRef = useRef<string | null>(null);`
-- When `selectedCustomerId` changes, reset this ref.
-- Only run the “auto-select primary contact + set form values” if:
-  - `autoSelectedCustomerRef.current !== selectedCustomerId`
-  - and contacts are loaded.
+**What changes**: The item cards displayed in the main order view will no longer show the "Use as Print" or "Auto-Crop" buttons.
 
-This guarantees the effect runs at most once per customer change.
+**Why**: These preparation actions are better suited to the AI Layout workflow where there's a clear "Prepare Items" action. Showing them on every card in the proof area clutters the interface and creates confusion about the workflow.
 
-### 3) Add idempotent checks (avoid re-setting same values)
-Before calling `setSelectedContacts` / `form.setValue`, check whether the values are already correct:
-- If `selectedContacts` already equals `[primaryContact.id]`, do not set again.
-- If form values already match primary contact name/email, do not set again.
+**Technical approach**:
+- Modify `LabelItemsGrid` to NOT pass `onPrepareArtwork` to `LabelItemCard`
+- The preparation actions will remain available in the AI Layout Optimizer panel via the "Prepare X Items" button
 
-This reduces unnecessary renders and eliminates any remaining risk of render loops.
+---
 
-### 4) Fix double-toggle risk in contact UI (secondary, but good hardening)
-Currently both the row `<div onClick>` and the `<Checkbox onCheckedChange>` call `toggleContact`. That can cause “toggle twice” in some click paths.
-We’ll adjust to a single source of truth:
-- Either:
-  - keep row click and make the Checkbox “read-only” (no handler) OR
-  - keep Checkbox handler and remove row `onClick`, or stopPropagation on checkbox.
-This is not the #185 root cause, but it prevents confusing selection behavior.
+### 2. Allow AI Layout to Generate Options with Proof Files
 
-### 5) Add minimal diagnostic logging (temporary)
-Add a few `console.debug` statements (and remove later) to confirm:
-- effect fires once per customer
-- contacts length and primary contact id
-- whether we actually set values or skip
+**What changes**: 
+- Layout generation will work when items have proof files (not just print-ready)
+- The warning will change from blocking to informational ("X items will need print files before production")
+- The "Apply Layout" button will remain locked until all items are print-ready
 
-This helps verify quickly without guesswork.
+**Why**: This allows admins to plan production layouts during the proofing phase, optimizing the workflow and providing earlier visibility into production schedules.
 
-## Files we will change
-1) `src/components/labels/NewLabelOrderDialog.tsx`
-- Update `useEffect` logic (dependencies + useRef guard + idempotent checks)
-- Adjust contact row/checkbox click handlers to avoid double toggles
-- Add temporary debug logs (optional, can remove after confirming)
+**Technical approach**:
+- Update the artwork readiness check in `LayoutOptimizer` to distinguish between:
+  - Items with NO artwork (blocking)
+  - Items with proof artwork but no print file (allow generation, warn at apply)
+  - Items with print-ready files (fully ready)
+- Change the alert from blocking to informational when items have proof but not print
+- Move the "Prepare Items" action to be more prominent
 
-## How we will test (end-to-end)
-1) Open `/labels` → “New Order”
-2) Select a customer that definitely has contacts
-3) Confirm:
-   - No crash / no error boundary
-   - Contacts list appears
-   - Primary contact auto-select happens exactly once
-   - You can select/deselect contacts reliably
-4) Switch to another customer and confirm it re-initializes correctly (once)
-5) Switch back to the first customer and confirm it still behaves correctly
+---
 
-## Notes on TypeScript & validation (to match your standards)
-- Keep `selectedContacts` as `string[]` consistently
-- Avoid unsafe casts; rely on `CustomerContact` type from `useCustomerContacts`
-- Ensure all setValue calls remain within schema expectations (`contact_email` accepts `''` or email)
-- No new interfaces needed for this fix; just behavioral stability
+## Files to Change
 
-## Expected outcome
-Selecting a customer will no longer crash the app. Primary contact will auto-populate once, and contact selection will remain stable and predictable.
+1. **`src/components/labels/items/LabelItemsGrid.tsx`**
+   - Remove the `onPrepareArtwork` handler from `LabelItemCard` calls
+
+2. **`src/components/labels/LayoutOptimizer.tsx`**
+   - Update `artworkReadiness` logic to check for ANY artwork (proof or print)
+   - Add separate tracking for "has artwork" vs "is print-ready"
+   - Change alert to informational when items have proof files
+   - Keep "Apply Layout" disabled only when items aren't print-ready
+
+---
+
+## Expected Result
+
+After these changes:
+- The order view will show clean item cards without action buttons
+- AI Layout can generate options for orders where items have proof artwork
+- The "Prepare Items" button in the AI Layout dialog handles artwork preparation
+- Final layout application remains blocked until artwork is print-ready, maintaining production safety
+
+---
+
+## Technical Details
+
+```text
+Artwork State Machine:
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   No Artwork    │ -> │   Proof Only    │ -> │  Print Ready    │
+│  (blocks all)   │    │ (allows layout) │    │ (allows apply)  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+**`artworkReadiness` updated logic**:
+- `hasArtwork`: Item has `proof_pdf_url` OR `artwork_pdf_url` OR `print_pdf_url`
+- `isPrintReady`: Item has `print_pdf_status === 'ready'`
+- `canGenerateLayout`: All items have artwork (proof or print)
+- `canApplyLayout`: All items are print-ready
