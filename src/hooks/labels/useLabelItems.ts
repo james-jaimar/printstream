@@ -184,10 +184,14 @@ export function useDeleteLabelItem() {
 async function updateOrderTotalCount(orderId: string): Promise<void> {
   const { data: items } = await supabase
     .from('label_items')
-    .select('quantity')
+    .select('quantity, page_count, parent_item_id')
     .eq('order_id', orderId);
 
-  const totalCount = (items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
+  // Exclude parent items that were split into children (page_count > 1 and no parent)
+  const countableItems = (items || []).filter(
+    item => !(item.page_count > 1 && !item.parent_item_id)
+  );
+  const totalCount = countableItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
 
   await supabase
     .from('label_orders')
