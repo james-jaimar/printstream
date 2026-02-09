@@ -4836,6 +4836,7 @@ export type Database = {
           display_stage_name: string
           due_date: string
           job_id: string
+          proof_approved_at: string
           proof_emailed_at: string
           qty: number
           reference: string
@@ -4882,6 +4883,7 @@ export type Database = {
           job_id: string
           manual_due_date: string
           parallel_stages: Json
+          proof_approved_at: string
           proof_emailed_at: string
           qty: number
           reference: string
