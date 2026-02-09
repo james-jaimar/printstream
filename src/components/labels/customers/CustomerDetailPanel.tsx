@@ -21,7 +21,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Building2, Mail, Phone, MapPin, Plus, MoreHorizontal, Pencil, Trash2, User, Bell, CheckCircle, X, Archive } from 'lucide-react';
+import { Building2, Mail, Phone, MapPin, Plus, MoreHorizontal, Pencil, Trash2, User, Bell, CheckCircle, X, Archive, KeyRound, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useCustomerContacts, useDeleteCustomerContact, CustomerContact } from '@/hooks/labels/useCustomerContacts';
 import { ContactFormDialog } from './ContactFormDialog';
 
@@ -52,6 +56,9 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive, onDe
   const [editingContact, setEditingContact] = useState<CustomerContact | null>(null);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [passwordContact, setPasswordContact] = useState<CustomerContact | null>(null);
+  const [portalPassword, setPortalPassword] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
 
   const { data: contacts, isLoading: contactsLoading } = useCustomerContacts(customer.id);
   const deleteContactMutation = useDeleteCustomerContact();
@@ -68,6 +75,29 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive, onDe
       await deleteContactMutation.mutateAsync({ id: contact.id, customerId: customer.id });
     }
   };
+
+  const handleSetPortalPassword = async () => {
+    if (!passwordContact || !portalPassword || portalPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    setIsSavingPassword(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('label-client-auth/set-password', {
+        body: { contact_id: passwordContact.id, password: portalPassword },
+      });
+      if (error || data?.error) throw new Error(data?.error || 'Failed to set password');
+      toast.success(`Portal password set for ${passwordContact.name}`);
+      setPasswordContact(null);
+      setPortalPassword('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to set portal password');
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
+
+
 
   const handleArchiveConfirm = () => {
     if (onArchive) {
@@ -256,6 +286,11 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive, onDe
                               <Pencil className="h-4 w-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setPasswordContact(contact); setPortalPassword(''); }}>
+                              <KeyRound className="h-4 w-4 mr-2" />
+                              Set Portal Password
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={() => handleDeleteContact(contact)}
@@ -349,6 +384,38 @@ export function CustomerDetailPanel({ customer, onClose, onEdit, onArchive, onDe
             <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Delete Permanently
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Set Portal Password Dialog */}
+      <AlertDialog open={!!passwordContact} onOpenChange={(open) => { if (!open) { setPasswordContact(null); setPortalPassword(''); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5" />
+              Set Portal Password
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Set a password for <strong>{passwordContact?.name}</strong> ({passwordContact?.email}) to access the client portal.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Label>New Password</Label>
+            <Input
+              type="password"
+              value={portalPassword}
+              onChange={(e) => setPortalPassword(e.target.value)}
+              placeholder="Min 6 characters"
+              className="mt-1"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSavingPassword}>Cancel</AlertDialogCancel>
+            <Button onClick={handleSetPortalPassword} disabled={isSavingPassword || portalPassword.length < 6}>
+              {isSavingPassword ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Set Password
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
