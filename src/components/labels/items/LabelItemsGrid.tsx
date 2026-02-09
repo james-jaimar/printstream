@@ -102,9 +102,18 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
     deleteItem.mutate({ id: itemId, orderId });
   };
 
+  // Sort items: children by source_page_number, others by item_number
+  const sortedItems = [...items].sort((a, b) => {
+    // Group children of the same parent together
+    if (a.parent_item_id && b.parent_item_id && a.parent_item_id === b.parent_item_id) {
+      return (a.source_page_number ?? 0) - (b.source_page_number ?? 0);
+    }
+    return (a.item_number ?? 0) - (b.item_number ?? 0);
+  });
+
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-      {items.map((item) => {
+      {sortedItems.map((item) => {
         const analysis = itemAnalyses[item.id];
         const validationStatus = getValidationStatus(item, analysis);
         const validationIssues = getValidationIssues(item, analysis);
