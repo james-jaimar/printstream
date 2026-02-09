@@ -56,7 +56,7 @@ export async function fetchUsers(): Promise<UserWithRole[]> {
       return {
         id: authUser.id,
         email: authUser.email,
-        full_name: profile?.full_name || null,
+        full_name: profile?.full_name || '',
         role: (userRole?.role as UserRole) || 'user',
         groups: userGroups,
         created_at: profile?.created_at || new Date().toISOString()

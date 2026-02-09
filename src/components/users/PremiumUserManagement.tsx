@@ -149,12 +149,13 @@ export const PremiumUserManagement = () => {
   };
 
   const filteredUsers = users.filter(user => 
-    user.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.role.toLowerCase().includes(searchQuery.toLowerCase())
+    (user.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (user.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (user.role || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string) => {
+    if (!name) return '?';
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 

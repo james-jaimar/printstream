@@ -42,23 +42,36 @@ export async function fetchJobStagesFromSupabase(
   }
 
   try {
-    const { data, error } = await supabase
-      .from("job_stage_instances")
-      .select(
-        `
-        *,
-        production_stage:production_stages(
-          id, name, color, description, supports_parts
-        )
-      `
-      )
-      .in("job_id", jobIds)
-      .eq("job_table_name", "production_jobs")
-      .order("stage_order", { ascending: true });
-
-    if (error) {
-      throw error;
+    // Batch job IDs into chunks to avoid URL length limits with large .in() clauses
+    const CHUNK_SIZE = 100;
+    const chunks: string[][] = [];
+    for (let i = 0; i < jobIds.length; i += CHUNK_SIZE) {
+      chunks.push(jobIds.slice(i, i + CHUNK_SIZE));
     }
+
+    let allData: any[] = [];
+    for (const chunk of chunks) {
+      const { data, error } = await supabase
+        .from("job_stage_instances")
+        .select(
+          `
+          *,
+          production_stage:production_stages(
+            id, name, color, description, supports_parts
+          )
+        `
+        )
+        .in("job_id", chunk)
+        .eq("job_table_name", "production_jobs")
+        .order("stage_order", { ascending: true });
+
+      if (error) {
+        throw error;
+      }
+      if (data) allData.push(...data);
+    }
+
+    const data = allData;
 
     // Create lookup by both job_id and id for compatibility
     const jobsById: Record<string, any> = {};
