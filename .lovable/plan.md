@@ -1,94 +1,86 @@
 
 
-# Fix Plan: Kanban "Failed to load job stages" and Setup "Something went wrong"
+# Plan: Separate Label Customers from Staff Users
 
-## Problem 1: Setup/Admin Page Crash
+## What's Wrong
 
-**Root Cause**: The `PremiumUserManagement` component crashes because `user.full_name` can be `null`.
+When you add a contact in the Labels customer area and tick "Create portal login", the system creates a Supabase auth account for that contact. This means those customer contacts appear alongside your staff in the Setup/Admin users list. Customers and staff should be completely separate.
 
-When the label system creates customer contact accounts (like james@jaimar.dev, dwain@klintscales.co.za, etc.), these users get profiles with `full_name: null`. The `get_all_users()` RPC returns ALL auth users. When these users are processed, `fetchUsers()` sets `full_name: null`. Then this line in `PremiumUserManagement.tsx` crashes:
+## What Will Change
 
-```
-user.full_name.toLowerCase()  // TypeError: Cannot read property 'toLowerCase' of null
-```
+### 1. Remove the "Create portal login" Feature from Contacts
 
-**Evidence**: 4 label customer contact users confirmed to have `null` full_name in profiles:
+The contact form currently has a checkbox to create a login account. This will be removed entirely since customer contacts should not be auth users.
+
+**Files changed:**
+- `src/components/labels/customers/ContactFormDialog.tsx` -- Remove the "Create portal login" checkbox, password field, and related logic
+- `src/hooks/labels/useCustomerContacts.ts` -- Remove `create_login`, `password` from `CreateContactInput` and remove the `signUp` logic from the mutation
+
+### 2. Clean Up Existing Customer Auth Accounts
+
+A database migration will:
+- Set `user_id = NULL` on all 4 affected `label_customer_contacts` rows
+- Delete the 4 customer entries from `user_roles` 
+- Delete the 4 customer entries from `profiles`
+
+The affected accounts are:
 - dwain@klintscales.co.za
 - james@jaimar.dev
 - michael@ontrendmedia.co.za
 - bianca@ontrendmedia.co.za
 
-**Fix**: Add null-safe access in `PremiumUserManagement.tsx` line 151-154:
+**Note:** The actual `auth.users` entries cannot be deleted via SQL migration (that's a reserved schema). You'll need to manually delete those 4 users from the Supabase Auth dashboard after this migration runs, or we can use an edge function to do it.
 
-```typescript
-const filteredUsers = users.filter(user => 
-    (user.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (user.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (user.role || '').toLowerCase().includes(searchQuery.toLowerCase())
+### 3. Simplify the `is_label_client` Security Function
+
+Currently `is_label_client()` checks if a `user_id` exists in `label_customer_contacts`. Since contacts will no longer have auth accounts, this function should simply return `false` (no authenticated user will ever be a "label client"). This keeps all existing RLS policies working without changes.
+
+---
+
+## Technical Details
+
+### Migration SQL
+```sql
+-- Clear user_id references from label_customer_contacts
+UPDATE label_customer_contacts SET user_id = NULL WHERE user_id IS NOT NULL;
+
+-- Remove customer entries from user_roles and profiles
+DELETE FROM user_roles WHERE user_id IN (
+  '6396a811-2807-473c-b429-437a75ec161c',
+  '2182756a-51c7-40c9-be51-dc2d6c44ccd9',
+  '722e154c-6716-42c6-af09-76024812e77c',
+  'e6f69018-c10d-441d-bc68-e44084c0192b'
 );
+DELETE FROM profiles WHERE id IN (
+  '6396a811-2807-473c-b429-437a75ec161c',
+  '2182756a-51c7-40c9-be51-dc2d6c44ccd9',
+  '722e154c-6716-42c6-af09-76024812e77c',
+  'e6f69018-c10d-441d-bc68-e44084c0192b'
+);
+
+-- Simplify is_label_client to always return false
+CREATE OR REPLACE FUNCTION public.is_label_client(check_user_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$ SELECT false $$;
 ```
 
-Also fix the `getInitials` function (line 157) which would similarly crash:
-```typescript
-const getInitials = (name: string) => {
-    if (!name) return '?';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase();
-};
-```
+### Frontend Changes
 
-And fix `userService.ts` to default `full_name` to empty string instead of null:
-```typescript
-full_name: profile?.full_name || '',
-```
+**ContactFormDialog.tsx**: Remove ~30 lines covering the create_login checkbox, password input, and related state/validation.
 
----
+**useCustomerContacts.ts**: Remove `create_login` and `password` from `CreateContactInput`. Remove the `signUp` block from the mutation. Always set `user_id: null` on insert.
 
-## Problem 2: Kanban "Failed to load job stages"
+### Post-Migration Manual Step
 
-**Root Cause**: The query in `fetchJobStagesFromSupabase` passes 681 UUIDs in a `.in()` clause, which exceeds the URL length limit for GET requests.
+After the migration, delete these 4 users from the Supabase Auth dashboard:
+- dwain@klintscales.co.za
+- james@jaimar.dev
+- michael@ontrendmedia.co.za
+- bianca@ontrendmedia.co.za
 
-There are 681 active (non-completed) jobs. The `fetchJobStagesFromSupabase` function builds a query:
-```typescript
-supabase.from("job_stage_instances")
-    .select(...)
-    .in("job_id", jobIds)  // 681 UUIDs = ~25KB of URL params
-```
+### Future Consideration
 
-PostgREST uses GET requests for SELECT queries. The URL with 681 UUIDs (~25KB) exceeds the typical ~12KB URL limit, causing a server error.
-
-**Fix**: Batch the query into chunks of 100 job IDs at a time in `fetchJobStages.ts`:
-
-```typescript
-// Split jobIds into chunks to avoid URL length limits
-const CHUNK_SIZE = 100;
-const chunks = [];
-for (let i = 0; i < jobIds.length; i += CHUNK_SIZE) {
-    chunks.push(jobIds.slice(i, i + CHUNK_SIZE));
-}
-
-let allData: any[] = [];
-for (const chunk of chunks) {
-    const { data, error } = await supabase
-        .from("job_stage_instances")
-        .select(`*, production_stage:production_stages(...)`)
-        .in("job_id", chunk)
-        .eq("job_table_name", "production_jobs")
-        .order("stage_order", { ascending: true });
-    
-    if (error) throw error;
-    if (data) allData.push(...data);
-}
-```
-
----
-
-## Files to Modify
-
-1. **src/components/users/PremiumUserManagement.tsx** - Add null-safe access for `full_name`, `email`, `role` in filter and `getInitials`
-2. **src/services/userService.ts** - Default `full_name` to empty string instead of null
-3. **src/hooks/tracker/useRealTimeJobStages/fetchJobStages.ts** - Batch `.in()` queries into chunks of 100
-
-## No Database Changes Required
-
-Both issues are purely frontend code bugs. No migrations needed.
+If you later want customers to have portal access (e.g., to view proofs online), a separate authentication system can be built using a `label_customer_auth` table with hashed passwords, completely independent of the staff auth system. This would be a separate feature.
 
