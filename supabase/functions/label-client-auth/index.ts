@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encode as base64url } from "https://deno.land/std@0.208.0/encoding/base64url.ts";
-import { hash as bcryptHash, compare as bcryptCompare } from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
+import * as bcrypt from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
       }
 
       // Verify password
-      const valid = await bcryptCompare(password, auth.password_hash);
+      const valid = bcrypt.compareSync(password, auth.password_hash);
       if (!valid) {
         return jsonResponse({ error: "Invalid credentials" }, 401);
       }
@@ -227,7 +227,7 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
       }
 
-      const passwordHash = await bcryptHash(password);
+      const passwordHash = bcrypt.hashSync(password);
 
       // Upsert auth record
       const { error: upsertErr } = await supabase
