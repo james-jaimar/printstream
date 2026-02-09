@@ -55,34 +55,49 @@ serve(async (req) => {
       );
     }
 
-    // Build context for AI
     const totalSlots = dieline.columns_across;
     const labelsPerFrame = dieline.columns_across * dieline.rows_around;
     const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0);
 
-    const systemPrompt = `You are an expert print production optimizer for HP Indigo label printing.
-Your goal is to minimize material waste while balancing production efficiency.
+    const systemPrompt = `You are an expert print production optimizer for HP Indigo digital label printing on rolls.
 
-Key constraints:
+CRITICAL PRODUCTION RULES:
+1. EVERY slot (column) in a frame MUST be filled. No empty slots allowed.
+   - If there are ${totalSlots} slots and only 3 items, duplicate items across remaining slots.
+   - A single-item run fills ALL ${totalSlots} slots with the same artwork.
+2. The run length (number of frames) is determined by the slot with the HIGHEST quantity.
+   All slots print for the same length. Slots with fewer labels than the max produce waste/overrun.
+3. Quantities CAN and SHOULD be split across multiple runs when it reduces waste.
+   Example: 1,500 labels can become 1,000 in Run 1 + 500 in Run 2.
+4. There is NO default batch size. Use the actual requested quantities.
+5. Gang items with SIMILAR quantities together to minimize waste from mismatched run lengths.
+
+MACHINE SPECIFICATIONS:
 - Roll width: ${dieline.roll_width_mm}mm
-- Available slots (columns): ${totalSlots}
-- Labels per frame: ${labelsPerFrame}
+- Available slots (columns across): ${totalSlots}
+- Rows around (labels per slot per frame): ${dieline.rows_around}
+- Labels per frame (all slots): ${labelsPerFrame}
 - Max frame length: 960mm
 
-Optimization priorities:
-1. Minimize substrate waste
-2. Reduce number of production runs
-3. Balance slot utilization across runs`;
+OPTIMIZATION PRIORITIES:
+1. Fill all slots (mandatory — never leave a slot empty)
+2. Minimize substrate waste (match quantities in ganged runs)
+3. Reduce number of production runs (fewer changeovers)
+4. Split quantities across runs when it improves ganging efficiency`;
 
     const userPrompt = `Analyze this label order and suggest the optimal production layout:
 
 Items to print:
-${items.map(i => `- ${i.name}: ${i.quantity} labels${i.width_mm ? ` (${i.width_mm}x${i.height_mm}mm)` : ''}`).join('\n')}
+${items.map(i => `- ${i.name}: ${i.quantity.toLocaleString()} labels${i.width_mm ? ` (${i.width_mm}x${i.height_mm}mm)` : ''}`).join('\n')}
 
-Total labels needed: ${totalLabels}
+Total labels needed: ${totalLabels.toLocaleString()}
+Available slots per frame: ${totalSlots}
+Labels per slot per frame: ${dieline.rows_around}
 
-${constraints?.rush_job ? 'This is a RUSH JOB - prioritize speed over efficiency.' : ''}
-${constraints?.prefer_ganging ? 'Customer prefers ganging multiple items per run if possible.' : ''}
+${constraints?.rush_job ? 'RUSH JOB — prioritize speed (fewer runs) over waste minimization.' : ''}
+${constraints?.prefer_ganging ? 'Customer prefers ganging multiple items per run where possible.' : ''}
+
+Remember: every slot must be filled, quantities can be split across runs, and there is no default batch size.
 
 Provide your recommendation with reasoning.`;
 
@@ -163,7 +178,6 @@ Provide your recommendation with reasoning.`;
 
     const aiResult = await response.json();
     
-    // Extract tool call result
     const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
     let suggestion = null;
     
