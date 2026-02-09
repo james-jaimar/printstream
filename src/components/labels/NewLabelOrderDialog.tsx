@@ -169,7 +169,10 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
           New Order
         </Button>
       </DialogTrigger>
-      <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto">
+      <DialogContent 
+        className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Create Label Order</DialogTitle>
           <DialogDescription>
