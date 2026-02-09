@@ -1,212 +1,133 @@
 
-# Plan: Separate Proof and Print-Ready Item Views
+# Fix Plan: Kanban and Setup Pages Errors
 
 ## Problem Summary
 
-Currently the Labels workflow has a "separation of concerns" issue:
+Both the Kanban and Setup (Admin) pages are broken with the following errors:
+1. **Kanban**: "Error loading multi-stage kanban" / "Failed to load job stages"
+2. **Setup/Admin**: "Something went wrong" (caught by error boundary)
 
-1. **Proof Artwork tab and Print-Ready tab both show the same 6 items** - The tabs control *uploading* behavior but don't filter the item grid below
-2. **AI Layout Optimizer sees all 6 files** - It should only work with print-ready items for production layouts
-3. **Duplicate items were created** - When proof artwork was uploaded, 3 items were created. When print-ready artwork was uploaded, 3 more items were created instead of updating the existing ones
+## Root Cause Analysis
 
-The dual-artwork model (`proof_pdf_url` and `print_pdf_url` on a single `LabelItem`) isn't being utilized correctly - the UI creates separate items instead of linking proof and print files to the same item.
+After thorough investigation, I've identified that both issues share a common root cause:
+
+### Issue 1: Database Function Missing `proof_approved_at` Return Field
+
+The `get_user_accessible_jobs` RPC function is **missing the `proof_approved_at` field** in its return type:
+
+**Current return type** (from database):
+```
+job_id, wo_no, customer, contact, status, due_date, reference, category_id, 
+category_name, category_color, current_stage_id, current_stage_name, 
+current_stage_color, current_stage_status, user_can_view, user_can_edit, 
+user_can_work, user_can_manage, workflow_progress, total_stages, 
+completed_stages, display_stage_name, qty, started_by, started_by_name, 
+proof_emailed_at  -- ENDS HERE, missing proof_approved_at!
+```
+
+**But the code expects** (in `src/hooks/tracker/useAccessibleJobs/types.ts`):
+```typescript
+proof_emailed_at?: string | null;
+proof_approved_at?: string | null;  // EXPECTED BUT NOT RETURNED
+```
+
+This causes downstream issues when components try to access `job.proof_approved_at`.
+
+### Issue 2: Code Safely Handles Missing Field But Side Effects Occur
+
+While the TypeScript code safely handles the missing field with:
+```typescript
+proof_approved_at: (job as any).proof_approved_at || null,
+```
+
+Multiple components depend on this field for logic decisions, which may cause unexpected behavior leading to crashes.
 
 ---
 
-## Solution Architecture
+## Solution
 
-### Approach: Filter Items by Tab Context
+### Step 1: Update Database Function to Include `proof_approved_at`
 
-Rather than creating duplicate items, we'll:
-1. Filter the displayed items based on which tab is active
-2. Pass only print-ready items to the AI Layout Optimizer
-3. Fix the item matching logic so print-ready uploads update existing items
+Create a migration to update the `get_user_accessible_jobs` function to include `proof_approved_at` in its return type.
+
+**Migration SQL:**
+```sql
+-- Update get_user_accessible_jobs to include proof_approved_at
+CREATE OR REPLACE FUNCTION public.get_user_accessible_jobs(
+  p_user_id uuid DEFAULT NULL::uuid, 
+  p_permission_type text DEFAULT 'work'::text, 
+  p_status_filter text DEFAULT NULL::text, 
+  p_stage_filter text DEFAULT NULL::text
+)
+RETURNS TABLE(
+  job_id uuid,
+  wo_no text,
+  customer text,
+  contact text,
+  status text,
+  due_date text,
+  reference text,
+  category_id uuid,
+  category_name text,
+  category_color text,
+  current_stage_id uuid,
+  current_stage_name text,
+  current_stage_color text,
+  current_stage_status text,
+  user_can_view boolean,
+  user_can_edit boolean,
+  user_can_work boolean,
+  user_can_manage boolean,
+  workflow_progress numeric,
+  total_stages integer,
+  completed_stages integer,
+  display_stage_name text,
+  qty integer,
+  started_by uuid,
+  started_by_name text,
+  proof_emailed_at timestamp with time zone,
+  proof_approved_at timestamp with time zone  -- ADD THIS FIELD
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+-- ... existing function body with proof_approved_at added to SELECT
+$$;
+```
+
+### Step 2: Verify the Current Function Implementation
+
+Before creating the migration, I need to retrieve the full current function body to ensure we preserve all existing logic while adding the missing field.
 
 ---
 
-## Implementation Details
+## Files to Create/Modify
 
-### 1. Update `LabelOrderModal.tsx` - Add Tab State for Item Display
-
-Connect the upload zone's tab state to the items grid display.
-
-**Changes**:
-- Lift the `activeTab` state from `DualArtworkUploadZone` to `LabelOrderModal`
-- Pass the tab state to control which items are displayed
-- Filter items based on tab:
-  - **Proof tab**: Show items that have `proof_pdf_url` or `artwork_pdf_url`
-  - **Print-Ready tab**: Show items that have `print_pdf_url`
-
-```typescript
-// In LabelOrderModal
-const [artworkTab, setArtworkTab] = useState<'proof' | 'print'>('proof');
-
-// Filter items based on active tab
-const filteredItems = useMemo(() => {
-  if (!order?.items) return [];
-  
-  if (artworkTab === 'proof') {
-    // Show items with proof/artwork files
-    return order.items.filter(item => 
-      item.proof_pdf_url || item.artwork_pdf_url
-    );
-  } else {
-    // Show items with print-ready files
-    return order.items.filter(item => 
-      item.print_pdf_url
-    );
-  }
-}, [order?.items, artworkTab]);
-```
-
-### 2. Update `DualArtworkUploadZone.tsx` - Accept External Tab Control
-
-Make the component accept tab state from parent for synchronized control.
-
-**Changes**:
-- Add optional `activeTab` and `onTabChange` props
-- Use these when provided, otherwise use internal state
-
-```typescript
-interface DualArtworkUploadZoneProps {
-  // ... existing props
-  activeTab?: 'proof' | 'print';
-  onTabChange?: (tab: 'proof' | 'print') => void;
-}
-```
-
-### 3. Fix Item Matching Logic in `handleDualFilesUploaded`
-
-The current logic only matches by exact name. We need better matching to link print files to existing proof items.
-
-**Current problem**:
-- File: `Eazi Tool BLUE (4300).pdf` uploaded to proof → creates item named `Eazi Tool BLUE (4300)`
-- File: `Eazi Tool BLUE (4300).pdf` uploaded to print → should update existing item, but name matching may fail
-
-**Fix**: Improve the matching algorithm:
-- Strip common suffixes like "proof", "print", "final", etc.
-- Use case-insensitive matching
-- Match by normalized base name
-
-```typescript
-function normalizeItemName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\.(pdf|png|jpg|jpeg)$/i, '')
-    .replace(/[\s_-]*(proof|print|final|ready|v\d+)[\s_-]*/gi, '')
-    .trim();
-}
-
-// In handleDualFilesUploaded
-const normalizedFileName = normalizeItemName(file.name);
-const existingItem = order.items?.find(item => 
-  normalizeItemName(item.name) === normalizedFileName
-);
-```
-
-### 4. Update AI Layout Optimizer - Only Use Print-Ready Items
-
-Modify `LabelOrderModal.tsx` to pass only print-ready items to the `LayoutOptimizer`.
-
-**Changes**:
-```typescript
-// In the LayoutOptimizer dialog
-const printReadyItems = useMemo(() => {
-  return (order?.items || []).filter(item => item.print_pdf_url);
-}, [order?.items]);
-
-<LayoutOptimizer
-  orderId={order.id}
-  items={printReadyItems}  // Only print-ready items
-  dieline={order.dieline || null}
-  onLayoutApplied={...}
-/>
-```
-
-### 5. Update Grid Display Based on Context
-
-Show appropriate thumbnails and info based on which tab is active.
-
-**Changes to `LabelItemsGrid.tsx`**:
-- Accept a `viewMode` prop ('proof' | 'print')
-- Choose appropriate thumbnail URL based on mode
-- Show appropriate status indicators
-
-```typescript
-interface LabelItemsGridProps {
-  items: LabelItem[];
-  orderId: string;
-  viewMode?: 'proof' | 'print';
-  itemAnalyses?: Record<string, ItemAnalysis>;
-}
-
-// In the render
-const thumbnailUrl = viewMode === 'print' 
-  ? item.print_thumbnail_url || item.artwork_thumbnail_url
-  : item.proof_thumbnail_url || item.artwork_thumbnail_url;
-```
-
----
-
-## Files to Change
-
-1. **`src/components/labels/order/LabelOrderModal.tsx`**
-   - Lift tab state from upload zone to modal level
-   - Filter items based on active tab
-   - Pass only print-ready items to AI Layout Optimizer
-   - Add tab synchronization with items grid
-
-2. **`src/components/labels/items/DualArtworkUploadZone.tsx`**
-   - Accept external tab control props
-   - Use parent-controlled state when provided
-
-3. **`src/components/labels/items/LabelItemsGrid.tsx`**
-   - Accept `viewMode` prop
-   - Display appropriate thumbnails/status based on mode
-
-4. **`src/components/labels/order/LabelOrderModal.tsx`** (item matching)
-   - Improve name normalization for print-ready file matching
-   - Update existing items instead of creating duplicates
-
----
-
-## Expected Result
-
-After implementation:
-- **Proof Artwork tab**: Shows only items with proof files (3 items)
-- **Print-Ready tab**: Shows only items with print files (3 items if uploaded, or 0 if not yet prepared)
-- **AI Layout Optimizer**: Works only with print-ready items (production-focused)
-- **Uploading print files**: Updates existing items rather than creating duplicates
+1. **New Migration File**: `supabase/migrations/YYYYMMDDHHMMSS_fix_accessible_jobs_proof_approved.sql`
+   - Add `proof_approved_at` to the return type of `get_user_accessible_jobs`
+   - Update the SELECT statement to include `pj.proof_approved_at`
 
 ---
 
 ## Technical Details
 
-```text
-Current Data Model (per LabelItem):
-┌─────────────────────────────────────────────────┐
-│  LabelItem                                      │
-│  ├── proof_pdf_url        (client-facing)       │
-│  ├── proof_thumbnail_url                        │
-│  ├── print_pdf_url        (production)          │
-│  ├── print_pdf_status     (pending/ready/...)   │
-│  └── artwork_pdf_url      (legacy/combined)     │
-└─────────────────────────────────────────────────┘
+The `production_jobs` table already has the `proof_approved_at` column (confirmed via database query):
+- Column: `proof_approved_at`  
+- Type: `timestamp with time zone`
 
-Tab Filtering Logic:
-┌──────────────┐     ┌──────────────┐
-│  Proof Tab   │     │ Print Tab    │
-│ proof_pdf_url│     │ print_pdf_url│
-│     OR       │     │              │
-│artwork_pdf   │     │              │
-└──────────────┘     └──────────────┘
-       │                    │
-       ▼                    ▼
-   Filter items         Filter items
-   with proof           with print
-       │                    │
-       ▼                    ▼
-   LabelItemsGrid       LabelItemsGrid
-   (proof view)         (print view)
-```
+The fix simply requires updating the database function to include this column in its output.
 
+---
+
+## Immediate Workaround
+
+If you need the app working immediately before the migration is applied, you can temporarily comment out the components/code that strictly depend on `proof_approved_at`, but this is not recommended as it would break proof tracking functionality.
+
+---
+
+## Next Steps
+
+1. I'll create a migration that retrieves the current function body and updates it to include `proof_approved_at`
+2. The migration will be applied to the database
+3. After the fix, both Kanban and Setup pages should work correctly
