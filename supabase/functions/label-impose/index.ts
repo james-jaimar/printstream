@@ -8,6 +8,7 @@ interface SlotAssignment {
   item_id: string;
   quantity_in_slot: number;
   pdf_url: string;
+  needs_rotation?: boolean;
 }
 
 interface ImposeRequest {
@@ -74,6 +75,12 @@ Deno.serve(async (req) => {
     
     const startTime = Date.now();
 
+    // Map slot assignments with rotation info for VPS
+    const slotsWithRotation = imposeRequest.slot_assignments.map(slot => ({
+      ...slot,
+      rotation: slot.needs_rotation ? 90 : 0,
+    }));
+
     // Call VPS PDF API imposition endpoint
     const response = await fetch(`${VPS_PDF_API_URL}/impose/labels`, {
       method: "POST",
@@ -83,7 +90,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         dieline: imposeRequest.dieline,
-        slots: imposeRequest.slot_assignments,
+        slots: slotsWithRotation,
         meters: imposeRequest.meters_to_print,
         include_dielines: imposeRequest.include_dielines,
         return_base64: true,

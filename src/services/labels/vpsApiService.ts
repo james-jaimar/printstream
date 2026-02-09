@@ -87,6 +87,7 @@ export interface PageBoxesResponse {
   };
   primary_box: "trimbox" | "mediabox";
   dimensions_mm: PageBoxesMm;
+  page_count: number;
   error?: string;
 }
 
@@ -165,6 +166,7 @@ export interface DielineConfig {
 
 export interface ImpositionSlot extends SlotAssignment {
   pdf_url: string;
+  needs_rotation?: boolean;
 }
 
 export interface ImpositionRequest {
@@ -210,11 +212,74 @@ export async function createImposition(
 // ============================================================================
 
 /**
+ * Rotate a PDF by the given angle (90, 180, 270)
+ */
+export async function rotatePdf(
+  pdfUrl: string,
+  angle: number = 90,
+  itemId?: string
+): Promise<{ rotated_pdf_base64: string; angle: number; page_count: number }> {
+  const { data, error } = await supabase.functions.invoke("label-rotate-pdf", {
+    body: { pdf_url: pdfUrl, angle, item_id: itemId },
+  });
+
+  if (error) {
+    console.error("Rotate PDF error:", error);
+    throw new Error(`PDF rotation failed: ${error.message}`);
+  }
+
+  return data;
+}
+
+// ============================================================================
+// SPLIT PDF SERVICE
+// ============================================================================
+
+export interface SplitPdfPage {
+  page_number: number;
+  pdf_url: string;
+  width_mm: number;
+  height_mm: number;
+}
+
+export interface SplitPdfResponse {
+  success: boolean;
+  item_id?: string;
+  page_count: number;
+  pages: SplitPdfPage[];
+  child_item_ids: string[];
+  error?: string;
+}
+
+/**
+ * Split a multi-page PDF into individual items
+ */
+export async function splitPdf(
+  itemId: string,
+  pdfUrl: string,
+  orderId: string
+): Promise<SplitPdfResponse> {
+  const { data, error } = await supabase.functions.invoke("label-split-pdf", {
+    body: { item_id: itemId, pdf_url: pdfUrl, order_id: orderId },
+  });
+
+  if (error) {
+    console.error("Split PDF error:", error);
+    throw new Error(`PDF split failed: ${error.message}`);
+  }
+
+  return data as SplitPdfResponse;
+}
+
+// ============================================================================
+// HEALTH CHECK
+// ============================================================================
+
+/**
  * Check if VPS PDF API is available
  */
 export async function checkVpsApiHealth(): Promise<boolean> {
   try {
-    // Simple preflight with a test - will fail but confirms connectivity
     const response = await fetch(`${SUPABASE_URL}/functions/v1/label-preflight`, {
       method: "POST",
       headers: {
@@ -224,7 +289,6 @@ export async function checkVpsApiHealth(): Promise<boolean> {
       body: JSON.stringify({ pdf_url: "health-check" }),
     });
     
-    // Even a 400 error means the function is reachable
     return response.status !== 502 && response.status !== 503;
   } catch (error) {
     console.error("VPS API health check failed:", error);

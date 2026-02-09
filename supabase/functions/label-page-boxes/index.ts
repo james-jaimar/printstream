@@ -28,6 +28,7 @@ interface VpsPageBoxesResponse {
   bleedbox: BoxDimensions | null;
   trimbox: BoxDimensions | null;
   artbox: BoxDimensions | null;
+  page_count: number;
 }
 
 interface BoxMm {
@@ -46,6 +47,7 @@ interface PageBoxesResponse {
   };
   primary_box: "trimbox" | "mediabox";
   dimensions_mm: BoxMm;
+  page_count: number;
   error?: string;
 }
 
@@ -129,6 +131,7 @@ Deno.serve(async (req) => {
       boxes,
       primary_box: primaryBox,
       dimensions_mm: dimensionsMm,
+      page_count: vpsData.page_count || 1,
     };
 
     console.log(`[label-page-boxes] Returning: primary_box=${primaryBox}, dimensions=${dimensionsMm.width_mm}x${dimensionsMm.height_mm}mm`);
