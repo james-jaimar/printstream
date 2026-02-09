@@ -1,86 +1,119 @@
 
 
-# Plan: Separate Label Customers from Staff Users
+# Plan: Independent Client Portal Authentication
 
-## What's Wrong
+## Overview
 
-When you add a contact in the Labels customer area and tick "Create portal login", the system creates a Supabase auth account for that contact. This means those customer contacts appear alongside your staff in the Setup/Admin users list. Customers and staff should be completely separate.
+Build a self-contained authentication system for label customers that is completely separate from the staff `auth.users` system. Customers will log in with email + password stored in a dedicated `label_client_auth` table, with sessions managed via a custom JWT issued by an edge function.
 
-## What Will Change
+## How It Works
 
-### 1. Remove the "Create portal login" Feature from Contacts
+**Login flow:**
+1. Customer enters email + password on the portal login page
+2. Frontend calls an edge function `label-client-auth`
+3. Edge function looks up the contact in `label_customer_contacts`, verifies the bcrypt password hash from `label_client_auth`, and returns a signed JWT containing `contact_id`, `customer_id`, and `email`
+4. Frontend stores the token in localStorage and uses it for all portal API calls
 
-The contact form currently has a checkbox to create a login account. This will be removed entirely since customer contacts should not be auth users.
+**Data access flow:**
+1. Portal pages call a second edge function `label-client-data` with the JWT in the Authorization header
+2. The edge function verifies the JWT, extracts `customer_id`, and queries Supabase using the service role key (bypassing RLS)
+3. Returns only orders/items belonging to that customer
 
-**Files changed:**
-- `src/components/labels/customers/ContactFormDialog.tsx` -- Remove the "Create portal login" checkbox, password field, and related logic
-- `src/hooks/labels/useCustomerContacts.ts` -- Remove `create_login`, `password` from `CreateContactInput` and remove the `signUp` logic from the mutation
+**Admin sets passwords:**
+1. In the Contacts dialog, admin gets a "Set Portal Password" field
+2. Password is sent to the `label-client-auth` edge function with the admin's staff JWT for authorization
+3. Edge function hashes the password with bcrypt and stores it in `label_client_auth`
 
-### 2. Clean Up Existing Customer Auth Accounts
+## Database Changes
 
-A database migration will:
-- Set `user_id = NULL` on all 4 affected `label_customer_contacts` rows
-- Delete the 4 customer entries from `user_roles` 
-- Delete the 4 customer entries from `profiles`
+### New table: `label_client_auth`
 
-The affected accounts are:
-- dwain@klintscales.co.za
-- james@jaimar.dev
-- michael@ontrendmedia.co.za
-- bianca@ontrendmedia.co.za
+| Column | Type | Description |
+|--------|------|-------------|
+| id | uuid (PK) | Auto-generated |
+| contact_id | uuid (FK -> label_customer_contacts.id, UNIQUE) | Links to the contact |
+| password_hash | text | bcrypt hash |
+| is_active | boolean | Can this contact log in? |
+| last_login_at | timestamptz | Tracks last login |
+| created_at | timestamptz | Auto |
+| updated_at | timestamptz | Auto |
 
-**Note:** The actual `auth.users` entries cannot be deleted via SQL migration (that's a reserved schema). You'll need to manually delete those 4 users from the Supabase Auth dashboard after this migration runs, or we can use an edge function to do it.
+RLS: Enabled with no SELECT policy (only accessed via edge functions using service role).
 
-### 3. Simplify the `is_label_client` Security Function
+## Edge Functions
 
-Currently `is_label_client()` checks if a `user_id` exists in `label_customer_contacts`. Since contacts will no longer have auth accounts, this function should simply return `false` (no authenticated user will ever be a "label client"). This keeps all existing RLS policies working without changes.
+### 1. `label-client-auth`
 
----
+Handles three operations:
+- **POST /login**: Accepts `{ email, password }`, verifies credentials, returns a signed JWT
+- **POST /set-password**: Accepts `{ contact_id, password }` with admin JWT auth, creates/updates the password hash
+- **POST /verify**: Accepts `{ token }`, verifies the JWT and returns the decoded payload
 
-## Technical Details
+Uses the `SUPABASE_SERVICE_ROLE_KEY` to access `label_client_auth` (bypasses RLS). Signs JWTs using `SUPABASE_JWT_SECRET`.
 
-### Migration SQL
-```sql
--- Clear user_id references from label_customer_contacts
-UPDATE label_customer_contacts SET user_id = NULL WHERE user_id IS NOT NULL;
+### 2. `label-client-data`
 
--- Remove customer entries from user_roles and profiles
-DELETE FROM user_roles WHERE user_id IN (
-  '6396a811-2807-473c-b429-437a75ec161c',
-  '2182756a-51c7-40c9-be51-dc2d6c44ccd9',
-  '722e154c-6716-42c6-af09-76024812e77c',
-  'e6f69018-c10d-441d-bc68-e44084c0192b'
-);
-DELETE FROM profiles WHERE id IN (
-  '6396a811-2807-473c-b429-437a75ec161c',
-  '2182756a-51c7-40c9-be51-dc2d6c44ccd9',
-  '722e154c-6716-42c6-af09-76024812e77c',
-  'e6f69018-c10d-441d-bc68-e44084c0192b'
-);
+Handles customer data requests, verified via the custom JWT:
+- **GET /orders**: Returns all orders for the customer
+- **GET /order/:id**: Returns a specific order with items/runs
+- **GET /approvals/:orderId**: Returns approval history
+- **POST /approve**: Submit proof approval/rejection
 
--- Simplify is_label_client to always return false
-CREATE OR REPLACE FUNCTION public.is_label_client(check_user_id uuid)
-RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = public
-AS $$ SELECT false $$;
-```
+## Frontend Changes
 
-### Frontend Changes
+### 1. Client Auth Context (`src/hooks/labels/useClientAuth.tsx`)
 
-**ContactFormDialog.tsx**: Remove ~30 lines covering the create_login checkbox, password input, and related state/validation.
+A new, separate auth context for the portal (not connected to the staff `AuthProvider`):
+- Stores JWT token in localStorage under `label_client_token`
+- Provides `login()`, `logout()`, `isAuthenticated`, `contact` info
+- Auto-checks token validity on mount
 
-**useCustomerContacts.ts**: Remove `create_login` and `password` from `CreateContactInput`. Remove the `signUp` block from the mutation. Always set `user_id: null` on insert.
+### 2. Client Portal Guard (`src/components/labels/portal/ClientPortalGuard.tsx`)
 
-### Post-Migration Manual Step
+Replaces the current `<ProtectedRoute>` wrapper on portal routes. Checks `label_client_token` instead of Supabase session.
 
-After the migration, delete these 4 users from the Supabase Auth dashboard:
-- dwain@klintscales.co.za
-- james@jaimar.dev
-- michael@ontrendmedia.co.za
-- bianca@ontrendmedia.co.za
+### 3. Updated Portal Login (`ClientPortalLogin.tsx`)
 
-### Future Consideration
+- Calls `label-client-auth` edge function instead of `supabase.auth.signInWithPassword`
+- Stores returned JWT in localStorage
 
-If you later want customers to have portal access (e.g., to view proofs online), a separate authentication system can be built using a `label_customer_auth` table with hashed passwords, completely independent of the staff auth system. This would be a separate feature.
+### 4. Updated Portal Dashboard + Order Detail
+
+- Replace `useClientOrders`, `useClientOrder`, `useClientProfile` hooks to call `label-client-data` edge function instead of direct Supabase queries
+- Create new `useClientPortalData.ts` hook that calls the edge function with the stored JWT
+
+### 5. Contact Form Enhancement
+
+- Add a "Portal Access" section in `ContactFormDialog.tsx` with a password field
+- When admin sets a password, calls `label-client-auth/set-password` with the admin's staff auth token
+- Shows a badge on contacts that have portal access enabled
+
+### 6. Route Changes in `App.tsx`
+
+- Replace `<ProtectedRoute>` with `<ClientPortalGuard>` for `/labels/portal` and `/labels/portal/order/:orderId`
+
+## Files to Create
+
+- `supabase/functions/label-client-auth/index.ts` -- Login, set-password, verify
+- `supabase/functions/label-client-data/index.ts` -- Orders, approvals, proof actions
+- `src/hooks/labels/useClientAuth.tsx` -- Client auth context + provider
+- `src/hooks/labels/useClientPortalData.ts` -- Data hooks calling edge function
+- `src/components/labels/portal/ClientPortalGuard.tsx` -- Route guard
+
+## Files to Modify
+
+- `src/pages/labels/portal/ClientPortalLogin.tsx` -- Use new auth flow
+- `src/pages/labels/portal/ClientPortalDashboard.tsx` -- Use new data hooks
+- `src/pages/labels/portal/ClientOrderDetail.tsx` -- Use new data hooks
+- `src/components/labels/customers/ContactFormDialog.tsx` -- Add portal password field
+- `src/hooks/labels/useClientPortal.ts` -- Remove old auth-dependent hooks (keep admin-only hooks)
+- `src/App.tsx` -- Swap ProtectedRoute for ClientPortalGuard on portal routes
+
+## Security Considerations
+
+- Passwords are bcrypt-hashed server-side in the edge function (never stored in plaintext)
+- `label_client_auth` table has RLS enabled with no public policies -- only accessible via service role in edge functions
+- JWTs are signed with `SUPABASE_JWT_SECRET` and have a 24-hour expiry
+- The `label-client-data` edge function scopes ALL queries to the authenticated customer's `customer_id` -- no cross-customer data leakage
+- Admin set-password endpoint validates the caller is an authenticated staff user before allowing password changes
 
