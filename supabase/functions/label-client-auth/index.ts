@@ -117,7 +117,10 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const jwtSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("JWT_SECRET")!;
+  const jwtSecret = Deno.env.get("JWT_SECRET") || Deno.env.get("SUPABASE_JWT_SECRET");
+  if (!jwtSecret) {
+    return jsonResponse({ error: "Server configuration error: JWT secret not set" }, 500);
+  }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
