@@ -47,6 +47,23 @@ export type PreflightStatus =
   | 'failed' 
   | 'warnings';
 
+export type PrintPdfStatus = 
+  | 'pending' 
+  | 'ready' 
+  | 'processing' 
+  | 'needs_crop';
+
+export type ArtworkSource = 
+  | 'admin' 
+  | 'client';
+
+export interface CropAmountMm {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 export type SubstrateType = 
   | 'Paper' 
   | 'PP' 
@@ -146,6 +163,14 @@ export interface LabelItem {
   name: string;
   artwork_pdf_url: string | null;
   artwork_thumbnail_url: string | null;
+  // Dual artwork model - proof vs print-ready
+  proof_pdf_url: string | null;
+  proof_thumbnail_url: string | null;
+  print_pdf_url: string | null;
+  print_pdf_status: PrintPdfStatus;
+  requires_crop: boolean;
+  crop_amount_mm: CropAmountMm | null;
+  artwork_source: ArtworkSource;
   quantity: number;
   width_mm: number | null;
   height_mm: number | null;

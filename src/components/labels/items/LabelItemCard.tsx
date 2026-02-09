@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2, Crop, FileCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -9,9 +9,15 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useThumbnailUrl } from '@/hooks/labels/useThumbnailUrl';
-import type { LabelItem } from '@/types/labels';
+import type { LabelItem, PrintPdfStatus } from '@/types/labels';
 
 type ValidationStatus = 'passed' | 'no_bleed' | 'too_large' | 'too_small' | 'needs_crop' | 'pending';
 
@@ -23,6 +29,8 @@ interface LabelItemCardProps {
   validationStatus?: ValidationStatus;
   validationIssues?: string[];
   thumbnailUrl?: string;
+  onPrepareArtwork?: (action: 'crop' | 'use_proof_as_print') => void;
+  isProcessing?: boolean;
 }
 
 const statusConfig: Record<ValidationStatus, {
@@ -39,6 +47,16 @@ const statusConfig: Record<ValidationStatus, {
   pending: { icon: FileText, color: 'text-muted-foreground', bgColor: 'bg-muted', label: 'Pending' },
 };
 
+const printStatusConfig: Record<PrintPdfStatus, {
+  color: string;
+  label: string;
+}> = {
+  pending: { color: 'text-muted-foreground', label: 'Not Ready' },
+  ready: { color: 'text-green-600', label: 'Print Ready' },
+  processing: { color: 'text-blue-600', label: 'Processing...' },
+  needs_crop: { color: 'text-amber-600', label: 'Needs Crop' },
+};
+
 export function LabelItemCard({
   item,
   onQuantityChange,
@@ -47,6 +65,8 @@ export function LabelItemCard({
   validationStatus = 'pending',
   validationIssues = [],
   thumbnailUrl: thumbnailPath,
+  onPrepareArtwork,
+  isProcessing = false,
 }: LabelItemCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(item.name);
@@ -63,6 +83,11 @@ export function LabelItemCard({
 
   const status = statusConfig[validationStatus];
   const StatusIcon = status.icon;
+  
+  const printStatus = printStatusConfig[item.print_pdf_status || 'pending'];
+  const hasProof = !!(item.proof_pdf_url || item.artwork_pdf_url);
+  const isPrintReady = item.print_pdf_status === 'ready';
+  const needsCrop = item.requires_crop || item.print_pdf_status === 'needs_crop';
 
   const handleNameSave = () => {
     if (editName.trim() && onNameChange) {
@@ -163,6 +188,82 @@ export function LabelItemCard({
               ) : null}
               {Number(item.width_mm).toFixed(1)}×{Number(item.height_mm).toFixed(1)}mm
             </p>
+          )}
+
+          {/* Artwork Status Row */}
+          <div className="flex items-center justify-between text-xs border-t pt-2">
+            <TooltipProvider>
+              <div className="flex items-center gap-2">
+                {/* Proof Status */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className={cn(
+                      "flex items-center gap-1",
+                      hasProof ? "text-green-600" : "text-muted-foreground"
+                    )}>
+                      {hasProof ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      <span>Proof</span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {hasProof ? 'Proof artwork uploaded' : 'No proof artwork'}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Print Status */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className={cn("flex items-center gap-1", printStatus.color)}>
+                      {isPrintReady ? (
+                        <CheckCircle className="h-3 w-3" />
+                      ) : item.print_pdf_status === 'processing' ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <XCircle className="h-3 w-3" />
+                      )}
+                      <span>Print</span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>{printStatus.label}</TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+          </div>
+
+          {/* Prep Actions */}
+          {onPrepareArtwork && hasProof && !isPrintReady && (
+            <div className="flex gap-2">
+              {needsCrop && item.crop_amount_mm && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 h-7 text-xs gap-1"
+                  onClick={() => onPrepareArtwork('crop')}
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Crop className="h-3 w-3" />
+                  )}
+                  Auto-Crop
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 h-7 text-xs gap-1"
+                onClick={() => onPrepareArtwork('use_proof_as_print')}
+                disabled={isProcessing}
+              >
+                {isProcessing ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <FileCheck className="h-3 w-3" />
+                )}
+                Use as Print
+              </Button>
+            </div>
           )}
 
           {/* Validation Details */}
