@@ -33,6 +33,8 @@ export interface UploadedFileResult {
   width_mm?: number;
   height_mm?: number;
   isProof: boolean; // True = proof artwork, False = print-ready
+  needs_rotation?: boolean;
+  page_count?: number;
 }
 
 interface DualArtworkUploadZoneProps {
@@ -144,10 +146,15 @@ export function DualArtworkUploadZone({
         // Validate dimensions
         let preflightStatus: 'pending' | 'passed' | 'failed' | 'warnings' = 'pending';
         let validation: ValidationResult | undefined;
-        let pdfDimensions: { width_mm: number; height_mm: number } | undefined;
+        let pdfDimensions: { width_mm: number; height_mm: number; page_count: number } | undefined;
         
         try {
           pdfDimensions = await getPdfDimensionsMm(file);
+          
+          // Notify about multi-page PDFs
+          if (pdfDimensions.page_count > 1) {
+            toast.info(`${file.name}: ${pdfDimensions.page_count} pages detected — can be split into individual items`, { duration: 5000 });
+          }
           
           if (dieline) {
             validation = validatePdfDimensions(
@@ -163,7 +170,9 @@ export function DualArtworkUploadZone({
             );
             preflightStatus = validation.preflightStatus;
             
-            if (validation.status !== 'passed') {
+            if (validation.needs_rotation) {
+              toast.info(`${file.name}: Will be auto-rotated 90° for production`, { duration: 4000 });
+            } else if (validation.status !== 'passed') {
               toast.info(`${file.name}: ${validation.issues[0]}`, { duration: 4000 });
             }
           }
@@ -216,6 +225,8 @@ export function DualArtworkUploadZone({
           width_mm: pdfDimensions?.width_mm,
           height_mm: pdfDimensions?.height_mm,
           isProof,
+          needs_rotation: validation?.needs_rotation,
+          page_count: pdfDimensions?.page_count,
         });
 
         setUploadingFiles(prev => 

@@ -103,7 +103,7 @@ export function dataUrlToBlob(dataUrl: string): Blob {
  * @param file - The PDF file
  * @returns Object with width and height in mm
  */
-export async function getPdfDimensionsMm(file: File): Promise<{ width_mm: number; height_mm: number }> {
+export async function getPdfDimensionsMm(file: File): Promise<{ width_mm: number; height_mm: number; page_count: number }> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(1);
@@ -116,6 +116,7 @@ export async function getPdfDimensionsMm(file: File): Promise<{ width_mm: number
   return {
     width_mm: viewport.width * PT_TO_MM,
     height_mm: viewport.height * PT_TO_MM,
+    page_count: pdf.numPages,
   };
 }
 
@@ -133,6 +134,8 @@ export interface ValidationResult {
   can_auto_crop: boolean;
   // Which box was used for validation
   box_used?: 'trimbox' | 'mediabox' | 'client';
+  // Orientation detection
+  needs_rotation: boolean;
 }
 
 /**
@@ -168,26 +171,36 @@ export function validatePdfDimensions(
   const issues: string[] = [];
   let status: ValidationResult['status'] = 'passed';
   let can_auto_crop = false;
+  let needs_rotation = false;
+
+  // Helper: check if dimensions match within tolerance
+  const dimMatch = (aW: number, aH: number, eW: number, eH: number) =>
+    Math.abs(aW - eW) <= toleranceMm && Math.abs(aH - eH) <= toleranceMm;
 
   // If dimensions are from TrimBox, compare directly to trim size
   if (isTrimBox) {
-    const widthDiff = actualWidth - expectedTrimWidth;
-    const heightDiff = actualHeight - expectedTrimHeight;
-    
-    // Check if TrimBox matches expected trim size (within tolerance)
-    if (Math.abs(widthDiff) <= toleranceMm && Math.abs(heightDiff) <= toleranceMm) {
+    // Normal orientation check
+    if (dimMatch(actualWidth, actualHeight, expectedTrimWidth, expectedTrimHeight)) {
       status = 'passed';
-      // TrimBox matches - artwork has correct trim size
-    } else if (widthDiff > toleranceMm || heightDiff > toleranceMm) {
-      status = 'too_large';
-      issues.push(`TrimBox is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
-      issues.push(`Expected ${expectedTrimWidth.toFixed(1)}×${expectedTrimHeight.toFixed(1)}mm`);
-      issues.push('Trim area is larger than dieline specification');
-    } else {
-      status = 'too_small';
-      issues.push(`TrimBox is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
-      issues.push(`Expected ${expectedTrimWidth.toFixed(1)}×${expectedTrimHeight.toFixed(1)}mm`);
-      issues.push('Trim area is smaller than dieline specification');
+    }
+    // Rotated orientation check (swap W/H)
+    else if (dimMatch(actualHeight, actualWidth, expectedTrimWidth, expectedTrimHeight)) {
+      status = 'passed';
+      needs_rotation = true;
+      issues.push('Artwork is rotated 90° — will be auto-rotated for production');
+    }
+    else {
+      const widthDiff = actualWidth - expectedTrimWidth;
+      const heightDiff = actualHeight - expectedTrimHeight;
+      if (widthDiff > toleranceMm || heightDiff > toleranceMm) {
+        status = 'too_large';
+        issues.push(`TrimBox is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
+        issues.push(`Expected ${expectedTrimWidth.toFixed(1)}×${expectedTrimHeight.toFixed(1)}mm`);
+      } else {
+        status = 'too_small';
+        issues.push(`TrimBox is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm`);
+        issues.push(`Expected ${expectedTrimWidth.toFixed(1)}×${expectedTrimHeight.toFixed(1)}mm`);
+      }
     }
     
     return {
@@ -200,6 +213,7 @@ export function validatePdfDimensions(
       expected_height_mm: expectedTrimHeight,
       can_auto_crop,
       box_used: 'trimbox',
+      needs_rotation,
     };
   }
 
@@ -211,13 +225,26 @@ export function validatePdfDimensions(
   const heightDiffFromTrim = actualHeight - expectedTrimHeight;
 
   // Check if it matches with bleed (within tolerance)
-  if (Math.abs(widthDiff) <= toleranceMm && Math.abs(heightDiff) <= toleranceMm) {
+  if (dimMatch(actualWidth, actualHeight, expectedWidthWithBleed, expectedHeightWithBleed)) {
     status = 'passed';
   }
+  // Check rotated orientation with bleed
+  else if (dimMatch(actualHeight, actualWidth, expectedWidthWithBleed, expectedHeightWithBleed)) {
+    status = 'passed';
+    needs_rotation = true;
+    issues.push('Artwork is rotated 90° — will be auto-rotated for production');
+  }
   // Check if it matches trim size exactly (no bleed)
-  else if (Math.abs(widthDiffFromTrim) <= toleranceMm && Math.abs(heightDiffFromTrim) <= toleranceMm) {
+  else if (dimMatch(actualWidth, actualHeight, expectedTrimWidth, expectedTrimHeight)) {
     status = 'no_bleed';
     issues.push(`PDF is ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)}mm (trim size only, no bleed)`);
+    issues.push(`Expected ${expectedWidthWithBleed.toFixed(1)}×${expectedHeightWithBleed.toFixed(1)}mm with bleed`);
+  }
+  // Check rotated trim size (no bleed)
+  else if (dimMatch(actualHeight, actualWidth, expectedTrimWidth, expectedTrimHeight)) {
+    status = 'no_bleed';
+    needs_rotation = true;
+    issues.push('Artwork is rotated 90° and has no bleed');
     issues.push(`Expected ${expectedWidthWithBleed.toFixed(1)}×${expectedHeightWithBleed.toFixed(1)}mm with bleed`);
   }
   // Check if too large but can be cropped
@@ -258,5 +285,6 @@ export function validatePdfDimensions(
     expected_height_mm: expectedHeightWithBleed,
     can_auto_crop,
     box_used: 'mediabox',
+    needs_rotation,
   };
 }

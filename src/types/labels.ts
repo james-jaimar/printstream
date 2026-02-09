@@ -190,6 +190,11 @@ export interface LabelItem {
   min_dpi: number | null;
   has_bleed: boolean | null;
   notes: string | null;
+  // Orientation & multi-page support
+  needs_rotation: boolean;
+  page_count: number;
+  parent_item_id: string | null;
+  source_page_number: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -251,6 +256,7 @@ export interface SlotAssignment {
   slot: number;
   item_id: string;
   quantity_in_slot: number;
+  needs_rotation?: boolean;
 }
 
 export interface LabelRun {

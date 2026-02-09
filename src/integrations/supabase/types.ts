@@ -1436,8 +1436,11 @@ export type Database = {
           item_number: number
           min_dpi: number | null
           name: string
+          needs_rotation: boolean
           notes: string | null
           order_id: string
+          page_count: number
+          parent_item_id: string | null
           preflight_report: Json | null
           preflight_status: string
           print_pdf_status: string | null
@@ -1447,6 +1450,7 @@ export type Database = {
           proofing_status: string | null
           quantity: number
           requires_crop: boolean | null
+          source_page_number: number | null
           updated_at: string
           width_mm: number | null
         }
@@ -1464,8 +1468,11 @@ export type Database = {
           item_number?: number
           min_dpi?: number | null
           name: string
+          needs_rotation?: boolean
           notes?: string | null
           order_id: string
+          page_count?: number
+          parent_item_id?: string | null
           preflight_report?: Json | null
           preflight_status?: string
           print_pdf_status?: string | null
@@ -1475,6 +1482,7 @@ export type Database = {
           proofing_status?: string | null
           quantity?: number
           requires_crop?: boolean | null
+          source_page_number?: number | null
           updated_at?: string
           width_mm?: number | null
         }
@@ -1492,8 +1500,11 @@ export type Database = {
           item_number?: number
           min_dpi?: number | null
           name?: string
+          needs_rotation?: boolean
           notes?: string | null
           order_id?: string
+          page_count?: number
+          parent_item_id?: string | null
           preflight_report?: Json | null
           preflight_status?: string
           print_pdf_status?: string | null
@@ -1503,6 +1514,7 @@ export type Database = {
           proofing_status?: string | null
           quantity?: number
           requires_crop?: boolean | null
+          source_page_number?: number | null
           updated_at?: string
           width_mm?: number | null
         }
@@ -1512,6 +1524,13 @@ export type Database = {
             columns: ["order_id"]
             isOneToOne: false
             referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_items_parent_item_id_fkey"
+            columns: ["parent_item_id"]
+            isOneToOne: false
+            referencedRelation: "label_items"
             referencedColumns: ["id"]
           },
         ]
