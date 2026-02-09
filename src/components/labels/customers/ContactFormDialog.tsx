@@ -39,8 +39,6 @@ export function ContactFormDialog({
     can_approve_proofs: true,
     is_primary: false,
     notes: '',
-    create_login: false,
-    password: '',
   });
 
   const createMutation = useCreateCustomerContact();
@@ -60,8 +58,6 @@ export function ContactFormDialog({
         can_approve_proofs: contact.can_approve_proofs,
         is_primary: contact.is_primary,
         notes: contact.notes || '',
-        create_login: false,
-        password: '',
       });
     } else {
       setFormData({
@@ -74,8 +70,6 @@ export function ContactFormDialog({
         can_approve_proofs: true,
         is_primary: false,
         notes: '',
-        create_login: false,
-        password: '',
       });
     }
   }, [contact, open]);
@@ -83,11 +77,6 @@ export function ContactFormDialog({
   const handleSubmit = async () => {
     if (!formData.name || !formData.email) {
       toast.error('Name and email are required');
-      return;
-    }
-
-    if (formData.create_login && !formData.password) {
-      toast.error('Password is required when creating login');
       return;
     }
 
@@ -118,8 +107,6 @@ export function ContactFormDialog({
           can_approve_proofs: formData.can_approve_proofs,
           is_primary: formData.is_primary,
           notes: formData.notes || undefined,
-          create_login: formData.create_login,
-          password: formData.password || undefined,
         });
       }
       onOpenChange(false);
@@ -236,34 +223,6 @@ export function ContactFormDialog({
               </div>
             </div>
           </div>
-
-          {!isEditing && (
-            <div className="space-y-3 pt-2 border-t">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="create_login"
-                  checked={formData.create_login}
-                  onCheckedChange={(checked) => 
-                    setFormData({ ...formData, create_login: !!checked })
-                  }
-                />
-                <label htmlFor="create_login" className="text-sm font-medium">
-                  Create portal login for this contact
-                </label>
-              </div>
-              {formData.create_login && (
-                <div className="space-y-2 pl-6">
-                  <Label>Password *</Label>
-                  <Input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="••••••••"
-                  />
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="space-y-2">
             <Label>Notes</Label>

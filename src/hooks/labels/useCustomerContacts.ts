@@ -31,8 +31,6 @@ export interface CreateContactInput {
   can_approve_proofs?: boolean;
   is_primary?: boolean;
   notes?: string;
-  create_login?: boolean;
-  password?: string;
 }
 
 export interface UpdateContactInput {
@@ -85,28 +83,11 @@ export function useCreateCustomerContact() {
 
   return useMutation({
     mutationFn: async (input: CreateContactInput): Promise<CustomerContact> => {
-      let userId: string | null = null;
-
-      // Create auth user if login is requested
-      if (input.create_login && input.password) {
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: input.email,
-          password: input.password,
-          options: {
-            emailRedirectTo: window.location.origin,
-          },
-        });
-
-        if (authError) throw authError;
-        if (!authData.user) throw new Error('Failed to create user');
-        userId = authData.user.id;
-      }
-
       const { data, error } = await supabase
         .from('label_customer_contacts')
         .insert({
           customer_id: input.customer_id,
-          user_id: userId,
+          user_id: null,
           name: input.name,
           email: input.email,
           phone: input.phone || null,
