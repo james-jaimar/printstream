@@ -71,24 +71,43 @@ export function LayoutOptimizer({
 
   const { prepareBulk, isProcessing: isPreparingArtwork } = usePrepareArtwork(orderId);
 
-  // Check artwork readiness
+  // Check artwork readiness - separate "has any artwork" from "is print-ready"
   const artworkReadiness = useMemo(() => {
-    const notReady = items.filter(item => item.print_pdf_status !== 'ready');
-    const needsCrop = notReady.filter(item => item.requires_crop || item.print_pdf_status === 'needs_crop');
-    const needsUpload = notReady.filter(item => !item.proof_pdf_url && !item.artwork_pdf_url);
-    const canAutoFix = notReady.filter(item => 
+    // Items that are fully print-ready
+    const printReady = items.filter(item => item.print_pdf_status === 'ready');
+    
+    // Items with some form of artwork (proof or print)
+    const hasAnyArtwork = items.filter(item => 
+      item.proof_pdf_url || item.artwork_pdf_url || item.print_pdf_url
+    );
+    
+    // Items missing all artwork (blocks layout generation)
+    const missingArtwork = items.filter(item => 
+      !item.proof_pdf_url && !item.artwork_pdf_url && !item.print_pdf_url
+    );
+    
+    // Items not print-ready (for apply-time blocking)
+    const notPrintReady = items.filter(item => item.print_pdf_status !== 'ready');
+    const needsCrop = notPrintReady.filter(item => item.requires_crop || item.print_pdf_status === 'needs_crop');
+    const canAutoFix = notPrintReady.filter(item => 
       (item.proof_pdf_url || item.artwork_pdf_url) && 
       !item.requires_crop && 
       item.print_pdf_status !== 'needs_crop'
     );
     
     return {
-      allReady: notReady.length === 0,
-      notReadyCount: notReady.length,
-      notReadyItems: notReady,
+      // For layout generation - only need some artwork
+      allHaveArtwork: missingArtwork.length === 0,
+      missingArtworkCount: missingArtwork.length,
+      
+      // For apply - need print-ready
+      allPrintReady: printReady.length === items.length,
+      notPrintReadyCount: notPrintReady.length,
+      notPrintReadyItems: notPrintReady,
+      
+      // For auto-fix UI
       needsCropCount: needsCrop.length,
       needsCropItems: needsCrop,
-      needsUploadCount: needsUpload.length,
       canAutoFixCount: canAutoFix.length + needsCrop.length,
       canAutoFixItems: [...canAutoFix, ...needsCrop],
     };
@@ -164,24 +183,28 @@ export function LayoutOptimizer({
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Artwork Readiness Alert */}
-        {!artworkReadiness.allReady && (
+        {/* Missing Artwork Alert - Blocks layout generation */}
+        {!artworkReadiness.allHaveArtwork && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Artwork Not Ready for Production</AlertTitle>
+            <AlertTitle>Missing Artwork</AlertTitle>
+            <AlertDescription>
+              {artworkReadiness.missingArtworkCount} item{artworkReadiness.missingArtworkCount !== 1 ? 's' : ''} missing 
+              artwork files. Please upload artwork before generating layouts.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Print-Ready Warning - Allows layout generation but warns about apply */}
+        {artworkReadiness.allHaveArtwork && !artworkReadiness.allPrintReady && (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Items Need Preparation</AlertTitle>
             <AlertDescription className="space-y-2">
               <p>
-                {artworkReadiness.notReadyCount} item{artworkReadiness.notReadyCount !== 1 ? 's' : ''} need
-                {artworkReadiness.notReadyCount === 1 ? 's' : ''} print-ready artwork:
+                {artworkReadiness.notPrintReadyCount} item{artworkReadiness.notPrintReadyCount !== 1 ? 's' : ''} will 
+                need print files before production. You can still preview layouts now.
               </p>
-              <ul className="text-xs space-y-1 ml-4">
-                {artworkReadiness.needsUploadCount > 0 && (
-                  <li>• {artworkReadiness.needsUploadCount} missing artwork files</li>
-                )}
-                {artworkReadiness.needsCropCount > 0 && (
-                  <li>• {artworkReadiness.needsCropCount} need cropping</li>
-                )}
-              </ul>
               {artworkReadiness.canAutoFixCount > 0 && (
                 <Button 
                   size="sm" 
@@ -299,12 +322,17 @@ export function LayoutOptimizer({
             
             <Button 
               onClick={handleApply} 
-              disabled={isApplying}
+              disabled={isApplying || !artworkReadiness.allPrintReady}
               className="w-full"
               variant="default"
             >
               {isApplying ? (
                 <>Creating Runs...</>
+              ) : !artworkReadiness.allPrintReady ? (
+                <>
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                  Prepare Items First ({artworkReadiness.notPrintReadyCount} remaining)
+                </>
               ) : (
                 <>
                   <Play className="h-4 w-4 mr-2" />
