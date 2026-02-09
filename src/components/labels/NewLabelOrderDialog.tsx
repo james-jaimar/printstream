@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus } from 'lucide-react';
+import { CalendarIcon, Plus, User } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -37,11 +37,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useCreateLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { useLabelDielines } from '@/hooks/labels/useLabelDielines';
 import { useLabelStock } from '@/hooks/labels/useLabelStock';
 import { useLabelCustomers } from '@/hooks/labels/useClientPortal';
+import { useCustomerContacts, CustomerContact } from '@/hooks/labels/useCustomerContacts';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
 
 const formSchema = z.object({
@@ -65,6 +68,7 @@ interface NewLabelOrderDialogProps {
 
 export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
   const [open, setOpen] = useState(false);
+  const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const createOrder = useCreateLabelOrder();
   const { data: dielines } = useLabelDielines();
   const { data: stock } = useLabelStock();
@@ -80,6 +84,31 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
       notes: '',
     },
   });
+
+  const selectedCustomerId = form.watch('customer_id');
+  const { data: contacts } = useCustomerContacts(selectedCustomerId);
+
+  // Reset selected contacts when customer changes
+  useEffect(() => {
+    setSelectedContacts([]);
+    // Auto-select primary contact
+    if (contacts?.length) {
+      const primaryContact = contacts.find(c => c.is_primary && c.is_active);
+      if (primaryContact) {
+        setSelectedContacts([primaryContact.id]);
+        form.setValue('contact_name', primaryContact.name);
+        form.setValue('contact_email', primaryContact.email);
+      }
+    }
+  }, [contacts, form]);
+
+  const toggleContact = (contactId: string) => {
+    setSelectedContacts(prev => 
+      prev.includes(contactId) 
+        ? prev.filter(id => id !== contactId)
+        : [...prev, contactId]
+    );
+  };
 
   const selectedDieline = dielines?.find(d => d.id === form.watch('dieline_id'));
 
@@ -186,13 +215,72 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                 )}
               />
 
+              {/* Contact Selection */}
+              {selectedCustomerId && contacts && contacts.length > 0 && (
+                <div className="space-y-2">
+                  <FormLabel>Select Contacts for this Order</FormLabel>
+                  <div className="border rounded-lg p-3 space-y-2 max-h-[200px] overflow-y-auto">
+                    {contacts.filter(c => c.is_active).map((contact) => (
+                      <div 
+                        key={contact.id}
+                        className={cn(
+                          "flex items-center justify-between p-2 rounded-md cursor-pointer transition-colors",
+                          selectedContacts.includes(contact.id) 
+                            ? "bg-primary/10 border border-primary/30" 
+                            : "hover:bg-muted"
+                        )}
+                        onClick={() => toggleContact(contact.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Checkbox 
+                            checked={selectedContacts.includes(contact.id)}
+                            onCheckedChange={() => toggleContact(contact.id)}
+                          />
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <div className="font-medium text-sm flex items-center gap-2">
+                                {contact.name}
+                                {contact.is_primary && (
+                                  <Badge variant="secondary" className="text-xs">Primary</Badge>
+                                )}
+                              </div>
+                              <div className="text-xs text-muted-foreground">{contact.email}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          {contact.receives_proofs && (
+                            <Badge variant="outline" className="text-xs">Proofs</Badge>
+                          )}
+                          {contact.can_approve_proofs && (
+                            <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-200">Can Approve</Badge>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {selectedContacts.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {selectedContacts.length} contact{selectedContacts.length !== 1 ? 's' : ''} selected
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {selectedCustomerId && (!contacts || contacts.length === 0) && (
+                <p className="text-sm text-muted-foreground italic">
+                  No contacts found for this customer. You can add contacts later.
+                </p>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
                   name="contact_name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Contact Name</FormLabel>
+                      <FormLabel>Primary Contact Name</FormLabel>
                       <FormControl>
                         <Input placeholder="John Smith" {...field} />
                       </FormControl>
@@ -206,7 +294,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                   name="contact_email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Contact Email</FormLabel>
+                      <FormLabel>Primary Contact Email</FormLabel>
                       <FormControl>
                         <Input type="email" placeholder="john@example.com" {...field} />
                       </FormControl>
