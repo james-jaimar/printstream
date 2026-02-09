@@ -1386,8 +1386,10 @@ export type Database = {
       label_items: {
         Row: {
           artwork_pdf_url: string | null
+          artwork_source: string | null
           artwork_thumbnail_url: string | null
           created_at: string
+          crop_amount_mm: Json | null
           has_bleed: boolean | null
           height_mm: number | null
           id: string
@@ -1399,14 +1401,21 @@ export type Database = {
           order_id: string
           preflight_report: Json | null
           preflight_status: string
+          print_pdf_status: string | null
+          print_pdf_url: string | null
+          proof_pdf_url: string | null
+          proof_thumbnail_url: string | null
           quantity: number
+          requires_crop: boolean | null
           updated_at: string
           width_mm: number | null
         }
         Insert: {
           artwork_pdf_url?: string | null
+          artwork_source?: string | null
           artwork_thumbnail_url?: string | null
           created_at?: string
+          crop_amount_mm?: Json | null
           has_bleed?: boolean | null
           height_mm?: number | null
           id?: string
@@ -1418,14 +1427,21 @@ export type Database = {
           order_id: string
           preflight_report?: Json | null
           preflight_status?: string
+          print_pdf_status?: string | null
+          print_pdf_url?: string | null
+          proof_pdf_url?: string | null
+          proof_thumbnail_url?: string | null
           quantity?: number
+          requires_crop?: boolean | null
           updated_at?: string
           width_mm?: number | null
         }
         Update: {
           artwork_pdf_url?: string | null
+          artwork_source?: string | null
           artwork_thumbnail_url?: string | null
           created_at?: string
+          crop_amount_mm?: Json | null
           has_bleed?: boolean | null
           height_mm?: number | null
           id?: string
@@ -1437,7 +1453,12 @@ export type Database = {
           order_id?: string
           preflight_report?: Json | null
           preflight_status?: string
+          print_pdf_status?: string | null
+          print_pdf_url?: string | null
+          proof_pdf_url?: string | null
+          proof_thumbnail_url?: string | null
           quantity?: number
+          requires_crop?: boolean | null
           updated_at?: string
           width_mm?: number | null
         }

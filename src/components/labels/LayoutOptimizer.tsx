@@ -4,13 +4,14 @@
  * Visual interface for generating and selecting optimal label layouts
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { 
   Sparkles, 
   Play, 
@@ -22,7 +23,9 @@ import {
   ChevronDown,
   ChevronUp,
   Zap,
-  LayoutGrid
+  LayoutGrid,
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 import { 
   Collapsible, 
@@ -30,6 +33,7 @@ import {
   CollapsibleTrigger 
 } from '@/components/ui/collapsible';
 import { useLayoutOptimizer } from '@/hooks/labels/useLayoutOptimizer';
+import { usePrepareArtwork } from '@/hooks/labels/usePrepareArtwork';
 import { RunLayoutDiagram } from './optimizer/RunLayoutDiagram';
 import { type LabelItem, type LabelDieline, type LayoutOption } from '@/types/labels';
 import { cn } from '@/lib/utils';
@@ -65,11 +69,48 @@ export function LayoutOptimizer({
     getProductionTime
   } = useLayoutOptimizer({ orderId, items, dieline });
 
+  const { prepareBulk, isProcessing: isPreparingArtwork } = usePrepareArtwork(orderId);
+
+  // Check artwork readiness
+  const artworkReadiness = useMemo(() => {
+    const notReady = items.filter(item => item.print_pdf_status !== 'ready');
+    const needsCrop = notReady.filter(item => item.requires_crop || item.print_pdf_status === 'needs_crop');
+    const needsUpload = notReady.filter(item => !item.proof_pdf_url && !item.artwork_pdf_url);
+    const canAutoFix = notReady.filter(item => 
+      (item.proof_pdf_url || item.artwork_pdf_url) && 
+      !item.requires_crop && 
+      item.print_pdf_status !== 'needs_crop'
+    );
+    
+    return {
+      allReady: notReady.length === 0,
+      notReadyCount: notReady.length,
+      notReadyItems: notReady,
+      needsCropCount: needsCrop.length,
+      needsCropItems: needsCrop,
+      needsUploadCount: needsUpload.length,
+      canAutoFixCount: canAutoFix.length + needsCrop.length,
+      canAutoFixItems: [...canAutoFix, ...needsCrop],
+    };
+  }, [items]);
+
   const handleApply = async () => {
     const success = await applyLayout();
     if (success && onLayoutApplied) {
       onLayoutApplied();
     }
+  };
+
+  const handlePrepareAll = async () => {
+    const itemsToPrep = artworkReadiness.canAutoFixItems.map(item => ({
+      id: item.id,
+      action: (item.requires_crop || item.print_pdf_status === 'needs_crop') 
+        ? 'crop' as const 
+        : 'use_proof_as_print' as const,
+      cropMm: item.crop_amount_mm || undefined,
+    }));
+    
+    await prepareBulk(itemsToPrep);
   };
 
   return (
@@ -122,6 +163,46 @@ export function LayoutOptimizer({
             />
           </CollapsibleContent>
         </Collapsible>
+
+        {/* Artwork Readiness Alert */}
+        {!artworkReadiness.allReady && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Artwork Not Ready for Production</AlertTitle>
+            <AlertDescription className="space-y-2">
+              <p>
+                {artworkReadiness.notReadyCount} item{artworkReadiness.notReadyCount !== 1 ? 's' : ''} need
+                {artworkReadiness.notReadyCount === 1 ? 's' : ''} print-ready artwork:
+              </p>
+              <ul className="text-xs space-y-1 ml-4">
+                {artworkReadiness.needsUploadCount > 0 && (
+                  <li>• {artworkReadiness.needsUploadCount} missing artwork files</li>
+                )}
+                {artworkReadiness.needsCropCount > 0 && (
+                  <li>• {artworkReadiness.needsCropCount} need cropping</li>
+                )}
+              </ul>
+              {artworkReadiness.canAutoFixCount > 0 && (
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={handlePrepareAll}
+                  disabled={isPreparingArtwork}
+                  className="mt-2"
+                >
+                  {isPreparingArtwork ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      Preparing...
+                    </>
+                  ) : (
+                    <>Prepare {artworkReadiness.canAutoFixCount} Items</>
+                  )}
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Generate Button */}
         <Button 

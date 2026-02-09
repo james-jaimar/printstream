@@ -1,5 +1,6 @@
 import { LabelItemCard } from './LabelItemCard';
 import { useUpdateLabelItem, useDeleteLabelItem } from '@/hooks/labels/useLabelItems';
+import { usePrepareArtwork } from '@/hooks/labels/usePrepareArtwork';
 import type { LabelItem, PreflightReport } from '@/types/labels';
 
 type ValidationStatus = 'passed' | 'no_bleed' | 'too_large' | 'too_small' | 'needs_crop' | 'pending';
@@ -78,6 +79,7 @@ function getValidationIssues(item: LabelItem, analysis?: ItemAnalysis): string[]
 export function LabelItemsGrid({ items, orderId, itemAnalyses = {} }: LabelItemsGridProps) {
   const updateItem = useUpdateLabelItem();
   const deleteItem = useDeleteLabelItem();
+  const { prepareItem, processingItemIds } = usePrepareArtwork(orderId);
 
   if (items.length === 0) {
     return null;
@@ -101,6 +103,10 @@ export function LabelItemsGrid({ items, orderId, itemAnalyses = {} }: LabelItems
     deleteItem.mutate({ id: itemId, orderId });
   };
 
+  const handlePrepareArtwork = (itemId: string, action: 'crop' | 'use_proof_as_print') => {
+    prepareItem(itemId, action);
+  };
+
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
       {items.map((item) => {
@@ -108,6 +114,7 @@ export function LabelItemsGrid({ items, orderId, itemAnalyses = {} }: LabelItems
         const validationStatus = getValidationStatus(item, analysis);
         const validationIssues = getValidationIssues(item, analysis);
         const thumbnailUrl = analysis?.thumbnail_url || item.artwork_thumbnail_url || undefined;
+        const isProcessing = processingItemIds.includes(item.id);
         
         return (
           <LabelItemCard
@@ -119,6 +126,8 @@ export function LabelItemsGrid({ items, orderId, itemAnalyses = {} }: LabelItems
             validationStatus={validationStatus}
             validationIssues={validationIssues}
             thumbnailUrl={thumbnailUrl}
+            onPrepareArtwork={(action) => handlePrepareArtwork(item.id, action)}
+            isProcessing={isProcessing}
           />
         );
       })}

@@ -10,3 +10,4 @@ export * from './useLabelSchedule';
 export * from './useClientPortal';
 export * from './useLabelNotifications';
 export * from './useCustomerContacts';
+export * from './usePrepareArtwork';
