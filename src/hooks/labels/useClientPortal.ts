@@ -363,6 +363,52 @@ export function useArchiveLabelCustomer() {
 }
 
 /**
+ * Permanently delete a customer and all related contacts/auth records (admin only)
+ */
+export function useDeleteLabelCustomer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (customerId: string): Promise<void> => {
+      // Contacts cascade-delete due to FK, but delete auth records first
+      const { data: contacts } = await supabase
+        .from('label_customer_contacts')
+        .select('id')
+        .eq('customer_id', customerId);
+
+      if (contacts && contacts.length > 0) {
+        const contactIds = contacts.map(c => c.id);
+        await supabase
+          .from('label_client_auth')
+          .delete()
+          .in('contact_id', contactIds);
+      }
+
+      // Delete contacts explicitly
+      await supabase
+        .from('label_customer_contacts')
+        .delete()
+        .eq('customer_id', customerId);
+
+      // Delete the customer
+      const { error } = await supabase
+        .from('label_customers')
+        .delete()
+        .eq('id', customerId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CUSTOMER_QUERY_KEY });
+      toast.success('Customer permanently deleted');
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete customer: ${error.message}`);
+    },
+  });
+}
+
+/**
  * Link a customer to an order
  */
 export function useLinkCustomerToOrder() {
