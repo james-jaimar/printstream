@@ -57,6 +57,13 @@ export type ArtworkSource =
   | 'admin' 
   | 'client';
 
+export type ProofingStatus = 
+  | 'draft' 
+  | 'ready_for_proof' 
+  | 'awaiting_client' 
+  | 'client_needs_upload' 
+  | 'approved';
+
 export interface CropAmountMm {
   left: number;
   right: number;
@@ -171,6 +178,9 @@ export interface LabelItem {
   requires_crop: boolean;
   crop_amount_mm: CropAmountMm | null;
   artwork_source: ArtworkSource;
+  // Proofing workflow
+  proofing_status: ProofingStatus;
+  artwork_issue: string | null;
   quantity: number;
   width_mm: number | null;
   height_mm: number | null;

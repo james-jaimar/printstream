@@ -11,3 +11,4 @@ export * from './useClientPortal';
 export * from './useLabelNotifications';
 export * from './useCustomerContacts';
 export * from './usePrepareArtwork';
+export * from './useProofingWorkflow';

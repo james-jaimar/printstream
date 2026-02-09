@@ -12,7 +12,9 @@ import {
   AlertCircle,
   Settings,
   Sparkles,
-  X
+  X,
+  Send,
+  ImageOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,10 +25,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { VisuallyHidden } from '@/components/ui/visually-hidden';
 import { useLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { useCreateLabelItem, useUpdateLabelItem } from '@/hooks/labels/useLabelItems';
-import { LabelItemsDropZone } from '../items/LabelItemsDropZone';
+import { DualArtworkUploadZone } from '../items/DualArtworkUploadZone';
 import { LabelItemsGrid } from '../items/LabelItemsGrid';
 import { LabelRunsCard } from '../LabelRunsCard';
 import { LayoutOptimizer } from '../LayoutOptimizer';
+import { SendProofingDialog } from '../proofing/SendProofingDialog';
+import { RequestArtworkDialog } from '../proofing/RequestArtworkDialog';
 import { runPreflight, getPageBoxes } from '@/services/labels/vpsApiService';
 import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
 import type { LabelOrderStatus, PreflightReport, PdfBoxes } from '@/types/labels';
@@ -55,9 +59,12 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const createItem = useCreateLabelItem();
   const updateItem = useUpdateLabelItem();
   const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
+  const [sendProofDialogOpen, setSendProofDialogOpen] = useState(false);
+  const [requestArtworkDialogOpen, setRequestArtworkDialogOpen] = useState(false);
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
 
-  const handleFilesUploaded = useCallback(async (files: { 
+  // Handler for dual upload zone (supports both proof and print-ready artwork)
+  const handleDualFilesUploaded = useCallback(async (files: { 
     url: string; 
     name: string; 
     thumbnailUrl?: string; 
@@ -65,22 +72,53 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     preflightReport?: Record<string, unknown>;
     width_mm?: number;
     height_mm?: number;
+    isProof: boolean;
   }[]) => {
     if (!order) return;
 
     for (const file of files) {
       try {
+        // Check if an item with this name already exists (for adding print-ready to existing)
+        const existingItem = order.items?.find(item => 
+          item.name.toLowerCase() === file.name.replace('.pdf', '').toLowerCase()
+        );
+
+        if (existingItem && !file.isProof) {
+          // Update existing item with print-ready artwork
+          updateItem.mutate({
+            id: existingItem.id,
+            updates: {
+              print_pdf_url: file.url,
+              print_pdf_status: 'ready',
+            }
+          });
+          continue;
+        }
+
+        // Create new item
         const result = await createItem.mutateAsync({
           order_id: order.id,
           name: file.name.replace('.pdf', ''),
           quantity: 1,
-          artwork_pdf_url: file.url,
-          artwork_thumbnail_url: file.thumbnailUrl,
+          // Set proof or print URLs based on upload type
+          artwork_pdf_url: file.isProof ? file.url : null,
+          artwork_thumbnail_url: file.isProof ? file.thumbnailUrl : undefined,
           width_mm: file.width_mm ?? order.dieline?.label_width_mm,
           height_mm: file.height_mm ?? order.dieline?.label_height_mm,
           preflight_status: file.preflightStatus,
           preflight_report: file.preflightReport,
         });
+
+        // If it's print-ready, also update print fields
+        if (!file.isProof) {
+          updateItem.mutate({
+            id: result.id,
+            updates: {
+              print_pdf_url: file.url,
+              print_pdf_status: 'ready',
+            }
+          });
+        }
 
         // Store analysis for the new item (for immediate UI feedback)
         if (file.preflightReport) {
@@ -94,14 +132,14 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
         }
 
         // Fire async VPS calls for accurate analysis
-        if (result.artwork_pdf_url) {
+        const pdfUrl = file.url;
+        if (pdfUrl) {
           // 1. Get page boxes (TrimBox, BleedBox) for accurate dimension validation
-          getPageBoxes(result.artwork_pdf_url, result.id)
+          getPageBoxes(pdfUrl, result.id)
             .then(boxResult => {
               console.log('VPS page boxes complete for item:', result.id, boxResult);
               
               if (boxResult.success && order?.dieline) {
-                // Re-validate with TrimBox if available
                 const isTrimBox = boxResult.primary_box === 'trimbox';
                 const dims = boxResult.dimensions_mm;
                 
@@ -118,7 +156,6 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   isTrimBox
                 );
                 
-                // Update item with accurate dimensions and box data
                 const updatedReport = {
                   boxes: boxResult.boxes,
                   primary_box: boxResult.primary_box,
@@ -145,12 +182,11 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
 
           // 2. Deep preflight analysis (fonts, DPI, color spaces)
           runPreflight({ 
-            pdf_url: result.artwork_pdf_url, 
+            pdf_url: pdfUrl, 
             item_id: result.id 
           })
             .then(preflightResult => {
               console.log('VPS preflight complete for item:', result.id, preflightResult);
-              // Only update if we got useful data (fonts, images, etc.)
               if (preflightResult.report && Object.keys(preflightResult.report).length > 0) {
                 updateItem.mutate({
                   id: result.id,
@@ -222,10 +258,29 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm">
-                    <FileText className="h-4 w-4 mr-2" />
-                    Generate Proof
+                  {/* Request Artwork Button */}
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setRequestArtworkDialogOpen(true)}
+                    disabled={(order.items?.length || 0) === 0}
+                  >
+                    <ImageOff className="h-4 w-4 mr-2" />
+                    Request Artwork
                   </Button>
+                  
+                  {/* Send Proof Button */}
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setSendProofDialogOpen(true)}
+                    disabled={(order.items?.length || 0) === 0}
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    Send Proof
+                  </Button>
+
+                  {/* AI Layout Dialog */}
                   <Dialog open={layoutDialogOpen} onOpenChange={setLayoutDialogOpen}>
                     <DialogTrigger asChild>
                       <Button size="sm" disabled={(order.items?.length || 0) === 0 || !order.dieline}>
@@ -337,11 +392,11 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   </p>
                 </div>
 
-                {/* Drop Zone */}
-                <LabelItemsDropZone
+                {/* Dual Upload Zone */}
+                <DualArtworkUploadZone
                   orderId={order.id}
                   dieline={order.dieline || null}
-                  onFilesUploaded={handleFilesUploaded}
+                  onFilesUploaded={handleDualFilesUploaded}
                   disabled={!order.dieline}
                 />
 
@@ -379,6 +434,24 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
               </div>
             </div>
           </div>
+        )}
+
+        {/* Proofing Dialogs */}
+        {order && (
+          <>
+            <SendProofingDialog
+              open={sendProofDialogOpen}
+              onOpenChange={setSendProofDialogOpen}
+              order={order}
+              items={order.items || []}
+            />
+            <RequestArtworkDialog
+              open={requestArtworkDialogOpen}
+              onOpenChange={setRequestArtworkDialogOpen}
+              order={order}
+              items={order.items || []}
+            />
+          </>
         )}
       </DialogContent>
     </Dialog>
