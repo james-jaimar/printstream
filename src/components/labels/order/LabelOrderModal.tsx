@@ -32,6 +32,7 @@ import { LayoutOptimizer } from '../LayoutOptimizer';
 import { SendProofingDialog } from '../proofing/SendProofingDialog';
 import { RequestArtworkDialog } from '../proofing/RequestArtworkDialog';
 import { runPreflight, getPageBoxes, splitPdf } from '@/services/labels/vpsApiService';
+import { supabase } from '@/integrations/supabase/client';
 import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
 import type { LabelOrderStatus, PreflightReport, PdfBoxes } from '@/types/labels';
 import { toast } from 'sonner';
@@ -65,18 +66,21 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
   const [artworkTab, setArtworkTab] = useState<'proof' | 'print'>('proof');
 
-  // Filter items based on active artwork tab
+  // Filter items based on active artwork tab, hiding split parents
   const filteredItems = useMemo(() => {
     if (!order?.items) return [];
     
+    // Hide parent items that have been split into children
+    const visibleItems = order.items.filter(item => 
+      !(item.page_count > 1 && !item.parent_item_id)
+    );
+    
     if (artworkTab === 'proof') {
-      // Show items with proof/artwork files
-      return order.items.filter(item => 
+      return visibleItems.filter(item => 
         item.proof_pdf_url || item.artwork_pdf_url
       );
     } else {
-      // Show items with print-ready files
-      return order.items.filter(item => 
+      return visibleItems.filter(item => 
         item.print_pdf_url
       );
     }
@@ -223,9 +227,33 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                 console.log(`Multi-page PDF detected (${pageCount} pages), triggering split for item:`, result.id);
                 splitPdf(result.id, pdfUrl, order.id)
                   .then(splitResult => {
-                    console.log('PDF split complete:', splitResult);
+                console.log('PDF split complete:', splitResult);
                     toast.success(`Split into ${splitResult.page_count} items`);
-                    refetch();
+                    // Refetch and generate thumbnails for child items
+                    refetch().then(async ({ data: refetchedOrder }) => {
+                      if (!refetchedOrder?.items) return;
+                      const childItems = refetchedOrder.items.filter(
+                        (i: { parent_item_id: string | null; artwork_thumbnail_url: string | null }) => 
+                          i.parent_item_id === result.id && !i.artwork_thumbnail_url
+                      );
+                      for (const child of childItems) {
+                        if (!child.artwork_pdf_url) continue;
+                        try {
+                          const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
+                          const dataUrl = await generatePdfThumbnailFromUrl(child.artwork_pdf_url, 300);
+                          const blob = dataUrlToBlob(dataUrl);
+                          const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}.png`;
+                          const { error: upErr } = await supabase.storage
+                            .from('label-files')
+                            .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
+                          if (!upErr) {
+                            updateItem.mutate({ id: child.id, updates: { artwork_thumbnail_url: thumbPath } });
+                          }
+                        } catch (thumbErr) {
+                          console.warn('Thumbnail generation failed for child:', child.id, thumbErr);
+                        }
+                      }
+                    });
                   })
                   .catch(err => {
                     console.error('PDF split failed:', err);
