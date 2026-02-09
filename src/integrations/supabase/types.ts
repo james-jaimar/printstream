@@ -1385,6 +1385,7 @@ export type Database = {
       }
       label_items: {
         Row: {
+          artwork_issue: string | null
           artwork_pdf_url: string | null
           artwork_source: string | null
           artwork_thumbnail_url: string | null
@@ -1405,12 +1406,14 @@ export type Database = {
           print_pdf_url: string | null
           proof_pdf_url: string | null
           proof_thumbnail_url: string | null
+          proofing_status: string | null
           quantity: number
           requires_crop: boolean | null
           updated_at: string
           width_mm: number | null
         }
         Insert: {
+          artwork_issue?: string | null
           artwork_pdf_url?: string | null
           artwork_source?: string | null
           artwork_thumbnail_url?: string | null
@@ -1431,12 +1434,14 @@ export type Database = {
           print_pdf_url?: string | null
           proof_pdf_url?: string | null
           proof_thumbnail_url?: string | null
+          proofing_status?: string | null
           quantity?: number
           requires_crop?: boolean | null
           updated_at?: string
           width_mm?: number | null
         }
         Update: {
+          artwork_issue?: string | null
           artwork_pdf_url?: string | null
           artwork_source?: string | null
           artwork_thumbnail_url?: string | null
@@ -1457,6 +1462,7 @@ export type Database = {
           print_pdf_url?: string | null
           proof_pdf_url?: string | null
           proof_thumbnail_url?: string | null
+          proofing_status?: string | null
           quantity?: number
           requires_crop?: boolean | null
           updated_at?: string
@@ -1593,6 +1599,89 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "label_proof_approvals_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_proofing_notifications: {
+        Row: {
+          contact_id: string
+          created_at: string | null
+          email: string
+          id: string
+          request_id: string
+          sent_at: string | null
+          viewed_at: string | null
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string | null
+          email: string
+          id?: string
+          request_id: string
+          sent_at?: string | null
+          viewed_at?: string | null
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string | null
+          email?: string
+          id?: string
+          request_id?: string
+          sent_at?: string | null
+          viewed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_proofing_notifications_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "label_customer_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_proofing_notifications_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "label_proofing_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_proofing_requests: {
+        Row: {
+          created_at: string | null
+          id: string
+          message: string | null
+          order_id: string
+          requested_by: string | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          message?: string | null
+          order_id: string
+          requested_by?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          message?: string | null
+          order_id?: string
+          requested_by?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_proofing_requests_order_id_fkey"
             columns: ["order_id"]
             isOneToOne: false
             referencedRelation: "label_orders"

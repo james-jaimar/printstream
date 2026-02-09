@@ -14,9 +14,14 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'proof_ready' | 'approval_received' | 'order_complete';
+  type: 'proof_ready' | 'approval_received' | 'order_complete' | 'proof_request' | 'artwork_request';
   order_id: string;
-  recipient_email?: string; // Optional override
+  recipient_email?: string; // Optional override for single recipient
+  request_id?: string; // Proofing request ID
+  contact_ids?: string[]; // For multi-contact notifications
+  message?: string; // Custom message
+  item_ids?: string[]; // For artwork request
+  issue?: string; // Artwork issue description
 }
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
@@ -32,7 +37,7 @@ serve(async (req: Request): Promise<Response> => {
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const body: NotificationRequest = await req.json();
-    const { type, order_id, recipient_email } = body;
+    const { type, order_id, recipient_email, request_id, contact_ids, message, item_ids, issue } = body;
 
     // Fetch order details
     const { data: order, error: orderError } = await supabase
@@ -53,7 +58,130 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // Determine recipient
+    // Get portal URL for client
+    const portalUrl = `${req.headers.get('origin') || 'https://printstream.lovable.app'}/labels/portal`;
+
+    // Handle multi-contact notifications (proof_request, artwork_request)
+    if ((type === 'proof_request' || type === 'artwork_request') && contact_ids && contact_ids.length > 0) {
+      // Fetch contacts
+      const { data: contacts, error: contactsError } = await supabase
+        .from('label_customer_contacts')
+        .select('id, name, email')
+        .in('id', contact_ids);
+
+      if (contactsError || !contacts || contacts.length === 0) {
+        console.error('Failed to fetch contacts:', contactsError);
+        return new Response(
+          JSON.stringify({ error: 'No valid contacts found' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Build email content based on type
+      let subject: string;
+      let htmlContentTemplate: (contactName: string) => string;
+
+      if (type === 'proof_request') {
+        subject = `Proof Ready for Review - Order ${order.order_number}`;
+        htmlContentTemplate = (contactName: string) => `
+          <h1>Proof Ready for Your Review</h1>
+          <p>Hello ${contactName},</p>
+          <p>A proof for label order <strong>${order.order_number}</strong> is ready for your review and approval.</p>
+          
+          ${message ? `<div style="background-color: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;"><strong>Message:</strong><br/>${message}</div>` : ''}
+          
+          <h3>Order Details</h3>
+          <ul>
+            <li><strong>Order Number:</strong> ${order.order_number}</li>
+            <li><strong>Customer:</strong> ${order.customer_name}</li>
+            <li><strong>Total Labels:</strong> ${order.total_label_count?.toLocaleString() || 'N/A'}</li>
+            <li><strong>Items:</strong> ${order.items?.length || 0} artwork(s)</li>
+          </ul>
+          
+          <p style="margin-top: 24px;">
+            <a href="${portalUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+              Review & Approve Proof
+            </a>
+          </p>
+          
+          <p style="margin-top: 24px; color: #666; font-size: 14px;">
+            Please log in to the client portal to review the proof and provide your feedback.
+          </p>
+        `;
+      } else {
+        // artwork_request
+        subject = `Artwork Update Required - Order ${order.order_number}`;
+        const itemsNeedingArtwork = order.items?.filter((i: any) => item_ids?.includes(i.id)) || [];
+        
+        htmlContentTemplate = (contactName: string) => `
+          <h1>Artwork Update Required</h1>
+          <p>Hello ${contactName},</p>
+          <p>Some artwork files for order <strong>${order.order_number}</strong> require your attention.</p>
+          
+          <div style="background-color: #fef2f2; border: 1px solid #fecaca; padding: 16px; border-radius: 8px; margin: 16px 0;">
+            <strong>Issue:</strong><br/>
+            ${issue || 'Please upload updated artwork files.'}
+          </div>
+          
+          <h3>Items Requiring New Artwork</h3>
+          <ul>
+            ${itemsNeedingArtwork.map((item: any) => `<li>${item.name} (Qty: ${item.quantity?.toLocaleString() || 'N/A'})</li>`).join('')}
+          </ul>
+          
+          <p style="margin-top: 24px;">
+            <a href="${portalUrl}" style="background-color: #dc2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+              Upload New Artwork
+            </a>
+          </p>
+          
+          <p style="margin-top: 24px; color: #666; font-size: 14px;">
+            Please log in to upload corrected artwork files for the items listed above.
+          </p>
+        `;
+      }
+
+      // Send email to each contact
+      const emailPromises = contacts.map(async (contact) => {
+        const { data: emailData, error: emailError } = await resend.emails.send({
+          from: 'PrintStream Labels <notifications@printstream.lovable.app>',
+          to: [contact.email],
+          subject,
+          html: htmlContentTemplate(contact.name),
+        });
+
+        if (emailError) {
+          console.error(`Failed to send email to ${contact.email}:`, emailError);
+          return { contact_id: contact.id, success: false, error: emailError };
+        }
+
+        // Update notification record
+        if (request_id) {
+          await supabase
+            .from('label_proofing_notifications')
+            .update({ sent_at: new Date().toISOString() })
+            .eq('request_id', request_id)
+            .eq('contact_id', contact.id);
+        }
+
+        return { contact_id: contact.id, success: true, email_id: emailData?.id };
+      });
+
+      const results = await Promise.all(emailPromises);
+      const successCount = results.filter(r => r.success).length;
+
+      console.log(`✅ ${type} notification sent to ${successCount}/${contacts.length} contacts for order ${order.order_number}`);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: `${type} notification sent to ${successCount} contact(s)`,
+          results 
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Single recipient notifications (legacy: proof_ready, approval_received, order_complete)
     const email = recipient_email || order.contact_email;
     if (!email) {
       return new Response(
@@ -61,9 +189,6 @@ serve(async (req: Request): Promise<Response> => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    // Get portal URL for client
-    const portalUrl = `${req.headers.get('origin') || 'https://printstream.lovable.app'}/labels/portal`;
     
     // Build email content based on type
     let subject: string;
