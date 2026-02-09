@@ -136,7 +136,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           quantity: 1,
           // Set proof or print URLs based on upload type
           artwork_pdf_url: file.isProof ? file.url : null,
-          artwork_thumbnail_url: file.isProof ? file.thumbnailUrl : undefined,
+          artwork_thumbnail_url: file.thumbnailUrl, // Always store thumbnail for preview
           width_mm: file.width_mm ?? order.dieline?.label_width_mm,
           height_mm: file.height_mm ?? order.dieline?.label_height_mm,
           preflight_status: file.preflightStatus,
