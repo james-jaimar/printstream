@@ -86,21 +86,27 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
   });
 
   const selectedCustomerId = form.watch('customer_id');
-  const { data: contacts } = useCustomerContacts(selectedCustomerId);
+  const { data: contacts, isLoading: contactsLoading } = useCustomerContacts(selectedCustomerId);
 
   // Reset selected contacts when customer changes
   useEffect(() => {
-    setSelectedContacts([]);
-    // Auto-select primary contact
-    if (contacts?.length) {
+    if (!selectedCustomerId) {
+      setSelectedContacts([]);
+      return;
+    }
+    
+    // Only auto-select once contacts have loaded
+    if (!contactsLoading && contacts) {
       const primaryContact = contacts.find(c => c.is_primary && c.is_active);
       if (primaryContact) {
         setSelectedContacts([primaryContact.id]);
         form.setValue('contact_name', primaryContact.name);
         form.setValue('contact_email', primaryContact.email);
+      } else {
+        setSelectedContacts([]);
       }
     }
-  }, [contacts, form]);
+  }, [selectedCustomerId, contacts, contactsLoading, form]);
 
   const toggleContact = (contactId: string) => {
     setSelectedContacts(prev => 
