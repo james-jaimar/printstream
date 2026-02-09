@@ -142,6 +142,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
   async function onSubmit(data: FormData) {
     try {
       const result = await createOrder.mutateAsync({
+        customer_id: data.customer_id || undefined,
         customer_name: data.customer_name,
         contact_name: data.contact_name || undefined,
         contact_email: data.contact_email || undefined,

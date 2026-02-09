@@ -86,6 +86,7 @@ export function useCreateLabelOrder() {
         .from('label_orders')
         .insert({
           order_number: orderNumber,
+          customer_id: input.customer_id,
           customer_name: input.customer_name,
           contact_name: input.contact_name,
           contact_email: input.contact_email,

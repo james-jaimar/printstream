@@ -306,6 +306,7 @@ export interface LabelStockTransaction {
 
 // Form input types
 export interface CreateLabelOrderInput {
+  customer_id?: string;
   customer_name: string;
   contact_name?: string;
   contact_email?: string;
