@@ -1,111 +1,50 @@
 
 
-# Orientation-Aware Validation, Rotation, and Multi-Page Support
+# Fix Multi-Page PDF Processing
 
-## Summary
-Now that the VPS endpoints are confirmed working (`/manipulate/rotate`, `/manipulate/split`, and `/page-boxes` with `page_count`), this plan implements all the Lovable-side changes: database columns, type updates, orientation-aware validation, rotation during imposition, and a new edge function for splitting multi-page PDFs.
+## Problem
+The upload flow detects multi-page PDFs (shows a toast) but never actually triggers the split. Three gaps exist:
 
----
+1. **`CreateLabelItemInput`** is missing `needs_rotation` and `page_count` fields, so these values can't be saved when creating items.
+2. **`handleDualFilesUploaded` in `LabelOrderModal.tsx`** doesn't include `needs_rotation` or `page_count` in its type signature, doesn't pass them to `createItem`, and doesn't save them after VPS page-boxes returns.
+3. **No code calls `splitPdf()`** -- the edge function exists and works, but nothing triggers it when a multi-page PDF is uploaded.
 
-## Step 1: Database Migration
+## Fix
 
-Add four new columns to `label_items`:
+### 1. Update `CreateLabelItemInput` type
+**File**: `src/types/labels.ts` (line ~327)
 
-- `needs_rotation` (boolean, default false) -- artwork needs 90-degree rotation to match dieline
-- `page_count` (integer, default 1) -- number of pages in uploaded PDF
-- `parent_item_id` (uuid, nullable, FK to label_items) -- links split pages back to original
-- `source_page_number` (integer, nullable) -- which page this item was extracted from
+Add optional fields:
+- `needs_rotation?: boolean`
+- `page_count?: number`
 
----
+### 2. Update `useCreateLabelItem` hook
+**File**: `src/hooks/labels/useLabelItems.ts`
 
-## Step 2: Update TypeScript Types
+Include `needs_rotation` and `page_count` in the insert data passed to Supabase.
 
-**`src/types/labels.ts`**
-- Add `needs_rotation`, `page_count`, `parent_item_id`, `source_page_number` to `LabelItem`
-- Add `needs_rotation?: boolean` to `SlotAssignment`
+### 3. Update `handleDualFilesUploaded` in `LabelOrderModal.tsx`
 
----
+- Expand the callback type signature to include `needs_rotation` and `page_count`
+- Pass `needs_rotation` and `page_count` to `createItem.mutateAsync()`
+- After VPS page-boxes returns, also save `needs_rotation` and `page_count` to the item
+- After item creation, if `page_count > 1`, call `splitPdf(itemId, pdfUrl, orderId)` to create child items
 
-## Step 3: Orientation-Aware Validation
+### 4. Implementation flow after fix
 
-**`src/utils/pdf/thumbnailUtils.ts`**
-- Update `ValidationResult` to include `needs_rotation: boolean`
-- In `validatePdfDimensions()`: if normal W x H fails but swapped H x W passes against the dieline, return `status: 'passed'` with `needs_rotation: true`
-- Update `getPdfDimensionsMm()` to also return `page_count` from the PDF
-
----
-
-## Step 4: Upload Zone Updates
-
-**`src/components/labels/items/DualArtworkUploadZone.tsx`**
-- Pass `needs_rotation` and `page_count` through to item creation
-- Show info toast when rotation will be applied
-- Detect multi-page PDFs and show notification
-
----
-
-## Step 5: Edge Function Updates
-
-**`supabase/functions/label-page-boxes/index.ts`**
-- Add `page_count` to the `VpsPageBoxesResponse` interface
-- Pass `page_count` through in the response
-
-**`supabase/functions/label-pdf-analyze/index.ts`** (if it exists)
-- Add orientation-aware check in server-side validation
-
-**`supabase/functions/label-impose/index.ts`**
-- Map `needs_rotation: true` to `rotation: 90` per slot when calling VPS imposition
-
----
-
-## Step 6: New Edge Function -- `label-split-pdf`
-
-**`supabase/functions/label-split-pdf/index.ts`**
-- Accepts `{ item_id, pdf_url, order_id }`
-- Calls VPS `/manipulate/split`
-- Uploads each extracted page PDF to Supabase storage
-- Creates child `label_items` records with `parent_item_id` and `source_page_number`
-- Updates parent item's `page_count`
-
----
-
-## Step 7: VPS API Service Updates
-
-**`src/services/labels/vpsApiService.ts`**
-- Add `rotatePdf()` client function
-- Add `splitPdf()` client function
-- Add `page_count` to `PageBoxesResponse`
-
----
-
-## Technical Details
-
-### Files to Create
-- `supabase/functions/label-split-pdf/index.ts`
-
-### Files to Modify
-- `src/types/labels.ts`
-- `src/utils/pdf/thumbnailUtils.ts`
-- `src/components/labels/items/DualArtworkUploadZone.tsx`
-- `src/services/labels/vpsApiService.ts`
-- `supabase/functions/label-page-boxes/index.ts`
-- `supabase/functions/label-impose/index.ts`
-- `supabase/config.toml` (add `label-split-pdf` entry)
-
-### Orientation Check Logic
 ```text
-actualW x actualH vs expectedW x expectedH  -->  normal match?
-actualH x actualW vs expectedW x expectedH  -->  rotated match?
-
-If only rotated matches: status = "passed", needs_rotation = true
+Upload PDF
+  --> getPdfDimensionsMm() returns page_count
+  --> createItem with page_count + needs_rotation
+  --> VPS page-boxes returns page_count + validation
+  --> if page_count > 1: call splitPdf(item_id, pdf_url, order_id)
+      --> Edge function splits PDF into pages
+      --> Creates child label_items with parent_item_id
+      --> Toast: "Split into N items"
 ```
 
-### Implementation Order
-1. Database migration (new columns)
-2. Types update
-3. Validation logic (thumbnailUtils)
-4. Upload zone UI updates
-5. Edge function updates (page-boxes, impose)
-6. New split-pdf edge function
-7. VPS API service client functions
+### Files to modify
+- `src/types/labels.ts` -- add fields to `CreateLabelItemInput`
+- `src/hooks/labels/useLabelItems.ts` -- pass new fields in insert
+- `src/components/labels/order/LabelOrderModal.tsx` -- wire up `needs_rotation`, `page_count`, and call `splitPdf()`
 
