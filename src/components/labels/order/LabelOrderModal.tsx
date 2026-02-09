@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import { 
-  Calendar, 
+  Calendar,
   User, 
   Mail, 
   FileText, 
@@ -62,6 +62,29 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const [sendProofDialogOpen, setSendProofDialogOpen] = useState(false);
   const [requestArtworkDialogOpen, setRequestArtworkDialogOpen] = useState(false);
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
+  const [artworkTab, setArtworkTab] = useState<'proof' | 'print'>('proof');
+
+  // Filter items based on active artwork tab
+  const filteredItems = useMemo(() => {
+    if (!order?.items) return [];
+    
+    if (artworkTab === 'proof') {
+      // Show items with proof/artwork files
+      return order.items.filter(item => 
+        item.proof_pdf_url || item.artwork_pdf_url
+      );
+    } else {
+      // Show items with print-ready files
+      return order.items.filter(item => 
+        item.print_pdf_url
+      );
+    }
+  }, [order?.items, artworkTab]);
+
+  // Print-ready items only for AI Layout Optimizer
+  const printReadyItems = useMemo(() => {
+    return (order?.items || []).filter(item => item.print_pdf_url);
+  }, [order?.items]);
 
   // Handler for dual upload zone (supports both proof and print-ready artwork)
   const handleDualFilesUploaded = useCallback(async (files: { 
@@ -76,11 +99,22 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   }[]) => {
     if (!order) return;
 
+    // Normalize item name for matching (strips suffixes like "proof", "print", "final")
+    const normalizeItemName = (name: string): string => {
+      return name
+        .toLowerCase()
+        .replace(/\.(pdf|png|jpg|jpeg)$/i, '')
+        .replace(/[\s_-]*(proof|print|final|ready|v\d+)[\s_-]*/gi, '')
+        .trim();
+    };
+
     for (const file of files) {
       try {
+        const normalizedFileName = normalizeItemName(file.name);
+        
         // Check if an item with this name already exists (for adding print-ready to existing)
         const existingItem = order.items?.find(item => 
-          item.name.toLowerCase() === file.name.replace('.pdf', '').toLowerCase()
+          normalizeItemName(item.name) === normalizedFileName
         );
 
         if (existingItem && !file.isProof) {
@@ -283,9 +317,9 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   {/* AI Layout Dialog */}
                   <Dialog open={layoutDialogOpen} onOpenChange={setLayoutDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button size="sm" disabled={(order.items?.length || 0) === 0 || !order.dieline}>
+                      <Button size="sm" disabled={printReadyItems.length === 0 || !order.dieline}>
                         <Sparkles className="h-4 w-4 mr-2" />
-                        AI Layout
+                        AI Layout ({printReadyItems.length})
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto">
@@ -294,7 +328,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       </DialogHeader>
                       <LayoutOptimizer
                         orderId={order.id}
-                        items={order.items || []}
+                        items={printReadyItems}
                         dieline={order.dieline || null}
                         onLayoutApplied={() => {
                           setLayoutDialogOpen(false);
@@ -398,6 +432,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   dieline={order.dieline || null}
                   onFilesUploaded={handleDualFilesUploaded}
                   disabled={!order.dieline}
+                  activeTab={artworkTab}
+                  onTabChange={setArtworkTab}
                 />
 
                 {!order.dieline && (
@@ -406,12 +442,23 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   </p>
                 )}
 
-                {/* Items Grid */}
-                <LabelItemsGrid
-                  items={order.items || []}
-                  orderId={order.id}
-                  itemAnalyses={itemAnalyses as Record<string, { validation?: { status: string; issues: string[] }; thumbnail_url?: string }>}
-                />
+                {/* Items Grid - filtered by active tab */}
+                {filteredItems.length > 0 ? (
+                  <LabelItemsGrid
+                    items={filteredItems}
+                    orderId={order.id}
+                    viewMode={artworkTab}
+                    itemAnalyses={itemAnalyses as Record<string, { validation?: { status: string; issues: string[] }; thumbnail_url?: string }>}
+                  />
+                ) : (
+                  <div className="text-center py-8 border-2 border-dashed rounded-lg">
+                    <p className="text-sm text-muted-foreground">
+                      {artworkTab === 'proof' 
+                        ? 'No proof artwork uploaded yet. Drop PDFs above to add items.'
+                        : 'No print-ready artwork uploaded yet. Upload clean production files here.'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <Separator />
