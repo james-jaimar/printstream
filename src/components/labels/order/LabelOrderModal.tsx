@@ -31,9 +31,10 @@ import { LabelRunsCard } from '../LabelRunsCard';
 import { LayoutOptimizer } from '../LayoutOptimizer';
 import { SendProofingDialog } from '../proofing/SendProofingDialog';
 import { RequestArtworkDialog } from '../proofing/RequestArtworkDialog';
-import { runPreflight, getPageBoxes } from '@/services/labels/vpsApiService';
+import { runPreflight, getPageBoxes, splitPdf } from '@/services/labels/vpsApiService';
 import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
 import type { LabelOrderStatus, PreflightReport, PdfBoxes } from '@/types/labels';
+import { toast } from 'sonner';
 
 const statusConfig: Record<LabelOrderStatus, { 
   label: string; 
@@ -96,6 +97,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     width_mm?: number;
     height_mm?: number;
     isProof: boolean;
+    needs_rotation?: boolean;
+    page_count?: number;
   }[]) => {
     if (!order) return;
 
@@ -141,6 +144,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           height_mm: file.height_mm ?? order.dieline?.label_height_mm,
           preflight_status: file.preflightStatus,
           preflight_report: file.preflightReport,
+          needs_rotation: file.needs_rotation ?? false,
+          page_count: file.page_count ?? 1,
         });
 
         // If it's print-ready, also update print fields
@@ -206,8 +211,26 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     height_mm: dims.height_mm,
                     preflight_status: validation.preflightStatus,
                     preflight_report: updatedReport,
+                    needs_rotation: validation.needs_rotation ?? false,
+                    page_count: boxResult.page_count ?? 1,
                   }
                 });
+              }
+
+              // Trigger multi-page split if page_count > 1
+              const pageCount = boxResult.page_count ?? 1;
+              if (pageCount > 1) {
+                console.log(`Multi-page PDF detected (${pageCount} pages), triggering split for item:`, result.id);
+                splitPdf(result.id, pdfUrl, order.id)
+                  .then(splitResult => {
+                    console.log('PDF split complete:', splitResult);
+                    toast.success(`Split into ${splitResult.page_count} items`);
+                    refetch();
+                  })
+                  .catch(err => {
+                    console.error('PDF split failed:', err);
+                    toast.error('Failed to split multi-page PDF');
+                  });
               }
             })
             .catch(err => {
@@ -240,7 +263,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
         console.error('Error creating label item:', error);
       }
     }
-  }, [order, createItem, updateItem]);
+  }, [order, createItem, updateItem, refetch]);
 
   if (!open) return null;
 

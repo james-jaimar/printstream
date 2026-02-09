@@ -335,6 +335,8 @@ export interface CreateLabelItemInput {
   preflight_status?: PreflightStatus;
   preflight_report?: PreflightReport;
   notes?: string;
+  needs_rotation?: boolean;
+  page_count?: number;
 }
 
 export interface CreateLabelDielineInput {

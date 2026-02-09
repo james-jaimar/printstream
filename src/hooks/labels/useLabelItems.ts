@@ -79,6 +79,8 @@ export function useCreateLabelItem() {
         notes: input.notes,
         preflight_status: input.preflight_status || 'pending',
         preflight_report: (input.preflight_report || null) as Json,
+        needs_rotation: input.needs_rotation ?? false,
+        page_count: input.page_count ?? 1,
       };
       
       const { data, error } = await supabase
