@@ -16,7 +16,7 @@ interface SlotLayoutPreviewProps {
 
 export function SlotLayoutPreview({ runs, items, dieline }: SlotLayoutPreviewProps) {
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {runs.map((run) => (
         <RunLayoutDiagram
           key={run.run_number}
