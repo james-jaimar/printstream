@@ -1,69 +1,53 @@
 
-# Balance Slot Quantities and Show Per-Run Print Qty
 
-## Problem 1: Unbalanced slot quantities in ganged runs
-When items are ganged into a single run, each slot may have very different quantities (e.g., 2000 vs 1500). The run prints for the longest slot, meaning the 1500-qty slot actually prints 2000 labels -- 500 are wasted. The optimizer should group items with similar quantities together, and split quantities to balance slots within ~10%.
+# Smart Quantity Splitting to Match Run Levels
 
-## Problem 2: No per-run print quantity visible
-In compact mode (the 3-column grid), there are no stats shown -- the admin can't see how many labels each run will actually produce. The tooltip shows per-slot quantity, but there's no at-a-glance total.
+## Problem
+The current optimizer groups items with similar quantities and splits when imbalanced, but it doesn't proactively split an item's quantity to fit into existing run levels. For example, if you have items at 2000, 2000, 500, 500, and one item at 2500 -- the optimizer should split 2500 into 2000 + 500 and slot each part into the matching runs, rather than creating a separate imbalanced run.
 
----
+## Approach
+Rework the `createOptimizedRuns` function in `src/utils/labels/layoutOptimizer.ts` to use a **"find target levels, then split to match"** strategy:
 
-## Changes
-
-### 1. Balance slot quantities in the optimizer (`src/utils/labels/layoutOptimizer.ts`)
-
-**Ganged strategy**: After assigning items to slots, check if quantities are within 10% of each other. If not, split the higher-quantity items so that all slots in the run are balanced. For example, if items have quantities 2000 and 1500 across 4 slots, instead of running 2000 frames and wasting on the 1500-qty slots, split into:
-- Run A: all items at ~1500 each (balanced)
-- Run B: the remaining ~500 for the item that needed 2000
-
-**Optimized strategy**: When selecting items to gang, prefer items with similar remaining quantities. Sort candidates and group those within 10% of each other into the same run.
-
-**Individual strategy**: For single-item runs, all slots have the same item so they're inherently balanced -- no change needed.
-
-### 2. Add per-run print quantity to the diagram (`src/components/labels/optimizer/RunLayoutDiagram.tsx`)
-
-**Compact mode enhancement**: Add a small header/footer line in compact mode showing:
-- Run number
-- Total print quantity (sum of all slot quantities, or the actual print output based on frames x labels per frame)
-
-This will show something like "Run 1 -- 6,000 labels" beneath or above the diagram in compact view, giving admins an at-a-glance count.
-
-**Non-compact mode**: Already shows meters and frames in the header -- add a "labels" count there too.
-
----
+1. **Identify natural quantity levels** -- Collect all item quantities, find clusters (e.g., multiple items near 2000, multiple near 500).
+2. **Split items to match levels** -- If an item's quantity is larger than a level, split it: assign a portion equal to the level, and keep the remainder for the next level.
+3. **Build runs per level** -- Each level becomes one or more runs where all slots have matching quantities, minimizing waste.
 
 ## Technical Details
 
 ### File: `src/utils/labels/layoutOptimizer.ts`
 
-- Add a `balanceSlotQuantities` helper that takes slot assignments and splits runs if max/min ratio exceeds 1.10 (10% threshold)
-- Update `createGangedRun` to call the balancer, returning multiple runs if needed
-- Update `createOptimizedRuns` to group items by similar quantity (within 10%) before ganging
-- The balancing logic: find the minimum slot quantity in a ganged run. Cap all slots at that minimum for Run A, then create Run B with the remainders, recursively balancing if needed
+Replace the `createOptimizedRuns` function (lines ~240-301) with the new level-matching algorithm:
 
-### File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
-
-- Calculate `totalPrintQty` from slot assignments: sum of `quantity_in_slot` across all unique items, or `frames * labelsPerFrame` for actual output
-- In compact mode, add a small label below the roll width showing "Run N -- X,XXX labels"
-- In non-compact mode, add the label count to the existing stats row in the header
-
-### Balancing algorithm pseudocode
 ```text
-function balanceRuns(items, slots, config):
-  assign items to slots (round-robin fill)
-  minQty = min(slot quantities)
-  maxQty = max(slot quantities)
-  
-  if maxQty / minQty <= 1.10:
-    return [single run]  -- already balanced
-  
-  // Cap all slots at minQty for Run A
-  runA = slots with qty capped at minQty
-  
-  // Remainders go to Run B
-  remainders = items where original qty - minQty > 0
-  runB = balanceRuns(remainders, slots, config)  -- recursive
-  
-  return [runA, ...runB]
+createOptimizedRuns(items, config):
+  // 1. Collect all unique quantities as candidate levels
+  quantities = items.map(i => i.quantity).sort(descending)
+  levels = deduplicate and cluster quantities within 10%
+
+  // 2. Build a remaining-qty map
+  remaining = Map(item.id -> item.quantity)
+
+  // 3. For each level (highest first):
+  for level in levels:
+    // Collect items that have >= level remaining
+    candidates = items where remaining[id] >= level
+    
+    // Group candidates into runs (up to totalSlots per run)
+    while candidates.length > 0:
+      batch = take up to totalSlots candidates
+      assign each batch item with quantity = level
+      fill empty slots round-robin
+      create run
+      deduct level from each candidate's remaining
+      
+  // 4. Handle any leftover remainders as individual runs
+  for items with remaining > 0:
+    create single-item run for the remainder
 ```
+
+This ensures that a 2500-qty item naturally splits: 2000 goes into the "2000 level" run alongside other 2000-qty items, and the remaining 500 goes into the "500 level" run alongside other 500-qty items.
+
+The existing `balanceSlotQuantities` function still acts as a safety net -- if somehow a run ends up with slots that differ by more than 10%, it will split further. But with level-matching, runs should already be balanced by construction.
+
+No changes needed to the UI or diagram components -- this is purely an algorithm improvement in the optimizer.
+
