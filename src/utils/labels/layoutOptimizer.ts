@@ -235,66 +235,140 @@ function createSingleItemRun(
   };
 }
 
-// ─── STRATEGY 3: OPTIMIZED (balanced ganging with quantity splitting) ─
+// ─── STRATEGY 3: OPTIMIZED (level-matching with quantity splitting) ──
 
+/**
+ * Cluster quantities into natural levels.
+ * Quantities within 10% of each other are merged into a single level
+ * (using the most common value in the cluster as representative).
+ */
+function findQuantityLevels(quantities: number[]): number[] {
+  if (quantities.length === 0) return [];
+  
+  const sorted = [...new Set(quantities)].sort((a, b) => b - a); // descending
+  const levels: number[] = [];
+  
+  for (const qty of sorted) {
+    // Check if this qty fits into an existing level (within 10%)
+    const existingLevel = levels.find(l => 
+      l > 0 && qty > 0 && Math.max(l, qty) / Math.min(l, qty) <= 1.10
+    );
+    if (!existingLevel) {
+      levels.push(qty);
+    }
+  }
+  
+  return levels.sort((a, b) => b - a); // highest first
+}
+
+/**
+ * Smart level-matching optimizer.
+ * 
+ * 1. Identify natural quantity levels from all items
+ * 2. For each level (highest first), collect items with >= level remaining
+ * 3. Assign them to runs at that level quantity, deducting from remaining
+ * 4. Remainders naturally fall to lower levels
+ * 5. Any leftover gets its own individual run
+ */
 function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRun[] {
   const runs: ProposedRun[] = [];
   const remaining = new Map(items.map(i => [i.id, i.quantity]));
   let runNumber = 1;
   
-  while ([...remaining.values()].some(q => q > 0)) {
-    // Get items with remaining quantity, sorted by qty ascending for grouping
-    const activeItems = items
-      .filter(i => (remaining.get(i.id) || 0) > 0)
-      .sort((a, b) => (remaining.get(a.id) || 0) - (remaining.get(b.id) || 0));
+  // 1. Find natural quantity levels
+  const allQuantities = items.map(i => i.quantity);
+  const levels = findQuantityLevels(allQuantities);
+  
+  // 2. Process each level, highest first
+  for (const level of levels) {
+    // Collect items that have enough remaining to contribute at this level
+    let candidates = items.filter(i => (remaining.get(i.id) || 0) >= level);
     
-    if (activeItems.length === 0) break;
-    
-    // Group items with similar quantities (within 10% of each other)
-    const gangItems: LabelItem[] = [activeItems[0]];
-    const baseQty = remaining.get(activeItems[0].id) || 0;
-    
-    for (let i = 1; i < activeItems.length && gangItems.length < config.totalSlots; i++) {
-      const itemQty = remaining.get(activeItems[i].id) || 0;
-      // Accept items within 10% of the base quantity
-      if (baseQty > 0 && itemQty / baseQty <= 1.10 && baseQty / itemQty <= 1.10) {
-        gangItems.push(activeItems[i]);
+    while (candidates.length > 0) {
+      // Take up to totalSlots candidates for this run
+      const batch = candidates.slice(0, config.totalSlots);
+      
+      const itemSlots = batch.map(item => ({
+        item_id: item.id,
+        quantity: level,
+      }));
+      
+      // Fill all slots (round-robin if fewer items than slots)
+      const assignments = fillAllSlots(itemSlots, config.totalSlots);
+      
+      const frames = calculateFramesForSlot(level, config);
+      runs.push({
+        run_number: runNumber++,
+        slot_assignments: assignments,
+        meters: calculateMeters(frames, config),
+        frames,
+      });
+      
+      // Deduct level from each batch item's remaining
+      for (const item of batch) {
+        remaining.set(item.id, Math.max(0, (remaining.get(item.id) || 0) - level));
       }
+      
+      // Re-check candidates for this level
+      candidates = items.filter(i => (remaining.get(i.id) || 0) >= level);
     }
+  }
+  
+  // 3. Handle any leftover remainders (quantities that didn't match any level)
+  const leftovers = items.filter(i => (remaining.get(i.id) || 0) > 0);
+  
+  if (leftovers.length > 0) {
+    // Try to gang leftovers together if they're similar
+    const leftoverLevels = findQuantityLevels(leftovers.map(i => remaining.get(i.id) || 0));
     
-    // If we couldn't find similar items, just take what's available
-    if (gangItems.length < config.totalSlots && activeItems.length > gangItems.length) {
-      for (const item of activeItems) {
-        if (!gangItems.includes(item) && gangItems.length < config.totalSlots) {
-          gangItems.push(item);
+    for (const level of leftoverLevels) {
+      let candidates = leftovers.filter(i => (remaining.get(i.id) || 0) >= level);
+      
+      while (candidates.length > 0) {
+        const batch = candidates.slice(0, config.totalSlots);
+        const qty = Math.min(...batch.map(i => remaining.get(i.id) || 0));
+        
+        const itemSlots = batch.map(item => ({
+          item_id: item.id,
+          quantity: qty,
+        }));
+        
+        const assignments = fillAllSlots(itemSlots, config.totalSlots);
+        const frames = calculateFramesForSlot(qty, config);
+        
+        runs.push({
+          run_number: runNumber++,
+          slot_assignments: assignments,
+          meters: calculateMeters(frames, config),
+          frames,
+        });
+        
+        for (const item of batch) {
+          remaining.set(item.id, Math.max(0, (remaining.get(item.id) || 0) - qty));
         }
+        
+        candidates = leftovers.filter(i => (remaining.get(i.id) || 0) >= level);
       }
     }
-    
-    const itemSlots = gangItems.map(item => ({
-      item_id: item.id,
-      quantity: remaining.get(item.id) || 0,
-    }));
-    
-    // Fill all slots (round-robin if fewer items than slots)
-    const assignments = fillAllSlots(itemSlots, config.totalSlots);
-    
-    // Balance the slot quantities — may split into multiple runs
-    const balancedRuns = balanceSlotQuantities(assignments, config, runNumber);
-    
-    // Deduct assigned quantities from remaining
-    for (const run of balancedRuns) {
-      const deducted = new Set<string>();
-      for (const a of run.slot_assignments) {
-        if (!deducted.has(a.item_id)) {
-          remaining.set(a.item_id, Math.max(0, (remaining.get(a.item_id) || 0) - a.quantity_in_slot));
-          deducted.add(a.item_id);
-        }
-      }
+  }
+  
+  // 4. Final safety net: any still-remaining items get individual runs
+  for (const item of items) {
+    const rem = remaining.get(item.id) || 0;
+    if (rem > 0) {
+      const itemSlots = [{ item_id: item.id, quantity: rem }];
+      const assignments = fillAllSlots(itemSlots, config.totalSlots);
+      const frames = calculateFramesForSlot(rem, config);
+      
+      runs.push({
+        run_number: runNumber++,
+        slot_assignments: assignments,
+        meters: calculateMeters(frames, config),
+        frames,
+      });
+      
+      remaining.set(item.id, 0);
     }
-    
-    runs.push(...balancedRuns);
-    runNumber = runs.length + 1;
   }
   
   return runs;
