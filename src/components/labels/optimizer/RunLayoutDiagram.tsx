@@ -71,11 +71,26 @@ export function RunLayoutDiagram({
   const columnsAcross = dieline.columns_across;
   const rowsAround = dieline.rows_around;
 
+  // Calculate total print qty for this run
+  const labelsPerFrame = columnsAcross * rowsAround;
+  const totalPrintQty = frames ? frames * labelsPerFrame : null;
+
   // Calculate how many frames to show (max 3 for preview)
   const framesToShow = compact ? 1 : Math.min(3, Math.max(1, frames || 1));
 
   return (
     <Card className={cn("overflow-hidden", compact && "border-0 shadow-none")}>
+      {/* Compact mode header */}
+      {compact && (
+        <div className="px-2 pt-2 pb-1 text-center">
+          <span className="text-xs font-medium text-muted-foreground">
+            Run {runNumber}
+            {totalPrintQty && (
+              <> — {totalPrintQty.toLocaleString()} labels</>
+            )}
+          </span>
+        </div>
+      )}
       {!compact && (
         <CardHeader className="py-3 px-4 bg-muted/30">
           <div className="flex items-center justify-between">
@@ -104,6 +119,11 @@ export function RunLayoutDiagram({
             </div>
             {showStats && (
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {totalPrintQty && (
+                  <span className="flex items-center gap-1 font-medium text-foreground">
+                    {totalPrintQty.toLocaleString()} labels
+                  </span>
+                )}
                 {meters && (
                   <span className="flex items-center gap-1">
                     <Ruler className="h-3 w-3" />
