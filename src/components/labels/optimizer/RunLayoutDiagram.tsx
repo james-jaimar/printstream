@@ -205,7 +205,11 @@ export function RunLayoutDiagram({
                               >
                                 {item ? (
                                   <span className="font-medium truncate px-1">
-                                    {isFirstRow ? (isSingleItemRun ? item.name.substring(0, 8) : `S${slotNumber + 1}`) : ''}
+                                    {isFirstRow ? (
+                                      isSingleItemRun 
+                                        ? item.name.substring(0, 8) 
+                                        : `S${slotNumber + 1}${assignment ? ` x${(assignment.quantity_in_slot / 1000) >= 1 ? `${(assignment.quantity_in_slot / 1000).toFixed(assignment.quantity_in_slot % 1000 === 0 ? 0 : 1)}k` : assignment.quantity_in_slot}` : ''}`
+                                    ) : ''}
                                   </span>
                                 ) : (
                                   <span className="text-muted-foreground/50">
