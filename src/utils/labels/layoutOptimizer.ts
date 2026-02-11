@@ -115,9 +115,80 @@ function fillAllSlots(
   return assignments;
 }
 
+// ─── SLOT BALANCING ─────────────────────────────────────────────────
+
+/**
+ * Balance slot quantities within a run. If max/min ratio exceeds 1.10 (10%),
+ * split into a balanced run (capped at min qty) and remainder runs.
+ */
+function balanceSlotQuantities(
+  assignments: SlotAssignment[],
+  config: SlotConfig,
+  startRunNumber: number
+): ProposedRun[] {
+  // Get unique item quantities (ignore duplicated round-robin slots)
+  const uniqueItems = new Map<string, number>();
+  for (const a of assignments) {
+    if (!uniqueItems.has(a.item_id) || a.quantity_in_slot > (uniqueItems.get(a.item_id) || 0)) {
+      uniqueItems.set(a.item_id, a.quantity_in_slot);
+    }
+  }
+  
+  const quantities = [...uniqueItems.values()];
+  const minQty = Math.min(...quantities);
+  const maxQty = Math.max(...quantities);
+  
+  // Already balanced or single-item — return as-is
+  if (minQty <= 0 || maxQty / minQty <= 1.10) {
+    const maxFrames = Math.max(
+      ...assignments.map(a => calculateFramesForSlot(a.quantity_in_slot, config))
+    );
+    return [{
+      run_number: startRunNumber,
+      slot_assignments: assignments,
+      meters: calculateMeters(maxFrames, config),
+      frames: maxFrames,
+    }];
+  }
+  
+  // Cap all slots at minQty for Run A (balanced run)
+  const cappedAssignments: SlotAssignment[] = assignments.map(a => ({
+    ...a,
+    quantity_in_slot: Math.min(a.quantity_in_slot, minQty),
+  }));
+  
+  const cappedFrames = calculateFramesForSlot(minQty, config);
+  const runA: ProposedRun = {
+    run_number: startRunNumber,
+    slot_assignments: cappedAssignments,
+    meters: calculateMeters(cappedFrames, config),
+    frames: cappedFrames,
+  };
+  
+  // Build remainder assignments for items that had more than minQty
+  const remainderItemSlots: { item_id: string; quantity: number }[] = [];
+  const seen = new Set<string>();
+  for (const a of assignments) {
+    if (seen.has(a.item_id)) continue;
+    seen.add(a.item_id);
+    const remainder = a.quantity_in_slot - minQty;
+    if (remainder > 0) {
+      remainderItemSlots.push({ item_id: a.item_id, quantity: remainder });
+    }
+  }
+  
+  if (remainderItemSlots.length === 0) return [runA];
+  
+  // Recursively balance the remainder
+  const remainderAssignments = fillAllSlots(remainderItemSlots, config.totalSlots);
+  const remainderRuns = balanceSlotQuantities(remainderAssignments, config, startRunNumber + 1);
+  
+  return [runA, ...remainderRuns];
+}
+
 // ─── STRATEGY 1: GANGED (all items in one run) ──────────────────────
 
-function createGangedRun(items: LabelItem[], config: SlotConfig): ProposedRun {
+function createGangedRuns(items: LabelItem[], config: SlotConfig): ProposedRun[] {
   // Assign each item to a slot; if more items than slots, only take first N
   const itemSlots = items.slice(0, config.totalSlots).map(item => ({
     item_id: item.id,
@@ -126,17 +197,8 @@ function createGangedRun(items: LabelItem[], config: SlotConfig): ProposedRun {
   
   const assignments = fillAllSlots(itemSlots, config.totalSlots);
   
-  // Run length determined by the slot needing the most frames
-  const maxFrames = Math.max(
-    ...assignments.map(a => calculateFramesForSlot(a.quantity_in_slot, config))
-  );
-  
-  return {
-    run_number: 1,
-    slot_assignments: assignments,
-    meters: calculateMeters(maxFrames, config),
-    frames: maxFrames,
-  };
+  // Balance the slot quantities — may produce multiple runs
+  return balanceSlotQuantities(assignments, config, 1);
 }
 
 // ─── STRATEGY 2: INDIVIDUAL (one item per run, fills all slots) ─────
@@ -181,20 +243,34 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
   let runNumber = 1;
   
   while ([...remaining.values()].some(q => q > 0)) {
-    // Get items with remaining quantity, sorted largest first
+    // Get items with remaining quantity, sorted by qty ascending for grouping
     const activeItems = items
       .filter(i => (remaining.get(i.id) || 0) > 0)
-      .sort((a, b) => (remaining.get(b.id) || 0) - (remaining.get(a.id) || 0));
+      .sort((a, b) => (remaining.get(a.id) || 0) - (remaining.get(b.id) || 0));
     
     if (activeItems.length === 0) break;
     
-    // Determine how many items to gang in this run
-    const gangSize = Math.min(activeItems.length, config.totalSlots);
-    const gangItems = activeItems.slice(0, gangSize);
+    // Group items with similar quantities (within 10% of each other)
+    const gangItems: LabelItem[] = [activeItems[0]];
+    const baseQty = remaining.get(activeItems[0].id) || 0;
     
-    // The run length is driven by the item with the largest remaining qty
-    // in this gang. All slots run for the same length.
-    // We assign each item its full remaining qty (or as much as fits).
+    for (let i = 1; i < activeItems.length && gangItems.length < config.totalSlots; i++) {
+      const itemQty = remaining.get(activeItems[i].id) || 0;
+      // Accept items within 10% of the base quantity
+      if (baseQty > 0 && itemQty / baseQty <= 1.10 && baseQty / itemQty <= 1.10) {
+        gangItems.push(activeItems[i]);
+      }
+    }
+    
+    // If we couldn't find similar items, just take what's available
+    if (gangItems.length < config.totalSlots && activeItems.length > gangItems.length) {
+      for (const item of activeItems) {
+        if (!gangItems.includes(item) && gangItems.length < config.totalSlots) {
+          gangItems.push(item);
+        }
+      }
+    }
+    
     const itemSlots = gangItems.map(item => ({
       item_id: item.id,
       quantity: remaining.get(item.id) || 0,
@@ -203,26 +279,22 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
     // Fill all slots (round-robin if fewer items than slots)
     const assignments = fillAllSlots(itemSlots, config.totalSlots);
     
-    // Determine frames from the slot with the max quantity
-    const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
-    const frames = calculateFramesForSlot(maxSlotQty, config);
+    // Balance the slot quantities — may split into multiple runs
+    const balancedRuns = balanceSlotQuantities(assignments, config, runNumber);
     
     // Deduct assigned quantities from remaining
-    // For duplicated slots (round-robin), we only deduct once per unique item
-    const deducted = new Set<string>();
-    for (const a of assignments) {
-      if (!deducted.has(a.item_id)) {
-        remaining.set(a.item_id, (remaining.get(a.item_id) || 0) - a.quantity_in_slot);
-        deducted.add(a.item_id);
+    for (const run of balancedRuns) {
+      const deducted = new Set<string>();
+      for (const a of run.slot_assignments) {
+        if (!deducted.has(a.item_id)) {
+          remaining.set(a.item_id, Math.max(0, (remaining.get(a.item_id) || 0) - a.quantity_in_slot));
+          deducted.add(a.item_id);
+        }
       }
     }
     
-    runs.push({
-      run_number: runNumber++,
-      slot_assignments: assignments,
-      meters: calculateMeters(frames, config),
-      frames,
-    });
+    runs.push(...balancedRuns);
+    runNumber = runs.length + 1;
   }
   
   return runs;
@@ -280,15 +352,17 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
   const theoreticalMinFrames = Math.ceil(totalLabelsNeeded / config.labelsPerFrame);
   const theoreticalMinMeters = calculateMeters(theoreticalMinFrames, config);
   
-  // Option 1: Ganged — all items in a single run (if items fit in slots)
+  // Option 1: Ganged — all items ganged (balanced, may produce multiple runs)
   if (items.length <= config.totalSlots) {
-    const gangedRun = createGangedRun(items, config);
+    const gangedRuns = createGangedRuns(items, config);
     partialOptions.push(createLayoutOption(
       'ganged-all',
-      [gangedRun],
+      gangedRuns,
       config,
       theoreticalMinMeters,
-      'All items ganged in a single run — maximum efficiency, all slots filled'
+      gangedRuns.length === 1
+        ? 'All items ganged in a single balanced run — all slots filled'
+        : `All items ganged, split into ${gangedRuns.length} balanced runs to minimize waste`
     ));
   }
   
