@@ -1358,10 +1358,13 @@ export type Database = {
           bleed_left_mm: number | null
           bleed_right_mm: number | null
           bleed_top_mm: number | null
+          client: string | null
           columns_across: number
           corner_radius_mm: number | null
           created_at: string
           created_by: string | null
+          die_no: string | null
+          die_type: string | null
           dieline_pdf_url: string | null
           horizontal_gap_mm: number
           id: string
@@ -1372,6 +1375,7 @@ export type Database = {
           name: string
           roll_width_mm: number
           rows_around: number
+          rpl: string | null
           updated_at: string
           vertical_gap_mm: number
         }
@@ -1380,10 +1384,13 @@ export type Database = {
           bleed_left_mm?: number | null
           bleed_right_mm?: number | null
           bleed_top_mm?: number | null
+          client?: string | null
           columns_across?: number
           corner_radius_mm?: number | null
           created_at?: string
           created_by?: string | null
+          die_no?: string | null
+          die_type?: string | null
           dieline_pdf_url?: string | null
           horizontal_gap_mm?: number
           id?: string
@@ -1394,6 +1401,7 @@ export type Database = {
           name: string
           roll_width_mm: number
           rows_around?: number
+          rpl?: string | null
           updated_at?: string
           vertical_gap_mm?: number
         }
@@ -1402,10 +1410,13 @@ export type Database = {
           bleed_left_mm?: number | null
           bleed_right_mm?: number | null
           bleed_top_mm?: number | null
+          client?: string | null
           columns_across?: number
           corner_radius_mm?: number | null
           created_at?: string
           created_by?: string | null
+          die_no?: string | null
+          die_type?: string | null
           dieline_pdf_url?: string | null
           horizontal_gap_mm?: number
           id?: string
@@ -1416,6 +1427,7 @@ export type Database = {
           name?: string
           roll_width_mm?: number
           rows_around?: number
+          rpl?: string | null
           updated_at?: string
           vertical_gap_mm?: number
         }

@@ -112,6 +112,11 @@ export interface LabelDieline {
   bleed_right_mm: number | null;
   bleed_top_mm: number | null;
   bleed_bottom_mm: number | null;
+  // Die metadata
+  die_no: string | null;
+  rpl: string | null;
+  die_type: string | null;
+  client: string | null;
 }
 
 export interface LabelStock {
@@ -350,6 +355,10 @@ export interface CreateLabelDielineInput {
   vertical_gap_mm?: number;
   corner_radius_mm?: number;
   is_custom?: boolean;
+  die_no?: string;
+  rpl?: string;
+  die_type?: string;
+  client?: string;
 }
 
 // AI Layout types

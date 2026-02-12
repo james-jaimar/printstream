@@ -21,6 +21,13 @@ interface DielineFormDialogProps {
   isPending: boolean;
 }
 
+const DIE_TYPE_OPTIONS = [
+  'rectangle', 'square', 'circle', 'oval', 'arch', 'hexagon', 
+  'scallop', 'special shape', 'tappered', 'perf', 'custom',
+] as const;
+
+const RECT_TYPES = ['rectangle', 'square'];
+
 const defaultFormData: CreateLabelDielineInput = {
   name: '',
   roll_width_mm: 320,
@@ -32,6 +39,10 @@ const defaultFormData: CreateLabelDielineInput = {
   vertical_gap_mm: 2.5,
   corner_radius_mm: 0,
   is_custom: false,
+  die_no: '',
+  die_type: 'rectangle',
+  client: '',
+  rpl: '',
 };
 
 export function DielineFormDialog({
@@ -57,14 +68,29 @@ export function DielineFormDialog({
         vertical_gap_mm: dieline.vertical_gap_mm,
         corner_radius_mm: dieline.corner_radius_mm ?? 0,
         is_custom: dieline.is_custom,
+        die_no: dieline.die_no ?? '',
+        die_type: dieline.die_type ?? 'rectangle',
+        client: dieline.client ?? '',
+        rpl: dieline.rpl ?? '',
       });
     } else {
       setFormData(defaultFormData);
     }
   }, [dieline, open]);
 
+  const isRectType = RECT_TYPES.includes(formData.die_type || 'rectangle');
+
+  const handleDieTypeChange = (value: string) => {
+    const newData = { ...formData, die_type: value };
+    if (!RECT_TYPES.includes(value)) {
+      newData.corner_radius_mm = undefined;
+    }
+    setFormData(newData);
+  };
+
   const generateName = () => {
-    return `${formData.columns_across} Across x ${formData.rows_around} Around - ${formData.label_width_mm}x${formData.label_height_mm}mm (${formData.roll_width_mm}mm roll)`;
+    const typeLabel = formData.die_type && formData.die_type !== 'rectangle' ? ` (${formData.die_type})` : '';
+    return `${formData.columns_across} Across x ${formData.rows_around} Around - ${formData.label_width_mm}x${formData.label_height_mm}mm${typeLabel}`;
   };
 
   const handleSubmit = async () => {
@@ -93,7 +119,43 @@ export function DielineFormDialog({
               : 'Define the label dimensions and layout for the die.'}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
+        <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-1">
+          {/* Die No, Type & Client */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>Die No</Label>
+              <Input
+                value={formData.die_no ?? ''}
+                onChange={(e) => setFormData({ ...formData, die_no: e.target.value })}
+                placeholder="e.g. LP00065"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Die Type</Label>
+              <Select
+                value={formData.die_type || 'rectangle'}
+                onValueChange={handleDieTypeChange}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DIE_TYPE_OPTIONS.map((t) => (
+                    <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Client</Label>
+              <Input
+                value={formData.client ?? ''}
+                onChange={(e) => setFormData({ ...formData, client: e.target.value })}
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+
           {/* Roll Width & Corner Radius */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -118,12 +180,14 @@ export function DielineFormDialog({
               <Label>Corner Radius (mm)</Label>
               <Input
                 type="number"
-                value={formData.corner_radius_mm ?? 0}
+                value={isRectType ? (formData.corner_radius_mm ?? 0) : ''}
                 onChange={(e) =>
                   setFormData({ ...formData, corner_radius_mm: Number(e.target.value) })
                 }
                 min={0}
                 step={0.5}
+                disabled={!isRectType}
+                placeholder={!isRectType ? 'N/A for this shape' : ''}
               />
             </div>
           </div>

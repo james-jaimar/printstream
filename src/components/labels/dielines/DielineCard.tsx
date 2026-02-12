@@ -30,11 +30,15 @@ export function DielineCard({ dieline, onEdit, onDelete, onDuplicate, isDeleting
             <CardTitle className="text-base truncate" title={dieline.name}>
               {dieline.name}
             </CardTitle>
-            <CardDescription>
-              {dieline.roll_width_mm}mm roll width
+            <CardDescription className="flex items-center gap-2">
+              {dieline.die_no && <span className="font-mono text-xs">{dieline.die_no}</span>}
+              <span>{dieline.roll_width_mm}mm roll</span>
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            {dieline.die_type && dieline.die_type !== 'rectangle' && (
+              <Badge variant="outline" className="text-xs capitalize">{dieline.die_type}</Badge>
+            )}
             {dieline.is_custom && (
               <Badge variant="outline">Custom</Badge>
             )}
@@ -90,11 +94,16 @@ export function DielineCard({ dieline, onEdit, onDelete, onDuplicate, isDeleting
             {labelsPerFrame} labels/frame
           </Badge>
         </div>
-        {dieline.corner_radius_mm && dieline.corner_radius_mm > 0 && (
+        {dieline.corner_radius_mm != null && dieline.corner_radius_mm > 0 && (
           <div className="mt-2">
             <span className="text-xs text-muted-foreground">
               Corner radius: {dieline.corner_radius_mm}mm
             </span>
+          </div>
+        )}
+        {dieline.client && (
+          <div className="mt-1">
+            <span className="text-xs text-muted-foreground">Client: {dieline.client}</span>
           </div>
         )}
       </CardContent>
