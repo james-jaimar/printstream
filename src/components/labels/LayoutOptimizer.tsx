@@ -400,8 +400,8 @@ function LayoutOptionCard({ option, isSelected, productionTime, onSelect }: Layo
           <span className="font-medium">
             {option.runs.length} Run{option.runs.length !== 1 ? 's' : ''}
           </span>
-          <Badge variant={option.overall_score >= 80 ? "default" : "secondary"}>
-            {option.overall_score}% score
+          <Badge variant={Math.round(option.overall_score * 100) >= 80 ? "default" : "secondary"}>
+            {Math.round(option.overall_score * 100)}% score
           </Badge>
         </div>
         <span className="text-sm text-muted-foreground">
@@ -428,13 +428,14 @@ interface ScoreBarProps {
 }
 
 function ScoreBar({ label, value }: ScoreBarProps) {
+  const percent = Math.round(value * 100);
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs">
         <span className="text-muted-foreground">{label}</span>
-        <span>{value}%</span>
+        <span>{percent}%</span>
       </div>
-      <Progress value={value} className="h-1" />
+      <Progress value={percent} className="h-1" />
     </div>
   );
 }

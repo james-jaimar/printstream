@@ -323,7 +323,8 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
       // Fill all slots (round-robin if fewer items than slots)
       const assignments = fillAllSlots(itemSlots, config.totalSlots);
       
-      const frames = calculateFramesForSlot(level, config);
+      const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+      const frames = calculateFramesForSlot(maxSlotQty, config);
       runs.push({
         run_number: runNumber++,
         slot_assignments: assignments,
@@ -361,7 +362,8 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
         }));
         
         const assignments = fillAllSlots(itemSlots, config.totalSlots);
-        const frames = calculateFramesForSlot(qty, config);
+        const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+        const frames = calculateFramesForSlot(maxSlotQty, config);
         
         runs.push({
           run_number: runNumber++,
@@ -385,7 +387,8 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
     if (rem > 0) {
       const itemSlots = [{ item_id: item.id, quantity: rem }];
       const assignments = fillAllSlots(itemSlots, config.totalSlots);
-      const frames = calculateFramesForSlot(rem, config);
+      const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+      const frames = calculateFramesForSlot(maxSlotQty, config);
       
       runs.push({
         run_number: runNumber++,
