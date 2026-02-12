@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@/components/ui/visually-hidden';
 import { useLabelOrder } from '@/hooks/labels/useLabelOrders';
@@ -65,6 +67,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const [requestArtworkDialogOpen, setRequestArtworkDialogOpen] = useState(false);
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
   const [artworkTab, setArtworkTab] = useState<'proof' | 'print'>('proof');
+  const [bypassProof, setBypassProof] = useState(false);
 
   // Filter items based on active artwork tab, hiding split parents
   const filteredItems = useMemo(() => {
@@ -225,7 +228,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
               const pageCount = boxResult.page_count ?? 1;
               if (pageCount > 1) {
                 console.log(`Multi-page PDF detected (${pageCount} pages), triggering split for item:`, result.id);
-                splitPdf(result.id, pdfUrl, order.id)
+                splitPdf(result.id, pdfUrl, order.id, artworkTab === 'print' ? 'print' : 'proof')
                   .then(splitResult => {
                 console.log('PDF split complete:', splitResult);
                     toast.success(`Split into ${splitResult.page_count} items`);
@@ -342,7 +345,29 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  {/* Bypass Proof Toggle */}
+                  <div className="flex items-center gap-2 border rounded-md px-3 py-1.5">
+                    <Switch 
+                      id="bypass-proof" 
+                      checked={bypassProof}
+                      onCheckedChange={async (checked) => {
+                        setBypassProof(checked);
+                        if (checked && order.items?.length) {
+                          // Batch update all items to approved
+                          const childItems = order.items.filter(i => !(i.page_count > 1 && !i.parent_item_id));
+                          for (const item of childItems) {
+                            updateItem.mutate({ id: item.id, updates: { proofing_status: 'approved' } });
+                          }
+                          toast.success('All items marked as proof approved');
+                        }
+                      }}
+                    />
+                    <Label htmlFor="bypass-proof" className="text-xs cursor-pointer whitespace-nowrap">
+                      Bypass Proof
+                    </Label>
+                  </div>
+
                   {/* Request Artwork Button */}
                   <Button 
                     variant="outline" 
