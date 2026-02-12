@@ -43,21 +43,21 @@ export interface SlotConfig {
  */
 export function getSlotConfig(dieline: LabelDieline): SlotConfig {
   const totalSlots = dieline.columns_across;
-  const labelsPerSlotPerFrame = dieline.rows_around;
+  
+  // Single template height (one complete dieline layout)
+  const bleedVertical = (dieline.bleed_top_mm || 0) + (dieline.bleed_bottom_mm || 0);
+  const templateHeightMm = dieline.label_height_mm * dieline.rows_around + 
+                           dieline.vertical_gap_mm * (dieline.rows_around - 1) +
+                           bleedVertical;
+  
+  // Stack multiple complete templates within the 960mm max frame length
+  const templatesPerFrame = Math.max(1, Math.floor(MAX_FRAME_LENGTH_MM / templateHeightMm));
+  const frameHeightMm = templateHeightMm * templatesPerFrame;
+  
+  // Labels per slot = rows_around * templates stacked
+  const labelsPerSlotPerFrame = dieline.rows_around * templatesPerFrame;
   const labelsPerFrame = totalSlots * labelsPerSlotPerFrame;
   
-  // Frame height from dieline dimensions + gaps + bleed
-  const bleedVertical = (dieline.bleed_top_mm || 0) + (dieline.bleed_bottom_mm || 0);
-  let frameHeightMm = dieline.label_height_mm * dieline.rows_around + 
-                      dieline.vertical_gap_mm * (dieline.rows_around - 1) +
-                      bleedVertical;
-  
-  // Cap at max frame length (960mm)
-  if (frameHeightMm > MAX_FRAME_LENGTH_MM) {
-    frameHeightMm = MAX_FRAME_LENGTH_MM;
-  }
-  
-  // Exact division for accuracy (not floor)
   const framesPerMeter = 1000 / frameHeightMm;
   
   return { totalSlots, labelsPerFrame, labelsPerSlotPerFrame, framesPerMeter };
