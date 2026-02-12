@@ -1,56 +1,88 @@
 
 
-# Fix Frame Calculation: Stack Multiple Templates Per Frame
+# Fix Calculation Bugs in Layout Optimizer
 
-## The Problem
+## Problems Found
 
-The current code equates one dieline template (3 rows = 219mm tall) with one "frame." In reality, a **frame** is a repeating print unit up to 960mm long, and multiple complete dieline templates stack vertically within it.
+### 1. Scores displayed as raw decimals instead of percentages
+The `ScoreBar` component in `LayoutOptimizer.tsx` receives scores in the 0-1 range (e.g., `0.993`) but displays them directly with a `%` sign, producing "0.993090506875...%". The `overall_score` badge has the same bug.
 
-For this order's dieline (3 across, 3 down, ~73mm label height):
-- Template height = 73mm x 3 rows + gaps = ~219mm
-- Templates that fit in 960mm frame = floor(960 / 219) = **4**
-- Actual frame height = 219mm x 4 = **876mm**
-- Labels per frame = 4 templates x 9 labels each = **36**
-- Run 1 (3,000 labels): 3000 / 36 = **84 frames** = 84 x 0.876 = **73.6 metres**
+### 2. Frame count calculated from undivided quantity (4x too high)
+In `createOptimizedRuns`, frames are calculated using the full item quantity (e.g., 3000) via `calculateFramesForSlot(level, config)`. But `fillAllSlots` has already divided the quantity across slots (e.g., 750 per slot for 4 slots). The frame count should be based on the per-slot quantity (750), not the full quantity (3000). This produces inflated frame counts and meter totals.
 
-Currently the code thinks labels per frame = 9 (one template only), producing inflated frame counts and wrong metre totals.
+### 3. Label count in diagram ignores template stacking
+`RunLayoutDiagram` calculates `labelsPerFrame = columnsAcross * rowsAround` (e.g., 3 x 3 = 9), but the actual frame stacks 4 templates, so it should be 36 labels per frame. This makes the header show "4,008 labels" instead of the correct ~3,000.
+
+---
 
 ## Changes
 
-### File: `src/utils/labels/layoutOptimizer.ts` -- `getSlotConfig` function
+### File: `src/components/labels/LayoutOptimizer.tsx`
 
-Update the calculation to:
-
-1. Compute the **single template height** from the dieline (label_height x rows_around + gaps + bleed)
-2. Calculate **templates per frame** = floor(960 / template_height)
-3. Set **frame height** = template_height x templates_per_frame (the actual repeating length, e.g. 876mm)
-4. Multiply labels accordingly: labelsPerSlotPerFrame = rows_around x templates_per_frame
-
+**Fix `ScoreBar` to multiply by 100:**
 ```
-getSlotConfig(dieline):
-  templateHeightMm = label_height * rows_around 
-                   + vertical_gap * (rows_around - 1) 
-                   + bleed_top + bleed_bottom
-
-  templatesPerFrame = floor(MAX_FRAME_LENGTH / templateHeightMm)
-  templatesPerFrame = max(1, templatesPerFrame)  // at least 1
-
-  frameHeightMm = templateHeightMm * templatesPerFrame
-  framesPerMeter = 1000 / frameHeightMm
-
-  labelsPerSlotPerFrame = rows_around * templatesPerFrame
-  labelsPerFrame = columns_across * labelsPerSlotPerFrame
+function ScoreBar({ label, value }) {
+  const percent = Math.round(value * 100);
+  return (
+    ...
+    <span>{percent}%</span>
+    <Progress value={percent} ... />
+  );
+}
 ```
 
-### File: `src/types/labels.ts` -- SlotConfig (no changes needed, same shape)
+**Fix `overall_score` badge display:**
+```
+<Badge>
+  {Math.round(option.overall_score * 100)}% score
+</Badge>
+```
 
-No interface changes required. The existing `labelsPerFrame`, `labelsPerSlotPerFrame`, and `framesPerMeter` fields will simply hold the correct values.
+### File: `src/utils/labels/layoutOptimizer.ts`
 
-### Expected Results for the Example Order
+**Fix `createOptimizedRuns` to use per-slot quantity for frame calculation:**
 
-With the corrected calculation:
-- Run 1 (3,000 labels, 4 slots x 750): 750 / 12 labels-per-slot-per-frame = 63 frames, 63 x 0.876m = ~55m (not 999 frames)
-- Production time and metre estimates will be realistic and usable for quoting
+After calling `fillAllSlots`, the per-slot quantity is `level / slotCount`. The frame count should use the max per-slot quantity from the assignments, not the raw `level`.
 
-All downstream code (`calculateFramesForSlot`, `calculateMeters`, diagram display) uses `SlotConfig` values, so they will automatically reflect correct numbers with no further changes.
+Change the frame calculation (around line 326) from:
+```
+const frames = calculateFramesForSlot(level, config);
+```
+To:
+```
+const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+const frames = calculateFramesForSlot(maxSlotQty, config);
+```
 
+Apply the same fix in the leftover handling section (around line 364) where frames are also calculated from the raw qty.
+
+### File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
+
+**Fix `labelsPerFrame` to account for template stacking:**
+
+The diagram needs to know how many templates stack per frame. Import `getSlotConfig` and use its `labelsPerFrame` value instead of the simple `columnsAcross * rowsAround` calculation.
+
+Change (around line 75):
+```
+const labelsPerFrame = columnsAcross * rowsAround;
+```
+To:
+```
+import { getSlotConfig } from '@/utils/labels/layoutOptimizer';
+...
+const slotConfig = getSlotConfig(dieline);
+const labelsPerFrame = slotConfig.labelsPerFrame;
+```
+
+This ensures the "Run 1 -- X labels" header shows the correct total.
+
+---
+
+## Expected Results After Fix
+
+For the Pizza Picasso order (3x3 dieline, 219mm template, 4 templates/frame):
+
+- Scores display as "99%", "29%", "22%" instead of raw decimals
+- Run 1 (3,000 labels, 4 slots x 750): frames = ceil(750 / 12) = 63 frames, 63 x 0.876m = ~55m
+- Diagram header shows "Run 1 -- ~3,000 labels" (not 4,008)
+- Production time calculated from realistic meter totals
