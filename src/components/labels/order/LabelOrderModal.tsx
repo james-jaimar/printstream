@@ -473,7 +473,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                 <div>
                   <h2 className="text-lg font-semibold">Label Items</h2>
                   <p className="text-sm text-muted-foreground">
-                    {(order.items?.length || 0)} artwork{(order.items?.length || 0) !== 1 ? 's' : ''} in this order
+                    {(() => { const count = order.items?.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length || 0; return `${count} artwork${count !== 1 ? 's' : ''} in this order`; })()}
                   </p>
                 </div>
 
