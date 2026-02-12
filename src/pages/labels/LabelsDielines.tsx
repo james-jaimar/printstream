@@ -11,8 +11,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Table, TableBody, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search } from 'lucide-react';
+import { SortableTableHead } from '@/components/tracker/jobs/SortableTableHead';
 import { ViewToggle } from '@/components/tracker/common/ViewToggle';
 import { 
   useLabelDielines, 
@@ -30,6 +31,8 @@ export default function LabelsDielines() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingDieline, setEditingDieline] = useState<LabelDieline | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<string | null>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const { data: dielines, isLoading } = useLabelDielines(false);
   const createMutation = useCreateLabelDieline();
@@ -37,9 +40,35 @@ export default function LabelsDielines() {
   const deleteMutation = useDeleteLabelDieline();
 
   const activeDielines = dielines?.filter(d => d.is_active) || [];
-  const filteredDielines = activeDielines.filter((d) =>
-    d.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredDielines = activeDielines
+    .filter((d) => d.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (!sortField) return 0;
+      let aVal: string | number = '';
+      let bVal: string | number = '';
+      switch (sortField) {
+        case 'die_no': aVal = a.die_no || ''; bVal = b.die_no || ''; break;
+        case 'name': aVal = a.name; bVal = b.name; break;
+        case 'size': aVal = a.label_width_mm * 10000 + a.label_height_mm; bVal = b.label_width_mm * 10000 + b.label_height_mm; break;
+        case 'layout': aVal = a.columns_across * 100 + a.rows_around; bVal = b.columns_across * 100 + b.rows_around; break;
+        case 'die_type': aVal = a.die_type || ''; bVal = b.die_type || ''; break;
+        case 'gaps': aVal = a.horizontal_gap_mm * 100 + a.vertical_gap_mm; bVal = b.horizontal_gap_mm * 100 + b.vertical_gap_mm; break;
+        case 'labels': aVal = a.columns_across * a.rows_around; bVal = b.columns_across * b.rows_around; break;
+        case 'client': aVal = a.client || ''; bVal = b.client || ''; break;
+      }
+      if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
 
   const handleCreate = async (data: CreateLabelDielineInput) => {
     await createMutation.mutateAsync(data);
@@ -147,15 +176,15 @@ export default function LabelsDielines() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[100px]">Die No</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Size (W×H)</TableHead>
-              <TableHead>Across × Around</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Gaps</TableHead>
-              <TableHead>Labels</TableHead>
-              <TableHead>Client</TableHead>
-              <TableHead className="w-[50px]"></TableHead>
+              <SortableTableHead sortKey="die_no" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort} className="w-[100px]">Die No</SortableTableHead>
+              <SortableTableHead sortKey="name" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Name</SortableTableHead>
+              <SortableTableHead sortKey="size" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Size (W×H)</SortableTableHead>
+              <SortableTableHead sortKey="layout" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Across × Around</SortableTableHead>
+              <SortableTableHead sortKey="die_type" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Type</SortableTableHead>
+              <SortableTableHead sortKey="gaps" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Gaps</SortableTableHead>
+              <SortableTableHead sortKey="labels" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Labels</SortableTableHead>
+              <SortableTableHead sortKey="client" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Client</SortableTableHead>
+              <SortableTableHead sortKey="" currentSortField={sortField} currentSortOrder={sortOrder} onSort={() => {}} className="w-[50px]"> </SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
