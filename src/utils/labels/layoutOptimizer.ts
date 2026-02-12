@@ -23,7 +23,7 @@ import type {
   OptimizationWeights 
 } from '@/types/labels';
 
-const { MAX_FRAME_LENGTH_MM, METERS_PER_FRAME, FRAME_CHANGEOVER_MINUTES, SETUP_TIME_MINUTES } = LABEL_PRINT_CONSTANTS;
+const { MAX_FRAME_LENGTH_MM, PRESS_SPEED_M_PER_MIN, MAKE_READY_FIRST_MIN, MAKE_READY_SUBSEQUENT_MIN } = LABEL_PRINT_CONSTANTS;
 
 export interface LayoutInput {
   items: LabelItem[];
@@ -45,9 +45,20 @@ export function getSlotConfig(dieline: LabelDieline): SlotConfig {
   const totalSlots = dieline.columns_across;
   const labelsPerSlotPerFrame = dieline.rows_around;
   const labelsPerFrame = totalSlots * labelsPerSlotPerFrame;
-  const frameHeightMm = dieline.label_height_mm * dieline.rows_around + 
-                        dieline.vertical_gap_mm * (dieline.rows_around - 1);
-  const framesPerMeter = Math.floor(1000 / frameHeightMm);
+  
+  // Frame height from dieline dimensions + gaps + bleed
+  const bleedVertical = (dieline.bleed_top_mm || 0) + (dieline.bleed_bottom_mm || 0);
+  let frameHeightMm = dieline.label_height_mm * dieline.rows_around + 
+                      dieline.vertical_gap_mm * (dieline.rows_around - 1) +
+                      bleedVertical;
+  
+  // Cap at max frame length (960mm)
+  if (frameHeightMm > MAX_FRAME_LENGTH_MM) {
+    frameHeightMm = MAX_FRAME_LENGTH_MM;
+  }
+  
+  // Exact division for accuracy (not floor)
+  const framesPerMeter = 1000 / frameHeightMm;
   
   return { totalSlots, labelsPerFrame, labelsPerSlotPerFrame, framesPerMeter };
 }
@@ -63,6 +74,7 @@ export function calculateFramesForSlot(quantity: number, config: SlotConfig): nu
  * Calculate meters needed for a number of frames
  */
 export function calculateMeters(frames: number, config: SlotConfig): number {
+  // Total meters = frames / framesPerMeter (exact frame height based)
   return Math.round((frames / config.framesPerMeter) * 100) / 100;
 }
 
@@ -70,10 +82,12 @@ export function calculateMeters(frames: number, config: SlotConfig): number {
  * Calculate production time in minutes
  */
 export function calculateProductionTime(runs: ProposedRun[]): number {
-  const totalFrames = runs.reduce((sum, r) => sum + r.frames, 0);
-  const changeoverTime = Math.max(0, runs.length - 1) * FRAME_CHANGEOVER_MINUTES;
-  const printTime = totalFrames * (10 / 60); // ~10 seconds per frame
-  return Math.ceil(SETUP_TIME_MINUTES + changeoverTime + printTime);
+  const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
+  const printTimeMinutes = totalMeters / PRESS_SPEED_M_PER_MIN;
+  // 20 min make ready for first run, 10 min for each subsequent (same material)
+  const makeReadyMinutes = MAKE_READY_FIRST_MIN + 
+    (Math.max(0, runs.length - 1) * MAKE_READY_SUBSEQUENT_MIN);
+  return Math.ceil(makeReadyMinutes + printTimeMinutes);
 }
 
 /**
@@ -109,9 +123,22 @@ function fillAllSlots(
     assignments.push({
       slot: s,
       item_id: source.item_id,
-      quantity_in_slot: source.quantity,
+      quantity_in_slot: source.quantity, // placeholder, adjusted below
     });
   }
+  
+  // Count how many slots each item occupies
+  const slotCounts = new Map<string, number>();
+  for (const a of assignments) {
+    slotCounts.set(a.item_id, (slotCounts.get(a.item_id) || 0) + 1);
+  }
+  
+  // Divide quantity by slot count so total across slots = original quantity
+  for (const a of assignments) {
+    const count = slotCounts.get(a.item_id) || 1;
+    a.quantity_in_slot = Math.ceil(a.quantity_in_slot / count);
+  }
+  
   return assignments;
 }
 

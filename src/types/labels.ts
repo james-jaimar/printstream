@@ -7,9 +7,9 @@
 export const LABEL_PRINT_CONSTANTS = {
   MAX_FRAME_LENGTH_MM: 960,        // HP Indigo max print length
   ROLL_WIDTHS_MM: [250, 280, 320, 330] as const,
-  FRAME_CHANGEOVER_MINUTES: 2,     // Time between frames
-  SETUP_TIME_MINUTES: 15,          // Initial job setup
-  METERS_PER_FRAME: 0.96,          // 960mm = 0.96m per frame
+  PRESS_SPEED_M_PER_MIN: 25,      // 25 metres/min average print speed
+  MAKE_READY_FIRST_MIN: 20,       // 20 min make ready for first run
+  MAKE_READY_SUBSEQUENT_MIN: 10,  // 10 min if not changing material
 } as const;
 
 // AI Optimization Weights (Configurable)
