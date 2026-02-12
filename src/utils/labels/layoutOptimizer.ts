@@ -79,15 +79,24 @@ export function calculateMeters(frames: number, config: SlotConfig): number {
 }
 
 /**
- * Calculate production time in minutes
+ * Calculate production time in minutes.
+ * Make-ready is a single 20-min setup per order (all runs share one setup).
+ * The 10-min subsequent setup applies between different orders on the same
+ * substrate and is handled at the scheduling/planning level, not here.
  */
 export function calculateProductionTime(runs: ProposedRun[]): number {
   const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
   const printTimeMinutes = totalMeters / PRESS_SPEED_M_PER_MIN;
-  // 20 min make ready for first run, 10 min for each subsequent (same material)
-  const makeReadyMinutes = MAKE_READY_FIRST_MIN + 
-    (Math.max(0, runs.length - 1) * MAKE_READY_SUBSEQUENT_MIN);
+  const makeReadyMinutes = MAKE_READY_FIRST_MIN; // single setup for entire order
   return Math.ceil(makeReadyMinutes + printTimeMinutes);
+}
+
+/**
+ * Calculate print-only time for a single run (no make-ready).
+ * Used when storing per-run durations in the database.
+ */
+export function calculateRunPrintTime(run: ProposedRun): number {
+  return Math.ceil(run.meters / PRESS_SPEED_M_PER_MIN);
 }
 
 /**
