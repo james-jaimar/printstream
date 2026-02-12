@@ -30,10 +30,9 @@ export function DielineCard({ dieline, onEdit, onDelete, onDuplicate, isDeleting
             <CardTitle className="text-base truncate" title={dieline.name}>
               {dieline.name}
             </CardTitle>
-            <CardDescription className="flex items-center gap-2">
-              {dieline.die_no && <span className="font-mono text-xs">{dieline.die_no}</span>}
-              <span>{dieline.roll_width_mm}mm roll</span>
-            </CardDescription>
+            {dieline.die_no && (
+              <CardDescription className="font-mono text-xs">{dieline.die_no}</CardDescription>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {dieline.die_type && dieline.die_type !== 'rectangle' && (
