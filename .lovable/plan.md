@@ -1,63 +1,56 @@
 
 
-# Fix Quantity Distribution, Production Time, and Frame Calculations
+# Fix Frame Calculation: Stack Multiple Templates Per Frame
 
-## Problem Summary
+## The Problem
 
-Three calculation issues in the layout optimizer:
+The current code equates one dieline template (3 rows = 219mm tall) with one "frame." In reality, a **frame** is a repeating print unit up to 960mm long, and multiple complete dieline templates stack vertically within it.
 
-1. **Quantity per slot is wrong**: When one item fills multiple slots (round-robin), each slot shows the TOTAL quantity instead of dividing it. E.g., item needs 3,000 labels across 4 slots -- each slot should be 750, not 3,000. This causes the diagram to show "S1 x3k" and "12,000 labels" instead of "S1 x750" and "3,000 labels".
+For this order's dieline (3 across, 3 down, ~73mm label height):
+- Template height = 73mm x 3 rows + gaps = ~219mm
+- Templates that fit in 960mm frame = floor(960 / 219) = **4**
+- Actual frame height = 219mm x 4 = **876mm**
+- Labels per frame = 4 templates x 9 labels each = **36**
+- Run 1 (3,000 labels): 3000 / 36 = **84 frames** = 84 x 0.876 = **73.6 metres**
 
-2. **Production time formula is wrong**: Currently uses an arbitrary "10 seconds per frame" calculation. Should use real press speed: 25 metres/min with 20 min make ready (10 min if not changing material).
-
-3. **Frame length not factored correctly**: The 960mm max frame length should be used to calculate repeating frame length and total run length from the dieline dimensions.
-
----
+Currently the code thinks labels per frame = 9 (one template only), producing inflated frame counts and wrong metre totals.
 
 ## Changes
 
-### File: `src/utils/labels/layoutOptimizer.ts`
+### File: `src/utils/labels/layoutOptimizer.ts` -- `getSlotConfig` function
 
-**Fix 1 -- Divide quantity across duplicated slots in `fillAllSlots`**
+Update the calculation to:
 
-After assigning items round-robin, count how many slots each item occupies and divide `quantity_in_slot` by that count. A 3,000-qty item in 4 slots becomes 750 per slot.
+1. Compute the **single template height** from the dieline (label_height x rows_around + gaps + bleed)
+2. Calculate **templates per frame** = floor(960 / template_height)
+3. Set **frame height** = template_height x templates_per_frame (the actual repeating length, e.g. 876mm)
+4. Multiply labels accordingly: labelsPerSlotPerFrame = rows_around x templates_per_frame
 
-```text
-function fillAllSlots(itemSlots, totalSlots):
-  // ... existing round-robin assignment ...
-  
-  // Count how many slots each item occupies
-  slotCounts = count occurrences of each item_id
-  
-  // Divide quantity by slot count
-  for each assignment:
-    assignment.quantity_in_slot = ceil(assignment.quantity / slotCounts[item_id])
+```
+getSlotConfig(dieline):
+  templateHeightMm = label_height * rows_around 
+                   + vertical_gap * (rows_around - 1) 
+                   + bleed_top + bleed_bottom
+
+  templatesPerFrame = floor(MAX_FRAME_LENGTH / templateHeightMm)
+  templatesPerFrame = max(1, templatesPerFrame)  // at least 1
+
+  frameHeightMm = templateHeightMm * templatesPerFrame
+  framesPerMeter = 1000 / frameHeightMm
+
+  labelsPerSlotPerFrame = rows_around * templatesPerFrame
+  labelsPerFrame = columns_across * labelsPerSlotPerFrame
 ```
 
-**Fix 2 -- Rewrite `calculateProductionTime` to use real press parameters**
+### File: `src/types/labels.ts` -- SlotConfig (no changes needed, same shape)
 
-Replace the current arbitrary formula with:
-- Print time = total meters / 25 (m/min)
-- Make ready = 20 min for first run, 10 min for subsequent runs (assuming same material)
-- Total = make ready + print time
+No interface changes required. The existing `labelsPerFrame`, `labelsPerSlotPerFrame`, and `framesPerMeter` fields will simply hold the correct values.
 
-```text
-function calculateProductionTime(runs):
-  totalMeters = sum of run.meters
-  printTimeMinutes = totalMeters / 25
-  makeReadyMinutes = 20 + (max(0, runs.length - 1) * 10)
-  return ceil(makeReadyMinutes + printTimeMinutes)
-```
+### Expected Results for the Example Order
 
-**Fix 3 -- Verify frame height calculation**
+With the corrected calculation:
+- Run 1 (3,000 labels, 4 slots x 750): 750 / 12 labels-per-slot-per-frame = 63 frames, 63 x 0.876m = ~55m (not 999 frames)
+- Production time and metre estimates will be realistic and usable for quoting
 
-The existing `getSlotConfig` calculates `frameHeightMm` from the dieline. Ensure:
-- Frame height = (label_height_mm x rows_around) + (vertical_gap_mm x (rows_around - 1)) + bleed
-- If frame height exceeds 960mm, cap it (this is a dieline validation issue but we should guard against it)
-- `framesPerMeter = 1000 / frameHeightMm` (use exact division, not floor, for accuracy)
-- Total meters for a run = frames x frameHeightMm / 1000
-
-### File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
-
-No structural changes needed -- the diagram already reads `quantity_in_slot` from the assignments. Once the optimizer produces correct per-slot quantities (750 instead of 3000), the diagram will automatically show the right values ("S1 x750" and correct total labels).
+All downstream code (`calculateFramesForSlot`, `calculateMeters`, diagram display) uses `SlotConfig` values, so they will automatically reflect correct numbers with no further changes.
 
