@@ -1,88 +1,41 @@
 
 
-# Fix Calculation Bugs in Layout Optimizer
+# Fix Make-Ready Time: Per Order, Not Per Run
 
-## Problems Found
+## The Issue
 
-### 1. Scores displayed as raw decimals instead of percentages
-The `ScoreBar` component in `LayoutOptimizer.tsx` receives scores in the 0-1 range (e.g., `0.993`) but displays them directly with a `%` sign, producing "0.993090506875...%". The `overall_score` badge has the same bug.
+The current `calculateProductionTime` function treats each run within an order as needing its own make-ready time (20 min for the first run + 10 min for each additional run). In reality:
 
-### 2. Frame count calculated from undivided quantity (4x too high)
-In `createOptimizedRuns`, frames are calculated using the full item quantity (e.g., 3000) via `calculateFramesForSlot(level, config)`. But `fillAllSlots` has already divided the quantity across slots (e.g., 750 per slot for 4 slots). The frame count should be based on the per-slot quantity (750), not the full quantity (3000). This produces inflated frame counts and meter totals.
+- All runs within a single order share **one** 20-minute setup
+- The 10-minute setup only applies when switching to a **different order** on the same substrate
 
-### 3. Label count in diagram ignores template stacking
-`RunLayoutDiagram` calculates `labelsPerFrame = columnsAcross * rowsAround` (e.g., 3 x 3 = 9), but the actual frame stacks 4 templates, so it should be 36 labels per frame. This makes the header show "4,008 labels" instead of the correct ~3,000.
+So for this order with 9 runs, the current code calculates: 20 + (8 x 10) = **100 minutes** of make-ready. It should be just **20 minutes**.
 
----
+## Change
 
-## Changes
+### File: `src/utils/labels/layoutOptimizer.ts` -- `calculateProductionTime`
 
-### File: `src/components/labels/LayoutOptimizer.tsx`
+Simplify to use a single make-ready per order (the function is always called with runs from one order):
 
-**Fix `ScoreBar` to multiply by 100:**
 ```
-function ScoreBar({ label, value }) {
-  const percent = Math.round(value * 100);
-  return (
-    ...
-    <span>{percent}%</span>
-    <Progress value={percent} ... />
-  );
-}
+function calculateProductionTime(runs):
+  totalMeters = sum of run.meters
+  printTimeMinutes = totalMeters / 25
+  makeReadyMinutes = 20   // single setup for the entire order
+  return ceil(makeReadyMinutes + printTimeMinutes)
 ```
 
-**Fix `overall_score` badge display:**
-```
-<Badge>
-  {Math.round(option.overall_score * 100)}% score
-</Badge>
-```
+The 10-minute subsequent setup is an inter-order concern (scheduling/planning level), not relevant within a single order's production time estimate.
 
-### File: `src/utils/labels/layoutOptimizer.ts`
+### File: `src/hooks/labels/useLayoutOptimizer.ts` -- `applyLayout`
 
-**Fix `createOptimizedRuns` to use per-slot quantity for frame calculation:**
+Currently calls `calculateProductionTime([run])` for each individual run when saving to the database (line 158). This should pass **all runs** so the make-ready is allocated once across the order, not once per run. Change to calculate the total once and divide proportionally, or simply assign the per-run print time without make-ready and store the total order time separately.
 
-After calling `fillAllSlots`, the per-slot quantity is `level / slotCount`. The frame count should use the max per-slot quantity from the assignments, not the raw `level`.
+**Approach**: Store per-run duration as just the print time (meters / 25), and let the order-level summary include the 20-min make-ready. This keeps individual run estimates accurate for scheduling.
 
-Change the frame calculation (around line 326) from:
-```
-const frames = calculateFramesForSlot(level, config);
-```
-To:
-```
-const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
-const frames = calculateFramesForSlot(maxSlotQty, config);
-```
+## Expected Result
 
-Apply the same fix in the leftover handling section (around line 364) where frames are also calculated from the raw qty.
-
-### File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
-
-**Fix `labelsPerFrame` to account for template stacking:**
-
-The diagram needs to know how many templates stack per frame. Import `getSlotConfig` and use its `labelsPerFrame` value instead of the simple `columnsAcross * rowsAround` calculation.
-
-Change (around line 75):
-```
-const labelsPerFrame = columnsAcross * rowsAround;
-```
-To:
-```
-import { getSlotConfig } from '@/utils/labels/layoutOptimizer';
-...
-const slotConfig = getSlotConfig(dieline);
-const labelsPerFrame = slotConfig.labelsPerFrame;
-```
-
-This ensures the "Run 1 -- X labels" header shows the correct total.
-
----
-
-## Expected Results After Fix
-
-For the Pizza Picasso order (3x3 dieline, 219mm template, 4 templates/frame):
-
-- Scores display as "99%", "29%", "22%" instead of raw decimals
-- Run 1 (3,000 labels, 4 slots x 750): frames = ceil(750 / 12) = 63 frames, 63 x 0.876m = ~55m
-- Diagram header shows "Run 1 -- ~3,000 labels" (not 4,008)
-- Production time calculated from realistic meter totals
+For 9 runs totaling ~700m:
+- Print time: 700 / 25 = **28 minutes**
+- Make-ready: **20 minutes** (once)
+- Total: **~48 minutes** (instead of the current ~128 minutes)
