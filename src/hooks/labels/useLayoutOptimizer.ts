@@ -7,7 +7,8 @@
 import { useState, useCallback, useMemo } from 'react';
 import { 
   generateLayoutOptions as generateOptions,
-  calculateProductionTime
+  calculateProductionTime,
+  calculateRunPrintTime
 } from '@/utils/labels/layoutOptimizer';
 import { 
   type LabelItem, 
@@ -155,7 +156,8 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
           slot_assignments: run.slot_assignments,
           meters_to_print: run.meters,
           frames_count: run.frames,
-          estimated_duration_minutes: calculateProductionTime([run]),
+          // Store per-run print time only (no make-ready; that's order-level)
+          estimated_duration_minutes: calculateRunPrintTime(run),
           ai_optimization_score: selectedOption.overall_score,
           ai_reasoning: selectedOption.reasoning,
         });
