@@ -1,53 +1,84 @@
 
+# "Send to Print" -- Batch Imposition for Label Runs
 
-# Smart Quantity Splitting to Match Run Levels
+## What Changes
 
-## Problem
-The current optimizer groups items with similar quantities and splits when imbalanced, but it doesn't proactively split an item's quantity to fit into existing run levels. For example, if you have items at 2000, 2000, 500, 500, and one item at 2500 -- the optimizer should split 2500 into 2000 + 500 and slot each part into the matching runs, rather than creating a separate imbalanced run.
+### 1. Add a "Send to Print" button on the Production Runs card
+Currently each run is an individual clickable card. The user wants a single action at the order level that says "these runs are ready -- generate all imposition PDFs."
 
-## Approach
-Rework the `createOptimizedRuns` function in `src/utils/labels/layoutOptimizer.ts` to use a **"find target levels, then split to match"** strategy:
+**File: `src/components/labels/LabelRunsCard.tsx`**
+- Add a "Send to Print" button in the card header (next to the "Completed" counter)
+- Button is enabled only when all runs are in `planned` status and the order has a dieline
+- Clicking it triggers imposition for ALL runs sequentially, updating each run's status to `approved` and storing the resulting PDF URLs
+- Show a progress indicator ("Imposing run 3 of 8...") while processing
+- Once complete, all runs show `approved` status with their `imposed_pdf_url` populated
 
-1. **Identify natural quantity levels** -- Collect all item quantities, find clusters (e.g., multiple items near 2000, multiple near 500).
-2. **Split items to match levels** -- If an item's quantity is larger than a level, split it: assign a portion equal to the level, and keep the remainder for the next level.
-3. **Build runs per level** -- Each level becomes one or more runs where all slots have matching quantities, minimizing waste.
+### 2. Create a `useBatchImpose` hook to orchestrate the process
+**New file: `src/hooks/labels/useBatchImpose.ts`**
+
+This hook will:
+- Accept the order's runs, items, and dieline
+- Iterate through each run sequentially
+- For each run:
+  1. Build the `ImpositionRequest` by looking up each slot's `item_id` to find the item's `print_pdf_url`
+  2. Call `createImposition()` from `vpsApiService` (which invokes the `label-impose` edge function)
+  3. The edge function already uploads the PDF to storage and updates the `label_runs` row with `imposed_pdf_url`
+  4. After successful imposition, update the run status to `approved`
+- Track progress (current run index, total, errors)
+- Return `{ impose, isImposing, progress, errors }`
+
+### 3. Wire into the LabelRunsCard UI
+**File: `src/components/labels/LabelRunsCard.tsx`**
+
+- Import and use `useBatchImpose`
+- Add `orderId` and `onImpositionComplete` to the component props
+- The "Send to Print" button calls `impose()` from the hook
+- During processing, show a progress bar and disable the button
+- After completion, show a toast with the result
+
+### 4. Pass orderId down from LabelOrderModal
+**File: `src/components/labels/order/LabelOrderModal.tsx`**
+
+- Pass `orderId={order.id}` to `LabelRunsCard`
 
 ## Technical Details
 
-### File: `src/utils/labels/layoutOptimizer.ts`
-
-Replace the `createOptimizedRuns` function (lines ~240-301) with the new level-matching algorithm:
-
+### Batch imposition flow per run:
 ```text
-createOptimizedRuns(items, config):
-  // 1. Collect all unique quantities as candidate levels
-  quantities = items.map(i => i.quantity).sort(descending)
-  levels = deduplicate and cluster quantities within 10%
-
-  // 2. Build a remaining-qty map
-  remaining = Map(item.id -> item.quantity)
-
-  // 3. For each level (highest first):
-  for level in levels:
-    // Collect items that have >= level remaining
-    candidates = items where remaining[id] >= level
-    
-    // Group candidates into runs (up to totalSlots per run)
-    while candidates.length > 0:
-      batch = take up to totalSlots candidates
-      assign each batch item with quantity = level
-      fill empty slots round-robin
-      create run
-      deduct level from each candidate's remaining
-      
-  // 4. Handle any leftover remainders as individual runs
-  for items with remaining > 0:
-    create single-item run for the remainder
+For each run in order.runs:
+  1. Build slot_assignments with pdf_url:
+     slot.item_id -> find item -> item.print_pdf_url
+  2. Call createImposition({
+       run_id: run.id,
+       order_id: orderId,
+       dieline: { roll_width_mm, label_width_mm, ... },
+       slot_assignments: [...with pdf_url],
+       include_dielines: true,
+       meters_to_print: run.meters_to_print
+     })
+  3. Edge function handles PDF generation + storage upload + DB update
+  4. Update run status to 'approved'
 ```
 
-This ensures that a 2500-qty item naturally splits: 2000 goes into the "2000 level" run alongside other 2000-qty items, and the remaining 500 goes into the "500 level" run alongside other 500-qty items.
+### useBatchImpose hook interface:
+```text
+interface BatchImposeProgress {
+  current: number;
+  total: number;
+  currentRunNumber: number;
+  status: 'idle' | 'imposing' | 'complete' | 'error';
+  errors: { runNumber: number; error: string }[];
+}
 
-The existing `balanceSlotQuantities` function still acts as a safety net -- if somehow a run ends up with slots that differ by more than 10%, it will split further. But with level-matching, runs should already be balanced by construction.
+useBatchImpose(orderId, runs, items, dieline) => {
+  impose: () => Promise<void>,
+  isImposing: boolean,
+  progress: BatchImposeProgress
+}
+```
 
-No changes needed to the UI or diagram components -- this is purely an algorithm improvement in the optimizer.
-
+### UI changes to LabelRunsCard header:
+- Add a `Printer` icon button labeled "Send to Print" in the header area
+- Only shown when there are runs and none are yet approved/printing
+- While imposing, shows "Imposing Run X of Y..." with a progress bar
+- After complete, button changes to a checkmark "All Imposed"
