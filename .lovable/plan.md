@@ -1,41 +1,46 @@
 
+# Fix Item Count and Proof/Print Status Bugs
 
-# Fix Make-Ready Time: Per Order, Not Per Run
+## Problem 1: Item count includes the original multi-page parent
 
-## The Issue
+**Location**: `src/components/labels/order/LabelOrderModal.tsx` line 476
 
-The current `calculateProductionTime` function treats each run within an order as needing its own make-ready time (20 min for the first run + 10 min for each additional run). In reality:
+The "Label Items" header uses `order.items?.length` (25 items) which includes the original 24-page parent PDF. The parent should be excluded since it was split into 24 child items. The same filtering logic used for `filteredItems` (hide items where `page_count > 1 && !parent_item_id`) should be applied to the count.
 
-- All runs within a single order share **one** 20-minute setup
-- The 10-minute setup only applies when switching to a **different order** on the same substrate
-
-So for this order with 9 runs, the current code calculates: 20 + (8 x 10) = **100 minutes** of make-ready. It should be just **20 minutes**.
-
-## Change
-
-### File: `src/utils/labels/layoutOptimizer.ts` -- `calculateProductionTime`
-
-Simplify to use a single make-ready per order (the function is always called with runs from one order):
-
+**Fix**: Filter out split parents before counting:
 ```
-function calculateProductionTime(runs):
-  totalMeters = sum of run.meters
-  printTimeMinutes = totalMeters / 25
-  makeReadyMinutes = 20   // single setup for the entire order
-  return ceil(makeReadyMinutes + printTimeMinutes)
+const visibleCount = order.items?.filter(item => 
+  !(item.page_count > 1 && !item.parent_item_id)
+).length || 0;
+```
+Display `visibleCount` instead of `order.items?.length`.
+
+## Problem 2: Split PDF function marks children as print-ready
+
+**Location**: `supabase/functions/label-split-pdf/index.ts` lines 137-138
+
+When splitting a multi-page PDF, the edge function sets both `artwork_pdf_url` AND `print_pdf_url` to the same URL, with `print_pdf_status: "ready"`. This causes every child item to show green checkmarks for both "Proof" and "Print" even though only proof artwork was uploaded.
+
+The split function should respect the parent item's state. If the parent has no `print_pdf_url` (i.e., only proof was uploaded), children should not get one either.
+
+**Fix**: Check the parent item's print status before setting child fields:
+```
+artwork_pdf_url: pageUrl,
+// Only set print fields if the parent already had print-ready artwork
+print_pdf_url: parentItem.print_pdf_url ? pageUrl : null,
+print_pdf_status: parentItem.print_pdf_url ? "ready" : "pending",
 ```
 
-The 10-minute subsequent setup is an inter-order concern (scheduling/planning level), not relevant within a single order's production time estimate.
+Additionally, since proof uploads use `artwork_pdf_url` (not `proof_pdf_url`), set `proof_pdf_url` on children when the parent was a proof upload:
+```
+proof_pdf_url: parentItem.proof_pdf_url || (!parentItem.print_pdf_url ? pageUrl : null),
+```
 
-### File: `src/hooks/labels/useLayoutOptimizer.ts` -- `applyLayout`
+## Technical Details
 
-Currently calls `calculateProductionTime([run])` for each individual run when saving to the database (line 158). This should pass **all runs** so the make-ready is allocated once across the order, not once per run. Change to calculate the total once and divide proportionally, or simply assign the per-run print time without make-ready and store the total order time separately.
+### Files to change:
+1. **`src/components/labels/order/LabelOrderModal.tsx`** -- line 476: use filtered count excluding split parents
+2. **`supabase/functions/label-split-pdf/index.ts`** -- lines 136-138: conditionally set print fields based on parent state
 
-**Approach**: Store per-run duration as just the print time (meters / 25), and let the order-level summary include the 20-min make-ready. This keeps individual run estimates accurate for scheduling.
-
-## Expected Result
-
-For 9 runs totaling ~700m:
-- Print time: 700 / 25 = **28 minutes**
-- Make-ready: **20 minutes** (once)
-- Total: **~48 minutes** (instead of the current ~128 minutes)
+### Data fix needed
+The 24 existing child items in the database currently have `print_pdf_url` set and `print_pdf_status = 'ready'` incorrectly. After deploying the edge function fix, you may want to clear these values on existing items so they correctly show as proof-only. This can be done via a one-time SQL update or by re-uploading the file.
