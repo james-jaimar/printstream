@@ -11,24 +11,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Table, TableBody, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search } from 'lucide-react';
+import { ViewToggle } from '@/components/tracker/common/ViewToggle';
 import { 
   useLabelDielines, 
   useCreateLabelDieline, 
   useUpdateLabelDieline,
   useDeleteLabelDieline 
 } from '@/hooks/labels/useLabelDielines';
-import { DielineFormDialog, DielineCard } from '@/components/labels/dielines';
+import { DielineFormDialog, DielineCard, DielineListRow } from '@/components/labels/dielines';
 import type { LabelDieline, CreateLabelDielineInput } from '@/types/labels';
 import { toast } from 'sonner';
 
 export default function LabelsDielines() {
   const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('list');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingDieline, setEditingDieline] = useState<LabelDieline | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const { data: dielines, isLoading } = useLabelDielines(false); // Show all, including inactive
+  const { data: dielines, isLoading } = useLabelDielines(false);
   const createMutation = useCreateLabelDieline();
   const updateMutation = useUpdateLabelDieline();
   const deleteMutation = useDeleteLabelDieline();
@@ -61,7 +64,6 @@ export default function LabelsDielines() {
   const handleDuplicate = (dieline: LabelDieline) => {
     setEditingDieline(null);
     setIsFormOpen(true);
-    // Pre-fill with duplicated data after dialog opens
     setTimeout(() => {
       const duplicateData: LabelDieline = {
         ...dieline,
@@ -112,18 +114,21 @@ export default function LabelsDielines() {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search dielines..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-        />
+      {/* Search + View Toggle */}
+      <div className="flex items-center gap-3">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search dielines..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <ViewToggle view={viewMode} onViewChange={setViewMode} />
       </div>
 
-      {/* Dielines Grid */}
+      {/* Content */}
       {isLoading ? (
         <div className="text-muted-foreground text-center py-8">Loading dielines...</div>
       ) : filteredDielines.length === 0 ? (
@@ -138,6 +143,34 @@ export default function LabelsDielines() {
             </Button>
           )}
         </div>
+      ) : viewMode === 'list' ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[100px]">Die No</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Size (W×H)</TableHead>
+              <TableHead>Across × Around</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Gaps</TableHead>
+              <TableHead>Labels</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead className="w-[50px]"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredDielines.map((dieline) => (
+              <DielineListRow
+                key={dieline.id}
+                dieline={dieline}
+                onEdit={handleEdit}
+                onDelete={(id) => setDeleteConfirm(id)}
+                onDuplicate={handleDuplicate}
+                isDeleting={deleteMutation.isPending}
+              />
+            ))}
+          </TableBody>
+        </Table>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredDielines.map((dieline) => (
