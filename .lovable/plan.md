@@ -1,46 +1,101 @@
 
-# Fix Item Count and Proof/Print Status Bugs
+# Rework Label Artwork Workflow: Proof-First with Print Matching
 
-## Problem 1: Item count includes the original multi-page parent
+## Current Problem
 
-**Location**: `src/components/labels/order/LabelOrderModal.tsx` line 476
+When proof artwork (24-page PDF) is uploaded, it splits into 24 child items. When the print-ready version of the same file is uploaded later, the split creates **another 24 child items** instead of updating the existing ones. This causes:
+- 48 items displayed instead of 24
+- Quantities doubled (52,000 instead of 26,000)
+- No link between proof and print-ready versions of the same page
 
-The "Label Items" header uses `order.items?.length` (25 items) which includes the original 24-page parent PDF. The parent should be excluded since it was split into 24 child items. The same filtering logic used for `filteredItems` (hide items where `page_count > 1 && !parent_item_id`) should be applied to the count.
+## Proposed Workflow
 
-**Fix**: Filter out split parents before counting:
-```
-const visibleCount = order.items?.filter(item => 
-  !(item.page_count > 1 && !item.parent_item_id)
-).length || 0;
-```
-Display `visibleCount` instead of `order.items?.length`.
+```text
+Phase 1: Upload Proofs + Set Quantities
+  Upload multi-page proof PDF --> splits into 24 items
+  Admin enters quantity per item (e.g., 1000 each)
+  Admin can toggle "Bypass Proof" for repeat orders
 
-## Problem 2: Split PDF function marks children as print-ready
+Phase 2: Upload Print-Ready Artwork  
+  Upload multi-page print PDF --> splits into pages
+  Pages are matched to existing items by source_page_number
+  Matched items get print_pdf_url updated (no new rows created)
+  Unmatched pages create new items (edge case)
 
-**Location**: `supabase/functions/label-split-pdf/index.ts` lines 137-138
-
-When splitting a multi-page PDF, the edge function sets both `artwork_pdf_url` AND `print_pdf_url` to the same URL, with `print_pdf_status: "ready"`. This causes every child item to show green checkmarks for both "Proof" and "Print" even though only proof artwork was uploaded.
-
-The split function should respect the parent item's state. If the parent has no `print_pdf_url` (i.e., only proof was uploaded), children should not get one either.
-
-**Fix**: Check the parent item's print status before setting child fields:
-```
-artwork_pdf_url: pageUrl,
-// Only set print fields if the parent already had print-ready artwork
-print_pdf_url: parentItem.print_pdf_url ? pageUrl : null,
-print_pdf_status: parentItem.print_pdf_url ? "ready" : "pending",
+Individual Page Replacement:
+  Upload single-page PDF on Print-Ready tab
+  Match by filename or manual selection
+  Updates print_pdf_url on existing item
 ```
 
-Additionally, since proof uploads use `artwork_pdf_url` (not `proof_pdf_url`), set `proof_pdf_url` on children when the parent was a proof upload:
+## Technical Changes
+
+### 1. Edge Function: `supabase/functions/label-split-pdf/index.ts`
+
+Add a `mode` parameter ("proof" or "print") to the request body. When `mode === "print"`:
+- After splitting, look for existing child items with `parent_item_id` matching the order's proof parent and matching `source_page_number`
+- Instead of inserting new rows, **update** existing items' `print_pdf_url` and `print_pdf_status`
+- Only create new child items for pages that have no match
+- Return which items were updated vs created
+
+New request shape:
 ```
-proof_pdf_url: parentItem.proof_pdf_url || (!parentItem.print_pdf_url ? pageUrl : null),
+{
+  item_id: string,      // The parent item being split
+  pdf_url: string,
+  order_id: string,
+  mode: "proof" | "print"  // NEW
+}
 ```
 
-## Technical Details
+When `mode === "print"`, the function will:
+1. Split the PDF into pages as before
+2. Query existing child items: `SELECT * FROM label_items WHERE order_id = ? AND parent_item_id IS NOT NULL AND source_page_number IS NOT NULL`
+3. For each split page, find a child item with matching `source_page_number`
+4. If found: UPDATE that item's `print_pdf_url`, `print_pdf_status = 'ready'`
+5. If not found: INSERT new child item (fallback)
 
-### Files to change:
-1. **`src/components/labels/order/LabelOrderModal.tsx`** -- line 476: use filtered count excluding split parents
-2. **`supabase/functions/label-split-pdf/index.ts`** -- lines 136-138: conditionally set print fields based on parent state
+### 2. Upload Handler: `src/components/labels/order/LabelOrderModal.tsx`
 
-### Data fix needed
-The 24 existing child items in the database currently have `print_pdf_url` set and `print_pdf_status = 'ready'` incorrectly. After deploying the edge function fix, you may want to clear these values on existing items so they correctly show as proof-only. This can be done via a one-time SQL update or by re-uploading the file.
+Update `handleDualFilesUploaded` to pass the `mode` based on `artworkTab`:
+- When `artworkTab === 'proof'`: pass `mode: "proof"` to `splitPdf()`
+- When `artworkTab === 'print'`: pass `mode: "print"` to `splitPdf()`
+
+This ensures multi-page PDFs on the Print-Ready tab update existing items rather than creating duplicates.
+
+### 3. VPS Service: `src/services/labels/vpsApiService.ts`
+
+Update the `splitPdf()` function signature to accept and forward the `mode` parameter to the edge function.
+
+### 4. Item Count Fix: `src/hooks/labels/useLabelItems.ts`
+
+The `updateOrderTotalCount` function currently sums quantities from all non-parent items. Since proof and print items are now the **same rows**, this is already correct -- no double-counting will occur after the matching fix. However, add a safeguard: only count items where `print_pdf_url IS NOT NULL` OR items where `proof_pdf_url IS NOT NULL` (deduplicate by ensuring we don't count both proof-only and print-only versions of the same logical item).
+
+### 5. Bypass Proof Toggle: `src/components/labels/order/LabelOrderModal.tsx`
+
+Add a Switch component in the order header area:
+- Label: "Bypass Proof Approval"
+- When toggled ON: sets all items' `proofing_status` to `'approved'` and marks them ready for production
+- Store this as a field on the order or simply batch-update items
+- This is for repeat orders where admin trusts the artwork
+
+### 6. Filtered Item Count (Already Fixed)
+
+The count in the header already excludes split parents. After this fix, proof and print share the same items, so the count will correctly show 24.
+
+## Summary of File Changes
+
+| File | Change |
+|------|--------|
+| `supabase/functions/label-split-pdf/index.ts` | Add `mode` param; match existing items by `source_page_number` when mode is "print" |
+| `src/services/labels/vpsApiService.ts` | Pass `mode` through to edge function |
+| `src/components/labels/order/LabelOrderModal.tsx` | Pass `artworkTab` as mode to split; add Bypass Proof toggle |
+| `src/hooks/labels/useLabelItems.ts` | Safeguard against double-counting (minor) |
+
+## Expected Results
+
+- Upload 24-page proof: 24 items created, each with `proof_pdf_url`
+- Set quantities: e.g., 1000 each = 24,000 total
+- Upload 24-page print-ready: existing 24 items updated with `print_pdf_url`, no new items
+- Item count stays at 24, total stays at 24,000
+- Bypass toggle allows skipping client approval for repeat orders
