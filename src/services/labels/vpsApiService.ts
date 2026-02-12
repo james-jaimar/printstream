@@ -257,10 +257,11 @@ export interface SplitPdfResponse {
 export async function splitPdf(
   itemId: string,
   pdfUrl: string,
-  orderId: string
+  orderId: string,
+  mode: "proof" | "print" = "proof"
 ): Promise<SplitPdfResponse> {
   const { data, error } = await supabase.functions.invoke("label-split-pdf", {
-    body: { item_id: itemId, pdf_url: pdfUrl, order_id: orderId },
+    body: { item_id: itemId, pdf_url: pdfUrl, order_id: orderId, mode },
   });
 
   if (error) {
