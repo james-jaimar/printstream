@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ArrowUp, Layers, Ruler, Clock } from 'lucide-react';
 import type { LabelItem, LabelDieline, SlotAssignment, LabelRunStatus } from '@/types/labels';
 import { cn } from '@/lib/utils';
+import { getSlotConfig } from '@/utils/labels/layoutOptimizer';
 
 // Color palette for items - using semantic tokens where possible
 const ITEM_COLORS = [
@@ -71,8 +72,9 @@ export function RunLayoutDiagram({
   const columnsAcross = dieline.columns_across;
   const rowsAround = dieline.rows_around;
 
-  // Calculate total print qty for this run
-  const labelsPerFrame = columnsAcross * rowsAround;
+  // Calculate total print qty for this run using proper template stacking
+  const slotConfig = getSlotConfig(dieline);
+  const labelsPerFrame = slotConfig.labelsPerFrame;
   const totalPrintQty = frames ? frames * labelsPerFrame : null;
 
   // Calculate how many frames to show (max 3 for preview)
