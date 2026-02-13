@@ -135,25 +135,22 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           
           if (existingChildren.length > 0 && (file.page_count ?? 1) > 1) {
             // Multi-page print-ready PDF with existing proof children
-            // Create a temporary parent item to hold the PDF, then split in 'print' mode
-            const result = await createItem.mutateAsync({
-              order_id: order.id,
-              name: file.name.replace('.pdf', ''),
-              quantity: 1,
-              print_pdf_url: file.url,
-              print_pdf_status: 'ready',
-              print_thumbnail_url: file.thumbnailUrl,
-              width_mm: file.width_mm ?? order.dieline?.label_width_mm,
-              height_mm: file.height_mm ?? order.dieline?.label_height_mm,
-              preflight_status: file.preflightStatus,
-              preflight_report: file.preflightReport,
-              needs_rotation: file.needs_rotation ?? false,
-              page_count: file.page_count ?? 1,
+            // Find the existing proof parent instead of creating a new one
+            const existingParentId = existingChildren[0].parent_item_id!;
+            
+            // Update the existing parent with print-ready PDF info
+            updateItem.mutate({
+              id: existingParentId,
+              updates: {
+                print_pdf_url: file.url,
+                print_thumbnail_url: file.thumbnailUrl,
+                print_pdf_status: 'ready',
+              }
             });
             
             // Split in 'print' mode to update existing children's print_pdf_url
             const pdfUrl = file.url;
-            splitPdf(result.id, pdfUrl, order.id, 'print')
+            splitPdf(existingParentId, pdfUrl, order.id, 'print')
               .then(splitResult => {
                 console.log('Print-ready split complete (matched to proof children):', splitResult);
                 toast.success(`Matched ${splitResult.page_count} print-ready pages to proof items`);
