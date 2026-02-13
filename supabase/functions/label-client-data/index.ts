@@ -63,6 +63,49 @@ async function verifyClientToken(
   }
 }
 
+// Helper to generate signed URLs for item artwork fields
+async function enrichItemsWithSignedUrls(
+  supabase: ReturnType<typeof createClient>,
+  items: any[]
+): Promise<any[]> {
+  if (!items || items.length === 0) return items;
+
+  const urlFields = [
+    "proof_pdf_url",
+    "proof_thumbnail_url",
+    "artwork_pdf_url",
+    "artwork_thumbnail_url",
+  ];
+
+  return Promise.all(
+    items.map(async (item) => {
+      const enriched = { ...item };
+      for (const field of urlFields) {
+        const rawUrl = item[field];
+        if (!rawUrl || typeof rawUrl !== "string") continue;
+        // Extract storage path from full URL or use as-is
+        let storagePath = rawUrl;
+        const bucketMatch = rawUrl.match(
+          /\/storage\/v1\/object\/(?:public|sign)\/label-files\/(.+)/
+        );
+        if (bucketMatch) {
+          storagePath = bucketMatch[1];
+        }
+        // Only sign if it looks like a storage path (not an external URL)
+        if (!storagePath.startsWith("http")) {
+          const { data } = await supabase.storage
+            .from("label-files")
+            .createSignedUrl(storagePath, 3600);
+          if (data?.signedUrl) {
+            enriched[`signed_${field}`] = data.signedUrl;
+          }
+        }
+      }
+      return enriched;
+    })
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -70,9 +113,13 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const jwtSecret = Deno.env.get("JWT_SECRET") || Deno.env.get("SUPABASE_JWT_SECRET");
+  const jwtSecret =
+    Deno.env.get("JWT_SECRET") || Deno.env.get("SUPABASE_JWT_SECRET");
   if (!jwtSecret) {
-    return jsonResponse({ error: "Server configuration error: JWT secret not set" }, 500);
+    return jsonResponse(
+      { error: "Server configuration error: JWT secret not set" },
+      500
+    );
   }
 
   // Extract and verify token
@@ -96,16 +143,21 @@ Deno.serve(async (req) => {
 
   try {
     // GET /orders
-    if (req.method === "GET" && (path === "/orders" || path === "" || path === "/")) {
+    if (
+      req.method === "GET" &&
+      (path === "/orders" || path === "" || path === "/")
+    ) {
       const { data, error } = await supabase
         .from("label_orders")
-        .select(`
+        .select(
+          `
           *,
           dieline:label_dielines(*),
           substrate:label_stock(*),
           items:label_items(*),
           runs:label_runs(*)
-        `)
+        `
+        )
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false });
 
@@ -119,19 +171,27 @@ Deno.serve(async (req) => {
       const orderId = orderMatch[1];
       const { data, error } = await supabase
         .from("label_orders")
-        .select(`
+        .select(
+          `
           *,
           dieline:label_dielines(*),
           substrate:label_stock(*),
           items:label_items(*),
           runs:label_runs(*)
-        `)
+        `
+        )
         .eq("id", orderId)
         .eq("customer_id", customerId)
         .maybeSingle();
 
       if (error) throw error;
       if (!data) return jsonResponse({ error: "Order not found" }, 404);
+
+      // Enrich items with signed URLs
+      if (data.items) {
+        data.items = await enrichItemsWithSignedUrls(supabase, data.items);
+      }
+
       return jsonResponse({ order: data });
     }
 
@@ -160,7 +220,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ approvals: data || [] });
     }
 
-    // POST /approve
+    // POST /approve (legacy - order level)
     if (req.method === "POST" && path === "/approve") {
       const body = await req.json();
       const { order_id, action, comment } = body;
@@ -195,7 +255,8 @@ Deno.serve(async (req) => {
       if (approvalErr) throw approvalErr;
 
       // Update order status
-      const newStatus = action === "approved" ? "approved" : "pending_approval";
+      const newStatus =
+        action === "approved" ? "approved" : "pending_approval";
       const updateData: Record<string, unknown> = { status: newStatus };
       if (action === "approved") {
         updateData.client_approved_at = new Date().toISOString();
@@ -210,6 +271,216 @@ Deno.serve(async (req) => {
       if (orderErr) throw orderErr;
 
       return jsonResponse({ success: true });
+    }
+
+    // POST /approve-items — item-level approval
+    if (req.method === "POST" && path === "/approve-items") {
+      const body = await req.json();
+      const { order_id, item_ids, action, comment } = body;
+
+      if (!order_id || !item_ids?.length || !action) {
+        return jsonResponse(
+          { error: "order_id, item_ids, and action required" },
+          400
+        );
+      }
+      if (action === "rejected" && !comment?.trim()) {
+        return jsonResponse({ error: "Comment required for rejection" }, 400);
+      }
+
+      // Verify order belongs to customer
+      const { data: order } = await supabase
+        .from("label_orders")
+        .select("id, status")
+        .eq("id", order_id)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
+      if (!order) return jsonResponse({ error: "Order not found" }, 404);
+
+      // Update proofing_status on each item
+      const newProofingStatus =
+        action === "approved" ? "approved" : "client_needs_upload";
+      const itemUpdateData: Record<string, unknown> = {
+        proofing_status: newProofingStatus,
+      };
+      if (action === "rejected") {
+        itemUpdateData.artwork_issue = comment;
+      }
+
+      const { error: itemErr } = await supabase
+        .from("label_items")
+        .update(itemUpdateData)
+        .eq("order_id", order_id)
+        .in("id", item_ids);
+
+      if (itemErr) throw itemErr;
+
+      // Insert approval record
+      const { error: approvalErr } = await supabase
+        .from("label_proof_approvals")
+        .insert({
+          order_id,
+          action,
+          comment:
+            comment ||
+            `${action === "approved" ? "Approved" : "Changes requested"} for ${item_ids.length} item(s)`,
+          approved_by: contactId,
+        });
+
+      if (approvalErr) throw approvalErr;
+
+      // Check if ALL items in the order are now approved
+      const { data: allItems } = await supabase
+        .from("label_items")
+        .select("id, proofing_status, print_pdf_url")
+        .eq("order_id", order_id);
+
+      const allApproved =
+        allItems && allItems.every((i) => i.proofing_status === "approved");
+
+      if (allApproved) {
+        // Update order status to approved
+        const { error: orderErr } = await supabase
+          .from("label_orders")
+          .update({
+            status: "approved",
+            client_approved_at: new Date().toISOString(),
+            client_approved_by: contactId,
+          })
+          .eq("id", order_id);
+
+        if (orderErr) throw orderErr;
+
+        // Check if auto-imposition is possible (all items have print-ready PDFs)
+        const allPrintReady =
+          allItems && allItems.every((i) => i.print_pdf_url);
+        if (allPrintReady) {
+          // Trigger imposition for each run
+          const { data: runs } = await supabase
+            .from("label_runs")
+            .select("id")
+            .eq("order_id", order_id)
+            .eq("status", "planned");
+
+          if (runs && runs.length > 0) {
+            // Fire and forget — imposition runs in the background
+            for (const run of runs) {
+              fetch(`${supabaseUrl}/functions/v1/label-impose`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${serviceRoleKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ run_id: run.id }),
+              }).catch((err) =>
+                console.error("Auto-impose error for run", run.id, err)
+              );
+            }
+          }
+        }
+
+        return jsonResponse({ success: true, all_approved: true, auto_impose_triggered: allPrintReady });
+      }
+
+      return jsonResponse({ success: true, all_approved: false });
+    }
+
+    // POST /upload-artwork — client uploads replacement artwork
+    if (req.method === "POST" && path === "/upload-artwork") {
+      const formData = await req.formData();
+      const orderId = formData.get("order_id") as string;
+      const itemId = formData.get("item_id") as string;
+      const file = formData.get("file") as File;
+
+      if (!orderId || !itemId || !file) {
+        return jsonResponse(
+          { error: "order_id, item_id, and file required" },
+          400
+        );
+      }
+
+      // Verify order belongs to customer
+      const { data: order } = await supabase
+        .from("label_orders")
+        .select("id")
+        .eq("id", orderId)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
+      if (!order) return jsonResponse({ error: "Order not found" }, 404);
+
+      // Verify item belongs to order
+      const { data: item } = await supabase
+        .from("label_items")
+        .select("id")
+        .eq("id", itemId)
+        .eq("order_id", orderId)
+        .maybeSingle();
+
+      if (!item) return jsonResponse({ error: "Item not found" }, 404);
+
+      // Upload file to storage
+      const ext = file.name.split(".").pop() || "pdf";
+      const storagePath = `orders/${orderId}/client-uploads/${itemId}-${Date.now()}.${ext}`;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const { error: uploadErr } = await supabase.storage
+        .from("label-files")
+        .upload(storagePath, arrayBuffer, {
+          contentType: file.type || "application/pdf",
+          upsert: true,
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      // Update item: reset to pending, set artwork_source to client
+      const { error: updateErr } = await supabase
+        .from("label_items")
+        .update({
+          artwork_pdf_url: storagePath,
+          artwork_source: "client",
+          proofing_status: "draft",
+          print_pdf_status: "pending",
+          preflight_status: "pending",
+          artwork_issue: null,
+        })
+        .eq("id", itemId);
+
+      if (updateErr) throw updateErr;
+
+      return jsonResponse({ success: true, path: storagePath });
+    }
+
+    // GET /signed-url?path=...
+    if (req.method === "GET" && path === "/signed-url") {
+      const filePath = url.searchParams.get("path");
+      if (!filePath) {
+        return jsonResponse({ error: "path parameter required" }, 400);
+      }
+
+      // Validate the path belongs to an order owned by this customer
+      const orderIdMatch = filePath.match(/orders\/([a-f0-9-]+)\//);
+      if (orderIdMatch) {
+        const fileOrderId = orderIdMatch[1];
+        const { data: order } = await supabase
+          .from("label_orders")
+          .select("id")
+          .eq("id", fileOrderId)
+          .eq("customer_id", customerId)
+          .maybeSingle();
+
+        if (!order)
+          return jsonResponse({ error: "Access denied" }, 403);
+      }
+
+      const { data, error: signErr } = await supabase.storage
+        .from("label-files")
+        .createSignedUrl(filePath, 3600);
+
+      if (signErr) throw signErr;
+
+      return jsonResponse({ signed_url: data?.signedUrl });
     }
 
     return jsonResponse({ error: "Not found" }, 404);

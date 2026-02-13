@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,45 +16,108 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { format } from 'date-fns';
-import { 
-  ArrowLeft, 
-  CheckCircle, 
-  XCircle, 
-  Image as ImageIcon, 
-  FileText, 
-  Loader2
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  FileText,
+  Loader2,
+  CheckCheck,
 } from 'lucide-react';
-import { useClientPortalOrder, useClientPortalApprovals, useClientPortalApprove } from '@/hooks/labels/useClientPortalData';
+import {
+  useClientPortalOrder,
+  useClientPortalApprovals,
+  useClientPortalApproveItems,
+  useClientPortalUploadArtwork,
+} from '@/hooks/labels/useClientPortalData';
+import ClientItemCard from '@/components/labels/portal/ClientItemCard';
+import ApprovalDisclaimer from '@/components/labels/portal/ApprovalDisclaimer';
 
 export default function ClientOrderDetail() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
+
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
-  const [confirmApproveOpen, setConfirmApproveOpen] = useState(false);
+  const [rejectItemIds, setRejectItemIds] = useState<string[]>([]);
+  const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+  const [approveItemIds, setApproveItemIds] = useState<string[]>([]);
 
   const { data: order, isLoading } = useClientPortalOrder(orderId);
   const { data: approvals } = useClientPortalApprovals(orderId);
-  const submitApprovalMutation = useClientPortalApprove();
+  const approveItemsMutation = useClientPortalApproveItems();
+  const uploadMutation = useClientPortalUploadArtwork();
 
-  const handleApprove = async () => {
-    if (!orderId) return;
-    await submitApprovalMutation.mutateAsync({
-      order_id: orderId,
-      action: 'approved',
-    });
-    setConfirmApproveOpen(false);
+  // Items that are awaiting client review
+  const awaitingItems = useMemo(
+    () => order?.items?.filter((i) => i.proofing_status === 'awaiting_client') || [],
+    [order]
+  );
+
+  const allItemsApproved = useMemo(
+    () => order?.items?.length && order.items.every((i) => i.proofing_status === 'approved'),
+    [order]
+  );
+
+  // Toggle selection
+  const handleToggleSelect = (id: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
-  const handleReject = async () => {
-    if (!orderId || !rejectComment.trim()) return;
-    await submitApprovalMutation.mutateAsync({
+  // Select all awaiting items
+  const handleSelectAll = () => {
+    if (selectedItemIds.length === awaitingItems.length) {
+      setSelectedItemIds([]);
+    } else {
+      setSelectedItemIds(awaitingItems.map((i) => i.id));
+    }
+  };
+
+  // Approve flow — opens disclaimer
+  const handleApprove = (itemIds: string[]) => {
+    setApproveItemIds(itemIds);
+    setDisclaimerOpen(true);
+  };
+
+  const handleConfirmApproval = async () => {
+    if (!orderId || approveItemIds.length === 0) return;
+    await approveItemsMutation.mutateAsync({
       order_id: orderId,
+      item_ids: approveItemIds,
+      action: 'approved',
+    });
+    setDisclaimerOpen(false);
+    setApproveItemIds([]);
+    setSelectedItemIds([]);
+  };
+
+  // Reject flow — opens comment dialog
+  const handleReject = (itemIds: string[]) => {
+    setRejectItemIds(itemIds);
+    setRejectDialogOpen(true);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!orderId || rejectItemIds.length === 0 || !rejectComment.trim()) return;
+    await approveItemsMutation.mutateAsync({
+      order_id: orderId,
+      item_ids: rejectItemIds,
       action: 'rejected',
       comment: rejectComment,
     });
     setRejectDialogOpen(false);
     setRejectComment('');
+    setRejectItemIds([]);
+    setSelectedItemIds([]);
+  };
+
+  // Artwork upload
+  const handleUploadArtwork = async (itemId: string, file: File) => {
+    if (!orderId) return;
+    await uploadMutation.mutateAsync({ order_id: orderId, item_id: itemId, file });
   };
 
   if (isLoading) {
@@ -80,8 +143,10 @@ export default function ClientOrderDetail() {
     );
   }
 
-  const canApprove = order.status === 'pending_approval';
-  const isApproved = order.status === 'approved' || order.status === 'in_production' || order.status === 'completed';
+  const isApproved =
+    order.status === 'approved' ||
+    order.status === 'in_production' ||
+    order.status === 'completed';
 
   return (
     <div className="min-h-screen bg-background">
@@ -95,18 +160,6 @@ export default function ClientOrderDetail() {
             <h1 className="font-semibold">{order.order_number}</h1>
             <p className="text-sm text-muted-foreground">{order.customer_name}</p>
           </div>
-          {canApprove && (
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setRejectDialogOpen(true)}>
-                <XCircle className="h-4 w-4 mr-2" />
-                Request Changes
-              </Button>
-              <Button onClick={() => setConfirmApproveOpen(true)}>
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Approve
-              </Button>
-            </div>
-          )}
           {isApproved && (
             <Badge variant="default" className="gap-1">
               <CheckCircle className="h-3 w-3" />
@@ -118,9 +171,55 @@ export default function ClientOrderDetail() {
 
       <main className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Order Details */}
+          {/* Items */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Items */}
+            {/* Bulk actions */}
+            {awaitingItems.length > 0 && (
+              <div className="flex items-center justify-between bg-card border rounded-lg p-3">
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" size="sm" onClick={handleSelectAll}>
+                    {selectedItemIds.length === awaitingItems.length ? 'Deselect All' : 'Select All'}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {awaitingItems.length} item{awaitingItems.length !== 1 ? 's' : ''} awaiting review
+                  </span>
+                </div>
+                {selectedItemIds.length > 0 && (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleReject(selectedItemIds)}
+                    >
+                      <XCircle className="h-3.5 w-3.5 mr-1" />
+                      Request Changes ({selectedItemIds.length})
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleApprove(selectedItemIds)}
+                    >
+                      <CheckCheck className="h-3.5 w-3.5 mr-1" />
+                      Approve ({selectedItemIds.length})
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* All approved banner */}
+            {allItemsApproved && (
+              <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-lg p-4">
+                <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-sm">All items approved</p>
+                  <p className="text-xs text-muted-foreground">
+                    Your order has been approved and is moving into production.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Item cards */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Label Items</CardTitle>
@@ -129,45 +228,18 @@ export default function ClientOrderDetail() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {order.items?.map((item) => (
-                    <div key={item.id} className="flex gap-4 p-4 border rounded-lg">
-                      <div className="w-20 h-20 bg-muted rounded flex items-center justify-center flex-shrink-0">
-                        {item.artwork_thumbnail_url ? (
-                          <img 
-                            src={item.artwork_thumbnail_url} 
-                            alt={item.name}
-                            className="w-full h-full object-cover rounded"
-                          />
-                        ) : (
-                          <ImageIcon className="h-8 w-8 text-muted-foreground" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-medium">{item.name}</h4>
-                          <Badge variant="outline">
-                            {item.quantity.toLocaleString()} labels
-                          </Badge>
-                        </div>
-                        {item.width_mm && item.height_mm && (
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {item.width_mm}mm × {item.height_mm}mm
-                          </p>
-                        )}
-                        {item.artwork_pdf_url && (
-                          <a 
-                            href={item.artwork_pdf_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-sm text-primary hover:underline mt-2"
-                          >
-                            <FileText className="h-3 w-3" />
-                            View Artwork PDF
-                          </a>
-                        )}
-                      </div>
-                    </div>
+                    <ClientItemCard
+                      key={item.id}
+                      item={item as any}
+                      selected={selectedItemIds.includes(item.id)}
+                      onToggleSelect={handleToggleSelect}
+                      onApprove={(id) => handleApprove([id])}
+                      onReject={(id) => handleReject([id])}
+                      onUploadArtwork={handleUploadArtwork}
+                      isUploading={uploadMutation.isPending}
+                    />
                   ))}
                 </div>
               </CardContent>
@@ -193,12 +265,10 @@ export default function ClientOrderDetail() {
                           </Badge>
                         </div>
                         {run.ai_reasoning && (
-                          <p className="text-sm text-muted-foreground">
-                            {run.ai_reasoning}
-                          </p>
+                          <p className="text-sm text-muted-foreground">{run.ai_reasoning}</p>
                         )}
                         {run.imposed_pdf_with_dielines_url && (
-                          <a 
+                          <a
                             href={run.imposed_pdf_with_dielines_url}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -272,7 +342,7 @@ export default function ClientOrderDetail() {
                       {approvals.map((approval: any) => (
                         <div key={approval.id} className="flex gap-3 text-sm">
                           {approval.action === 'approved' ? (
-                            <CheckCircle className="h-4 w-4 text-green-500 mt-0.5" />
+                            <CheckCircle className="h-4 w-4 text-primary mt-0.5" />
                           ) : (
                             <XCircle className="h-4 w-4 text-destructive mt-0.5" />
                           )}
@@ -298,33 +368,14 @@ export default function ClientOrderDetail() {
         </div>
       </main>
 
-      {/* Confirm Approve Dialog */}
-      <Dialog open={confirmApproveOpen} onOpenChange={setConfirmApproveOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Approve Proof</DialogTitle>
-            <DialogDescription>
-              By approving, you confirm that the artwork and layout are correct and authorize production to begin.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmApproveOpen(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleApprove}
-              disabled={submitApprovalMutation.isPending}
-            >
-              {submitApprovalMutation.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <CheckCircle className="h-4 w-4 mr-2" />
-              )}
-              Confirm Approval
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Approval Disclaimer Dialog */}
+      <ApprovalDisclaimer
+        open={disclaimerOpen}
+        onOpenChange={setDisclaimerOpen}
+        onConfirm={handleConfirmApproval}
+        isPending={approveItemsMutation.isPending}
+        itemCount={approveItemIds.length}
+      />
 
       {/* Reject Dialog */}
       <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
@@ -332,7 +383,9 @@ export default function ClientOrderDetail() {
           <DialogHeader>
             <DialogTitle>Request Changes</DialogTitle>
             <DialogDescription>
-              Please describe what changes are needed. Our team will review and update the proof.
+              Please describe what changes are needed for{' '}
+              {rejectItemIds.length} item{rejectItemIds.length !== 1 ? 's' : ''}.
+              Our team will review and update the proof.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -350,12 +403,12 @@ export default function ClientOrderDetail() {
             <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               variant="destructive"
-              onClick={handleReject}
-              disabled={submitApprovalMutation.isPending || !rejectComment.trim()}
+              onClick={handleConfirmReject}
+              disabled={approveItemsMutation.isPending || !rejectComment.trim()}
             >
-              {submitApprovalMutation.isPending ? (
+              {approveItemsMutation.isPending ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <XCircle className="h-4 w-4 mr-2" />
