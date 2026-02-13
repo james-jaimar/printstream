@@ -1,73 +1,65 @@
 
 
-# Print-Ready View Redesign: Proof-Linked Artwork Matching
+# Fix: Print-Ready Upload Flow and Item Filtering
 
-## Problem
-The current Print-Ready tab shows standalone item cards with editable quantity fields. This causes quantities to be "added together" because:
-1. Both views allow editing the same `quantity` field on the same item record
-2. The print-ready view doesn't visually link back to the proof artwork
-3. For multi-page split items, there's no clear way to match print-ready pages to their proof counterparts
+## Problems Identified
+
+1. **Print-ready uploads create new items instead of matching existing proof children**: When uploading a multi-page print-ready PDF, the name-matching logic fails because child items are named "Pizza Picasso Labels - Page 1" while the file is "Pizza Picasso Labels.pdf". So it falls through to creating brand new items.
+
+2. **New print-ready items appear in proof view**: The upload handler sets `artwork_pdf_url` and `artwork_thumbnail_url` for ALL uploads (even print-ready), causing them to match the proof filter (`proof_pdf_url || artwork_pdf_url`).
+
+3. **Split mode detection is wrong**: The split function call passes `artworkTab === 'print' ? 'print' : 'proof'` but by the time the async VPS callback fires, `artworkTab` may not reflect the original upload intent. The `isProof` flag from the file should be used instead.
+
+4. **Print-ready view shows nothing for new uploads**: Items need `print_pdf_url` set to appear in the print view, but this only happens after a secondary update call.
 
 ## Solution
-Redesign the Print-Ready view to use a **side-by-side card layout** (matching the mockup), where:
-- **Left panel**: Proof thumbnail + read-only quantity (this is the single source of truth)
-- **Right panel**: Print-ready artwork thumbnail + status badge
-- Quantity is **only editable in the Proof tab** -- the Print-Ready tab displays it as read-only
-- Items are matched by their database relationship (same `label_item` record holds both `proof_pdf_url` and `print_pdf_url`)
 
-## Changes
+### 1. Fix `handleDualFilesUploaded` in `LabelOrderModal.tsx`
 
-### 1. New Component: `PrintReadyItemCard.tsx`
-**File**: `src/components/labels/items/PrintReadyItemCard.tsx`
+**For print-ready uploads (`!file.isProof`):**
+- Before creating a new item, search for existing child items (from proof split) that match by normalized parent name
+- If a multi-page print-ready PDF is uploaded and matching proof children exist, skip item creation entirely -- just store the PDF and trigger `label-split-pdf` in `print` mode to update the existing children's `print_pdf_url`
+- For single-page print-ready files, try to match against existing proof items more broadly (fuzzy name match or by position/order)
 
-A new card component specifically for the print-ready view with a horizontal two-column layout:
-- **Left column** (~40% width): Proof thumbnail (from `proof_pdf_url` / `proof_thumbnail_url`), item name, read-only quantity display, dimensions
-- **Right column** (~60% width): Print-ready thumbnail (from `print_pdf_url` / `artwork_thumbnail_url`), print status badge, prep actions (auto-crop, use-as-print)
-- No editable quantity input -- qty is shown as a static label sourced from the proof
+**For all uploads:**
+- Set `proof_pdf_url` (not `artwork_pdf_url`) when `isProof` is true
+- Set `print_pdf_url` directly when `isProof` is false, and do NOT set `artwork_pdf_url`
+- This ensures items appear in the correct filtered view immediately
 
-### 2. Update `LabelItemsGrid.tsx`
-**File**: `src/components/labels/items/LabelItemsGrid.tsx`
+### 2. Fix split mode in VPS callback
 
-- Pass `viewMode` down to determine which card component to render
-- When `viewMode === 'print'`: render `PrintReadyItemCard` instead of `LabelItemCard`
-- When `viewMode === 'proof'`: render existing `LabelItemCard` (no changes)
-- Adjust grid layout: print-ready view uses wider cards (2-3 columns instead of 5-6) to accommodate the side-by-side layout
+- Capture the `isProof` boolean from the file in the closure, and pass `isProof ? 'proof' : 'print'` to `splitPdf()` instead of reading `artworkTab` state
 
-### 3. Update `LabelItemCard.tsx` (minor)
-**File**: `src/components/labels/items/LabelItemCard.tsx`
+### 3. Update `filteredItems` logic
 
-- No structural changes needed -- this component remains the proof-view card
-- Quantity remains fully editable here as the single source of truth
+- Proof view: show items that have `proof_pdf_url` OR (`artwork_pdf_url` AND no `print_pdf_url`)
+- Print-ready view: show ALL visible items (not just those with `print_pdf_url`), since the side-by-side card handles showing "no print file" state. This way admins can see which proofed items still need print-ready artwork.
 
-## Technical Details
+### 4. Fix `CreateLabelItemInput` type
 
-### PrintReadyItemCard Layout
-```text
-+------------------------------------------+
-|  PROOF (left)      |  PRINT-READY (right) |
-|  [proof thumb]     |  [print thumb]       |
-|                    |                      |
-|  Item Name         |  Status: Ready       |
-|  Qty: 3000 (ro)    |  [Auto-Crop] [Use]   |
-|  120.5 x 85.0mm    |                      |
-+------------------------------------------+
-```
+- Ensure `proof_pdf_url` and `print_pdf_url` are accepted fields in the create input type so we can set them directly on creation
 
-### Grid Columns by View Mode
-- **Proof view**: 2-6 columns (existing, narrow vertical cards)
-- **Print-ready view**: 1-3 columns (wider horizontal cards for side-by-side layout)
+## Files to Change
 
-### Data Flow
-- Both views read from the same `label_item` record
-- Quantity is only written from the Proof view via `onQuantityChange`
-- Print-ready view reads `item.quantity` as display-only
-- Proof thumbnail comes from `item.proof_thumbnail_url` or `item.proof_pdf_url`
-- Print-ready thumbnail comes from `item.artwork_thumbnail_url` or `item.print_pdf_url`
-
-## Files Summary
-
-| File | Action |
+| File | Change |
 |------|--------|
-| `src/components/labels/items/PrintReadyItemCard.tsx` | Create -- new horizontal card for print-ready view |
-| `src/components/labels/items/LabelItemsGrid.tsx` | Edit -- conditionally render PrintReadyItemCard when viewMode is 'print', adjust grid columns |
+| `src/components/labels/order/LabelOrderModal.tsx` | Fix upload handler to properly route proof vs print-ready files; fix split mode; update filteredItems logic |
+| `src/types/labels.ts` | Add `proof_pdf_url` and `print_pdf_url` to `CreateLabelItemInput` if missing |
+| `src/hooks/labels/useLabelItems.ts` | Support `proof_pdf_url` / `print_pdf_url` in create mutation insert |
+
+## Technical Detail: Print-Ready Multi-Page Upload Flow
+
+```text
+Upload print-ready multi-page PDF
+  |
+  v
+Check: do proof children exist for this order with matching parent name?
+  |
+  +-- YES --> Store PDF, call splitPdf(parentId, url, orderId, 'print')
+  |           --> Edge function matches pages to existing children by source_page_number
+  |           --> Updates print_pdf_url on each child
+  |
+  +-- NO  --> Create new parent item with print_pdf_url set
+              --> Split in 'print' mode creates children with print_pdf_url
+```
 
