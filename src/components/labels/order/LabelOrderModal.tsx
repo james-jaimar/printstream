@@ -129,9 +129,29 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           // PRINT-READY UPLOAD: Try to match existing proof items first
           
           // Check for existing child items (from proof split) that match by parent name
-          const existingChildren = order.items?.filter(item => 
+          let existingChildren = order.items?.filter(item => 
             item.parent_item_id && normalizeItemName(item.name.replace(/ - Page \d+$/i, '')) === normalizedFileName
           ) || [];
+          
+          // Fallback: if no exact name match for a multi-page PDF, try matching by page count
+          if (existingChildren.length === 0 && (file.page_count ?? 1) > 1) {
+            const parentIds = [...new Set(
+              (order.items || [])
+                .filter(i => i.parent_item_id)
+                .map(i => i.parent_item_id!)
+            )];
+            const parentsWithMatchingPageCount = parentIds.filter(pid => {
+              const childCount = (order.items || []).filter(i => i.parent_item_id === pid).length;
+              return childCount === (file.page_count ?? 1);
+            });
+            if (parentsWithMatchingPageCount.length === 1) {
+              const matchedParentId = parentsWithMatchingPageCount[0];
+              existingChildren = (order.items || []).filter(
+                i => i.parent_item_id === matchedParentId
+              );
+              console.log('Fallback match: matched print-ready PDF by page count to parent', matchedParentId);
+            }
+          }
           
           if (existingChildren.length > 0 && (file.page_count ?? 1) > 1) {
             // Multi-page print-ready PDF with existing proof children
