@@ -22,6 +22,7 @@ import {
   useDeleteLabelDieline 
 } from '@/hooks/labels/useLabelDielines';
 import { DielineFormDialog, DielineCard, DielineListRow } from '@/components/labels/dielines';
+import { DielineFinder } from '@/components/labels/dielines/DielineFinder';
 import type { LabelDieline, CreateLabelDielineInput } from '@/types/labels';
 import { toast } from 'sonner';
 
@@ -137,10 +138,13 @@ export default function LabelsDielines() {
             Standard label layouts and die templates ({activeDielines.length} active)
           </p>
         </div>
-        <Button onClick={() => { setEditingDieline(null); setIsFormOpen(true); }}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Dieline
-        </Button>
+        <div className="flex items-center gap-2">
+          <DielineFinder dielines={activeDielines} />
+          <Button onClick={() => { setEditingDieline(null); setIsFormOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Dieline
+          </Button>
+        </div>
       </div>
 
       {/* Search + View Toggle */}
