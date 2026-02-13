@@ -300,7 +300,7 @@ Deno.serve(async (req) => {
               Authorization: `Bearer ${resendKey}`,
             },
             body: JSON.stringify({
-              from: "PrintStream <no-reply@printstream.co.za>",
+              from: "Proofing at Impress Web <proofing@printstream.impressweb.co.za>",
               to: [contact.email],
               subject: "Reset Your Client Portal Password",
               html: `
