@@ -96,7 +96,7 @@ import BackfillPaperSpecs from "@/pages/BackfillPaperSpecs";
 // Labels Division imports
 import LabelsLayout from "@/components/labels/LabelsLayout";
 import { LabelsHome, LabelsOrders, LabelsOrderDetail, LabelsDielines, LabelsStock, LabelsSchedule, LabelsSettings, LabelsReporting, LabelsCustomers } from "@/pages/labels";
-import { ClientPortalLogin, ClientPortalDashboard, ClientOrderDetail } from "@/pages/labels/portal";
+import { ClientPortalLogin, ClientPortalDashboard, ClientOrderDetail, ClientResetPassword, ClientAccount } from "@/pages/labels/portal";
 import { ClientAuthProvider } from "@/hooks/labels/useClientAuth";
 import ClientPortalGuard from "@/components/labels/portal/ClientPortalGuard";
 
@@ -277,8 +277,21 @@ function App() {
                     <ClientPortalGuard>
                       <ClientOrderDetail />
                     </ClientPortalGuard>
+                </ClientAuthProvider>
+                } />
+                <Route path="/labels/portal/reset-password" element={
+                  <ClientAuthProvider>
+                    <ClientResetPassword />
                   </ClientAuthProvider>
                 } />
+                <Route path="/labels/portal/account" element={
+                  <ClientAuthProvider>
+                    <ClientPortalGuard>
+                      <ClientAccount />
+                    </ClientPortalGuard>
+                  </ClientAuthProvider>
+                } />
+                
                 
                 {/* Schedule Board standalone route */}
                 <Route path="/schedule-board" element={

@@ -17,6 +17,7 @@ interface ClientAuthState {
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const ClientAuthContext = createContext<ClientAuthState>({
@@ -26,6 +27,7 @@ const ClientAuthContext = createContext<ClientAuthState>({
   token: null,
   login: async () => {},
   logout: () => {},
+  changePassword: async () => {},
 });
 
 const TOKEN_KEY = 'label_client_token';
@@ -46,7 +48,6 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
       return;
     }
 
-    // Verify token is still valid
     supabase.functions
       .invoke('label-client-auth/verify', {
         body: { token: stored },
@@ -61,7 +62,6 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
             try {
               setContact(JSON.parse(storedContact));
             } catch {
-              // If contact parse fails, use payload from verify
               const p = data.payload;
               setContact({
                 id: p.contact_id,
@@ -108,6 +108,20 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
     localStorage.removeItem(CONTACT_KEY);
   }, []);
 
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const { data, error } = await supabase.functions.invoke('label-client-auth/change-password', {
+      body: { current_password: currentPassword, new_password: newPassword },
+      headers: { 'x-client-token': token || '' },
+    });
+
+    if (error) {
+      throw new Error(data?.error || 'Failed to change password');
+    }
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+  }, [token]);
+
   return (
     <ClientAuthContext.Provider
       value={{
@@ -117,6 +131,7 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
         token,
         login,
         logout,
+        changePassword,
       }}
     >
       {children}

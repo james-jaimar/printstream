@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
-import { Package, Eye, Clock, CheckCircle, AlertCircle, LogOut, Boxes } from 'lucide-react';
+import { Package, Eye, Clock, CheckCircle, AlertCircle, LogOut, Boxes, User } from 'lucide-react';
 import { useClientAuth } from '@/hooks/labels/useClientAuth';
 import { useClientPortalOrders } from '@/hooks/labels/useClientPortalData';
 import type { LabelOrderStatus } from '@/types/labels';
@@ -45,10 +45,16 @@ export default function ClientPortalDashboard() {
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleLogout}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Sign Out
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/labels/portal/account')}>
+              <User className="h-4 w-4 mr-2" />
+              Account
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
       </header>
 
