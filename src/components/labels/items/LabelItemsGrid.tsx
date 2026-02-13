@@ -1,4 +1,5 @@
 import { LabelItemCard } from './LabelItemCard';
+import { PrintReadyItemCard } from './PrintReadyItemCard';
 import { useUpdateLabelItem, useDeleteLabelItem } from '@/hooks/labels/useLabelItems';
 import type { LabelItem, PreflightReport } from '@/types/labels';
 
@@ -111,17 +112,22 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
     return (a.item_number ?? 0) - (b.item_number ?? 0);
   });
 
+  const gridClassName = viewMode === 'print'
+    ? "grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4"
+    : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4";
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+    <div className={gridClassName}>
       {sortedItems.map((item) => {
+        if (viewMode === 'print') {
+          return <PrintReadyItemCard key={item.id} item={item} />;
+        }
+
         const analysis = itemAnalyses[item.id];
         const validationStatus = getValidationStatus(item, analysis);
         const validationIssues = getValidationIssues(item, analysis);
         
-        // Choose thumbnail based on view mode
-        const thumbnailUrl = viewMode === 'print'
-          ? analysis?.thumbnail_url || item.artwork_thumbnail_url || undefined
-          : analysis?.thumbnail_url || item.proof_thumbnail_url || item.artwork_thumbnail_url || undefined;
+        const thumbnailUrl = analysis?.thumbnail_url || item.proof_thumbnail_url || item.artwork_thumbnail_url || undefined;
         
         return (
           <LabelItemCard
