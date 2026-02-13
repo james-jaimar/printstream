@@ -81,6 +81,17 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
   const updateItem = useUpdateLabelItem();
   const deleteItem = useDeleteLabelItem();
 
+  const handleDeletePrintFile = (itemId: string) => {
+    updateItem.mutate({
+      id: itemId,
+      updates: {
+        print_pdf_url: null,
+        print_thumbnail_url: null,
+        print_pdf_status: 'pending',
+      } as any,
+    });
+  };
+
   if (items.length === 0) {
     return null;
   }
@@ -120,7 +131,13 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
     <div className={gridClassName}>
       {sortedItems.map((item) => {
         if (viewMode === 'print') {
-          return <PrintReadyItemCard key={item.id} item={item} />;
+          return (
+            <PrintReadyItemCard
+              key={item.id}
+              item={item}
+              onDeletePrintFile={handleDeletePrintFile}
+            />
+          );
         }
 
         const analysis = itemAnalyses[item.id];

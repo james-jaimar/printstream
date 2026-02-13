@@ -179,6 +179,7 @@ export interface LabelItem {
   proof_pdf_url: string | null;
   proof_thumbnail_url: string | null;
   print_pdf_url: string | null;
+  print_thumbnail_url: string | null;
   print_pdf_status: PrintPdfStatus;
   requires_crop: boolean;
   crop_amount_mm: CropAmountMm | null;
@@ -338,6 +339,7 @@ export interface CreateLabelItemInput {
   proof_pdf_url?: string | null;
   proof_thumbnail_url?: string | null;
   print_pdf_url?: string | null;
+  print_thumbnail_url?: string | null;
   print_pdf_status?: PrintPdfStatus;
   width_mm?: number;
   height_mm?: number;

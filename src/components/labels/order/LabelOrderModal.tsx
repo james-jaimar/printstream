@@ -142,7 +142,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
               quantity: 1,
               print_pdf_url: file.url,
               print_pdf_status: 'ready',
-              artwork_thumbnail_url: file.thumbnailUrl,
+              print_thumbnail_url: file.thumbnailUrl,
               width_mm: file.width_mm ?? order.dieline?.label_width_mm,
               height_mm: file.height_mm ?? order.dieline?.label_height_mm,
               preflight_status: file.preflightStatus,
@@ -191,9 +191,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           quantity: 1,
           // Route to correct URL fields based on upload type
           ...(isProof 
-            ? { proof_pdf_url: file.url, artwork_pdf_url: file.url }
-            : { print_pdf_url: file.url, print_pdf_status: 'ready' as const }),
-          artwork_thumbnail_url: file.thumbnailUrl,
+            ? { proof_pdf_url: file.url, artwork_pdf_url: file.url, artwork_thumbnail_url: file.thumbnailUrl }
+            : { print_pdf_url: file.url, print_pdf_status: 'ready' as const, print_thumbnail_url: file.thumbnailUrl }),
           width_mm: file.width_mm ?? order.dieline?.label_width_mm,
           height_mm: file.height_mm ?? order.dieline?.label_height_mm,
           preflight_status: file.preflightStatus,
@@ -276,22 +275,23 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     refetch().then(async ({ data: refetchedOrder }) => {
                       if (!refetchedOrder?.items) return;
                       const childItems = refetchedOrder.items.filter(
-                        (i: { parent_item_id: string | null; artwork_thumbnail_url: string | null }) => 
-                          i.parent_item_id === result.id && !i.artwork_thumbnail_url
+                        (i: { parent_item_id: string | null; artwork_thumbnail_url: string | null; print_thumbnail_url: string | null }) => 
+                          i.parent_item_id === result.id && (uploadIsProof ? !i.artwork_thumbnail_url : !i.print_thumbnail_url)
                       );
                       for (const child of childItems) {
-                        const childPdfUrl = child.artwork_pdf_url || child.print_pdf_url;
+                        const childPdfUrl = uploadIsProof ? (child.artwork_pdf_url || child.proof_pdf_url) : child.print_pdf_url;
                         if (!childPdfUrl) continue;
                         try {
                           const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
                           const dataUrl = await generatePdfThumbnailFromUrl(childPdfUrl, 300);
                           const blob = dataUrlToBlob(dataUrl);
-                          const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}.png`;
+                          const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}${uploadIsProof ? '' : '-print'}.png`;
                           const { error: upErr } = await supabase.storage
                             .from('label-files')
                             .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
                           if (!upErr) {
-                            updateItem.mutate({ id: child.id, updates: { artwork_thumbnail_url: thumbPath } });
+                            const thumbField = uploadIsProof ? 'artwork_thumbnail_url' : 'print_thumbnail_url';
+                            updateItem.mutate({ id: child.id, updates: { [thumbField]: thumbPath } });
                           }
                         } catch (thumbErr) {
                           console.warn('Thumbnail generation failed for child:', child.id, thumbErr);
