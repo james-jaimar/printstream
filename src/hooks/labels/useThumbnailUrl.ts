@@ -1,10 +1,26 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+// In-memory cache for signed URLs
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const CACHE_TTL = 50 * 60 * 1000; // 50 minutes (URLs expire at 60 min)
+
+function getCachedUrl(path: string): string | null {
+  const entry = signedUrlCache.get(path);
+  if (entry && Date.now() < entry.expiresAt) {
+    return entry.url;
+  }
+  if (entry) signedUrlCache.delete(path);
+  return null;
+}
+
+function setCachedUrl(path: string, url: string): void {
+  signedUrlCache.set(path, { url, expiresAt: Date.now() + CACHE_TTL });
+}
+
 /**
  * Hook to generate a signed URL for a thumbnail stored in Supabase Storage.
- * If the URL is already a full URL (http/https or data:), returns it as-is.
- * Otherwise, treats it as a storage path and generates a signed URL.
+ * Caches signed URLs in memory to avoid repeated requests.
  */
 export function useThumbnailUrl(thumbnailPath: string | null | undefined): {
   url: string | null;
@@ -22,14 +38,20 @@ export function useThumbnailUrl(thumbnailPath: string | null | undefined): {
       return;
     }
 
-    // If it's already a full URL or data URL, use it directly
     if (thumbnailPath.startsWith('http') || thumbnailPath.startsWith('data:')) {
       setUrl(thumbnailPath);
       setIsLoading(false);
       return;
     }
 
-    // Otherwise, generate a signed URL
+    // Check cache first
+    const cached = getCachedUrl(thumbnailPath);
+    if (cached) {
+      setUrl(cached);
+      setIsLoading(false);
+      return;
+    }
+
     const generateSignedUrl = async () => {
       setIsLoading(true);
       setError(null);
@@ -37,13 +59,14 @@ export function useThumbnailUrl(thumbnailPath: string | null | undefined): {
       try {
         const { data, error: signError } = await supabase.storage
           .from('label-files')
-          .createSignedUrl(thumbnailPath, 60 * 60); // 1 hour expiry
+          .createSignedUrl(thumbnailPath, 60 * 60);
 
         if (signError) {
           console.error('Failed to generate signed URL:', signError);
           setError(signError.message);
           setUrl(null);
         } else {
+          setCachedUrl(thumbnailPath, data.signedUrl);
           setUrl(data.signedUrl);
         }
       } catch (err) {
@@ -68,10 +91,13 @@ export async function generateSignedUrl(
   storagePath: string,
   expiresIn: number = 3600
 ): Promise<string | null> {
-  // If it's already a full URL or data URL, return as-is
   if (storagePath.startsWith('http') || storagePath.startsWith('data:')) {
     return storagePath;
   }
+
+  // Check cache first
+  const cached = getCachedUrl(storagePath);
+  if (cached) return cached;
 
   try {
     const { data, error } = await supabase.storage
@@ -83,6 +109,7 @@ export async function generateSignedUrl(
       return null;
     }
 
+    setCachedUrl(storagePath, data.signedUrl);
     return data.signedUrl;
   } catch (err) {
     console.error('Error generating signed URL:', err);
