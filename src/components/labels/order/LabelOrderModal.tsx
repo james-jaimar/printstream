@@ -89,9 +89,11 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     }
   }, [order?.items, artworkTab]);
 
-  // Print-ready items only for AI Layout Optimizer
-  const printReadyItems = useMemo(() => {
-    return (order?.items || []).filter(item => item.print_pdf_url);
+  // Items with any artwork (proof or print-ready) for AI Layout Optimizer
+  const layoutEligibleItems = useMemo(() => {
+    return (order?.items || []).filter(item => 
+      item.print_pdf_url || item.proof_pdf_url || item.artwork_pdf_url
+    );
   }, [order?.items]);
 
   // Handler for dual upload zone (supports both proof and print-ready artwork)
@@ -393,9 +395,9 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   {/* AI Layout Dialog */}
                   <Dialog open={layoutDialogOpen} onOpenChange={setLayoutDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button size="sm" disabled={printReadyItems.length === 0 || !order.dieline}>
+                      <Button size="sm" disabled={layoutEligibleItems.length === 0 || !order.dieline}>
                         <Sparkles className="h-4 w-4 mr-2" />
-                        AI Layout ({printReadyItems.length})
+                        AI Layout ({layoutEligibleItems.length})
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto">
@@ -404,7 +406,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       </DialogHeader>
                       <LayoutOptimizer
                         orderId={order.id}
-                        items={printReadyItems}
+                        items={layoutEligibleItems}
                         dieline={order.dieline || null}
                         onLayoutApplied={() => {
                           setLayoutDialogOpen(false);
