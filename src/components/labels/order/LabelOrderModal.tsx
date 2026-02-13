@@ -92,7 +92,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   // Items with any artwork (proof or print-ready) for AI Layout Optimizer
   const layoutEligibleItems = useMemo(() => {
     return (order?.items || []).filter(item => 
-      item.print_pdf_url || item.proof_pdf_url || item.artwork_pdf_url
+      (item.print_pdf_url || item.proof_pdf_url || item.artwork_pdf_url) &&
+      !(item.page_count > 1 && !item.parent_item_id)
     );
   }, [order?.items]);
 
