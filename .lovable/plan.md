@@ -1,49 +1,62 @@
 
 
-# Fix Print-Ready Artwork Display and Add CRUD Controls
+# Fix: Generate Print-Ready Thumbnails After Matched Split
 
-## Problems
+## Root Cause
 
-1. **Print-ready thumbnails show proof artwork instead of actual print-ready artwork**: The system stores all thumbnails in a single `artwork_thumbnail_url` field. When proof artwork is uploaded first, this field gets the proof thumbnail. When print-ready artwork is later matched to the same item, no separate print thumbnail is generated or stored -- so the card keeps showing the old proof image.
+When a print-ready multi-page PDF is uploaded and matched to existing proof children (line 136-163 in `LabelOrderModal.tsx`), the edge function correctly splits the PDF and updates each child's `print_pdf_url`. However, **no thumbnails are generated** for these print-ready pages. Since `print_thumbnail_url` remains empty on all child items, the `PrintReadyItemCard` falls back to `proof_thumbnail_url` / `artwork_thumbnail_url` -- which contains the proof artwork with dieline overlays.
 
-2. **No edit/delete actions on print-ready cards**: The Print-Ready view cards are completely read-only. Admins cannot delete a print-ready file or replace it with a corrected version.
+The thumbnail generation logic that handles this correctly already exists in the "new item" code path (lines 272-296), but it is never called from the "matched children" path.
 
-## Solution
+## Fix
 
-### 1. Add `print_thumbnail_url` column to the database
+After the print-ready split completes and `refetch()` returns updated data, iterate over the matched children and generate a print-ready thumbnail for each one that has a `print_pdf_url` but no `print_thumbnail_url`.
 
-A new column on `label_items` to store print-ready artwork thumbnails separately from proof thumbnails.
+## Technical Details
 
-### 2. Update type definitions
+### File: `src/components/labels/order/LabelOrderModal.tsx`
 
-Add `print_thumbnail_url` to the `LabelItem` interface and `CreateLabelItemInput` in `src/types/labels.ts`.
+**Lines ~153-158** -- After `splitPdf` resolves and `refetch()` completes, add thumbnail generation:
 
-### 3. Fix thumbnail generation for print-ready uploads
+```text
+splitPdf(existingParentId, pdfUrl, order.id, 'print')
+  .then(splitResult => {
+    toast.success(`Matched ${splitResult.page_count} print-ready pages`);
+    refetch().then(async ({ data: refetchedOrder }) => {
+      if (!refetchedOrder?.items) return;
+      // Find children that now have print_pdf_url but no print_thumbnail_url
+      const childrenNeedingThumbs = refetchedOrder.items.filter(
+        i => i.parent_item_id === existingParentId
+          && i.print_pdf_url
+          && !i.print_thumbnail_url
+      );
+      for (const child of childrenNeedingThumbs) {
+        try {
+          // Generate thumbnail from the print-ready PDF (not the proof)
+          const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import(...);
+          const dataUrl = await generatePdfThumbnailFromUrl(child.print_pdf_url, 300);
+          const blob = dataUrlToBlob(dataUrl);
+          const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}-print.png`;
+          const { error } = await supabase.storage
+            .from('label-files')
+            .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
+          if (!error) {
+            updateItem.mutate({
+              id: child.id,
+              updates: { print_thumbnail_url: thumbPath }
+            });
+          }
+        } catch (err) {
+          console.warn('Print thumbnail gen failed for child:', child.id, err);
+        }
+      }
+    });
+  })
+```
 
-In `LabelOrderModal.tsx`, when generating thumbnails for print-ready child items after a split:
-- Store the thumbnail in `print_thumbnail_url` (not `artwork_thumbnail_url`)
-- For single-page print-ready matches, generate and store a print thumbnail too
+This reuses the exact same thumbnail generation pattern already used in the new-item split path (lines 278-296), but targets `print_pdf_url` as the source and writes to `print_thumbnail_url`.
 
-### 4. Fix PrintReadyItemCard thumbnail resolution
+### No other files need changes
 
-In `PrintReadyItemCard.tsx`, change the print thumbnail path to use a dedicated `print_thumbnail_url` field first, falling back to proof thumbnail only if no print thumbnail exists.
-
-### 5. Add CRUD controls to PrintReadyItemCard
-
-Add the following interactive controls to the print-ready side of the card:
-- **Delete** button (trash icon) to remove the print-ready file (clears `print_pdf_url` and `print_thumbnail_url`, resets `print_pdf_status` to `pending`)
-- **Replace** button (upload icon) to upload a replacement print-ready PDF
-
-This requires passing `onDeletePrintFile` and `onReplacePrintFile` callbacks from `LabelItemsGrid` into `PrintReadyItemCard`.
-
-## Files to Change
-
-| File | Change |
-|------|--------|
-| Database migration | Add `print_thumbnail_url TEXT` column to `label_items` |
-| `src/types/labels.ts` | Add `print_thumbnail_url` to `LabelItem` and `CreateLabelItemInput` |
-| `src/hooks/labels/useLabelItems.ts` | Include `print_thumbnail_url` in create mutation |
-| `src/components/labels/items/PrintReadyItemCard.tsx` | Use `print_thumbnail_url` for the print side; add delete and replace buttons |
-| `src/components/labels/items/LabelItemsGrid.tsx` | Wire up delete/replace handlers and pass them to `PrintReadyItemCard` |
-| `src/components/labels/order/LabelOrderModal.tsx` | Store print thumbnails in `print_thumbnail_url`; generate thumbnails for print-ready splits into the correct field |
+The `PrintReadyItemCard` already correctly prioritizes `print_thumbnail_url` over proof fallbacks (line 33-34). Once the thumbnails are actually generated and stored, the cards will display the correct clean print-ready artwork.
 
