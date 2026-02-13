@@ -77,6 +77,7 @@ export function useCreateLabelItem() {
         proof_pdf_url: input.proof_pdf_url,
         proof_thumbnail_url: input.proof_thumbnail_url,
         print_pdf_url: input.print_pdf_url,
+        print_thumbnail_url: input.print_thumbnail_url,
         print_pdf_status: input.print_pdf_status || null,
         width_mm: input.width_mm,
         height_mm: input.height_mm,

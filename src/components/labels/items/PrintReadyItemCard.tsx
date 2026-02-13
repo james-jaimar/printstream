@@ -1,5 +1,6 @@
-import { FileText, CheckCircle, XCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { FileText, CheckCircle, XCircle, Loader2, AlertTriangle, Trash2, Upload } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useThumbnailUrl } from '@/hooks/labels/useThumbnailUrl';
@@ -7,6 +8,8 @@ import type { LabelItem, PrintPdfStatus } from '@/types/labels';
 
 interface PrintReadyItemCardProps {
   item: LabelItem;
+  onDeletePrintFile?: (itemId: string) => void;
+  onReplacePrintFile?: (itemId: string) => void;
 }
 
 const printStatusConfig: Record<PrintPdfStatus, {
@@ -21,19 +24,20 @@ const printStatusConfig: Record<PrintPdfStatus, {
   needs_crop: { icon: AlertTriangle, color: 'text-amber-600', bgColor: 'bg-amber-100', label: 'Needs Crop' },
 };
 
-export function PrintReadyItemCard({ item }: PrintReadyItemCardProps) {
+export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile }: PrintReadyItemCardProps) {
   // Proof thumbnail: prefer proof_thumbnail_url, fall back to artwork_thumbnail_url
   const proofThumbPath = item.proof_thumbnail_url || item.artwork_thumbnail_url || null;
   const { url: proofThumbUrl, isLoading: proofLoading } = useThumbnailUrl(proofThumbPath);
 
-  // Print-ready thumbnail: prefer artwork_thumbnail_url when print is ready, else null
+  // Print-ready thumbnail: prefer print_thumbnail_url, fall back to proof thumbnail
   const printThumbPath = item.print_pdf_url
-    ? (item.artwork_thumbnail_url || item.proof_thumbnail_url || null)
+    ? (item.print_thumbnail_url || item.proof_thumbnail_url || item.artwork_thumbnail_url || null)
     : null;
   const { url: printThumbUrl, isLoading: printLoading } = useThumbnailUrl(printThumbPath);
 
   const printStatus = printStatusConfig[item.print_pdf_status || 'pending'];
   const PrintStatusIcon = printStatus.icon;
+  const hasPrintFile = !!item.print_pdf_url;
 
   return (
     <Card className="overflow-hidden">
@@ -94,12 +98,39 @@ export function PrintReadyItemCard({ item }: PrintReadyItemCardProps) {
                 {printStatus.label}
               </Badge>
             </div>
-            <div className="p-2">
-              {item.source_page_number && (
-                <p className="text-[10px] text-muted-foreground">
-                  Page {item.source_page_number}
-                </p>
-              )}
+            <div className="p-2 flex items-center justify-between">
+              <div>
+                {item.source_page_number && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Page {item.source_page_number}
+                  </p>
+                )}
+              </div>
+              {/* CRUD Controls */}
+              <div className="flex items-center gap-1">
+                {onReplacePrintFile && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    title="Replace print file"
+                    onClick={() => onReplacePrintFile(item.id)}
+                  >
+                    <Upload className="h-3 w-3" />
+                  </Button>
+                )}
+                {hasPrintFile && onDeletePrintFile && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-destructive hover:text-destructive"
+                    title="Remove print file"
+                    onClick={() => onDeletePrintFile(item.id)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </div>

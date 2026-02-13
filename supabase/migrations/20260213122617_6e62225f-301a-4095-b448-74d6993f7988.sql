@@ -1,0 +1,1 @@
+ALTER TABLE public.label_items ADD COLUMN print_thumbnail_url TEXT;

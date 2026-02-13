@@ -1463,6 +1463,7 @@ export type Database = {
           preflight_status: string
           print_pdf_status: string | null
           print_pdf_url: string | null
+          print_thumbnail_url: string | null
           proof_pdf_url: string | null
           proof_thumbnail_url: string | null
           proofing_status: string | null
@@ -1495,6 +1496,7 @@ export type Database = {
           preflight_status?: string
           print_pdf_status?: string | null
           print_pdf_url?: string | null
+          print_thumbnail_url?: string | null
           proof_pdf_url?: string | null
           proof_thumbnail_url?: string | null
           proofing_status?: string | null
@@ -1527,6 +1529,7 @@ export type Database = {
           preflight_status?: string
           print_pdf_status?: string | null
           print_pdf_url?: string | null
+          print_thumbnail_url?: string | null
           proof_pdf_url?: string | null
           proof_thumbnail_url?: string | null
           proofing_status?: string | null
