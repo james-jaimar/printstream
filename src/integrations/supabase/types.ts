@@ -1215,6 +1215,8 @@ export type Database = {
           is_active: boolean
           last_login_at: string | null
           password_hash: string
+          password_reset_expires_at: string | null
+          password_reset_token: string | null
           updated_at: string
         }
         Insert: {
@@ -1224,6 +1226,8 @@ export type Database = {
           is_active?: boolean
           last_login_at?: string | null
           password_hash: string
+          password_reset_expires_at?: string | null
+          password_reset_token?: string | null
           updated_at?: string
         }
         Update: {
@@ -1233,6 +1237,8 @@ export type Database = {
           is_active?: boolean
           last_login_at?: string | null
           password_hash?: string
+          password_reset_expires_at?: string | null
+          password_reset_token?: string | null
           updated_at?: string
         }
         Relationships: [
