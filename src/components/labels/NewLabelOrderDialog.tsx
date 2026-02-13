@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
 import { CalendarIcon, Plus, User } from 'lucide-react';
+import { DielineCombobox } from '@/components/labels/DielineCombobox';
 import {
   Dialog,
   DialogContent,
@@ -349,20 +350,13 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Dieline Template</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select dieline" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {dielines?.filter(d => d.is_active).map((dieline) => (
-                            <SelectItem key={dieline.id} value={dieline.id}>
-                              {dieline.name} ({dieline.roll_width_mm}mm)
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormControl>
+                        <DielineCombobox
+                          dielines={dielines ?? []}
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
