@@ -1,80 +1,73 @@
 
 
-# Client Portal Account Management & Password Reset
+# Print-Ready View Redesign: Proof-Linked Artwork Matching
 
-## Overview
+## Problem
+The current Print-Ready tab shows standalone item cards with editable quantity fields. This causes quantities to be "added together" because:
+1. Both views allow editing the same `quantity` field on the same item record
+2. The print-ready view doesn't visually link back to the proof artwork
+3. For multi-page split items, there's no clear way to match print-ready pages to their proof counterparts
 
-Add full account management for client portal users, including a self-service password reset flow (via email), a client-side account/profile page, and enhanced admin-side portal access controls with visibility into login status.
+## Solution
+Redesign the Print-Ready view to use a **side-by-side card layout** (matching the mockup), where:
+- **Left panel**: Proof thumbnail + read-only quantity (this is the single source of truth)
+- **Right panel**: Print-ready artwork thumbnail + status badge
+- Quantity is **only editable in the Proof tab** -- the Print-Ready tab displays it as read-only
+- Items are matched by their database relationship (same `label_item` record holds both `proof_pdf_url` and `print_pdf_url`)
 
-## What's Being Built
+## Changes
 
-### 1. Client-Side: Forgot Password Flow
-- **"Forgot password?" link** on the login page (`ClientPortalLogin.tsx`)
-- Clicking it shows an email input -- client enters their email and receives a password reset link via Resend
-- The link contains a time-limited token (1 hour expiry) and directs to `/labels/portal/reset-password?token=...`
-- New **Reset Password page** where they enter a new password
+### 1. New Component: `PrintReadyItemCard.tsx`
+**File**: `src/components/labels/items/PrintReadyItemCard.tsx`
 
-### 2. Client-Side: Account/Profile Page
-- New route `/labels/portal/account` accessible from the dashboard header
-- Shows: name, email, company name (read-only from their contact record)
-- **Change Password** section: current password + new password + confirm
-- **Sign Out** button (already exists in dashboard header, also here)
+A new card component specifically for the print-ready view with a horizontal two-column layout:
+- **Left column** (~40% width): Proof thumbnail (from `proof_pdf_url` / `proof_thumbnail_url`), item name, read-only quantity display, dimensions
+- **Right column** (~60% width): Print-ready thumbnail (from `print_pdf_url` / `artwork_thumbnail_url`), print status badge, prep actions (auto-crop, use-as-print)
+- No editable quantity input -- qty is shown as a static label sourced from the proof
 
-### 3. Edge Function: New Endpoints on `label-client-auth`
-- **`POST /forgot-password`**: Accepts `{ email }`, generates a reset token (random UUID stored in a new `password_reset_token` + `password_reset_expires` column on `label_client_auth`), sends email via Resend with reset link
-- **`POST /reset-password`**: Accepts `{ token, new_password }`, validates token hasn't expired, hashes new password, clears token
-- **`POST /change-password`**: Accepts `{ current_password, new_password }` with client JWT auth, verifies current password, updates hash
+### 2. Update `LabelItemsGrid.tsx`
+**File**: `src/components/labels/items/LabelItemsGrid.tsx`
 
-### 4. Database Migration
-Add columns to `label_client_auth`:
-```sql
-ALTER TABLE public.label_client_auth
-  ADD COLUMN IF NOT EXISTS password_reset_token uuid,
-  ADD COLUMN IF NOT EXISTS password_reset_expires_at timestamptz;
-```
+- Pass `viewMode` down to determine which card component to render
+- When `viewMode === 'print'`: render `PrintReadyItemCard` instead of `LabelItemCard`
+- When `viewMode === 'proof'`: render existing `LabelItemCard` (no changes)
+- Adjust grid layout: print-ready view uses wider cards (2-3 columns instead of 5-6) to accommodate the side-by-side layout
 
-### 5. Admin-Side: Enhanced Portal Access Indicators
-In `CustomerDetailPanel.tsx`, update the contact list to show:
-- "Portal Active" badge (green) when `label_client_auth` record exists and `is_active = true`
-- "Last Login" timestamp from `last_login_at`
-- Add "Revoke Portal Access" option in the 3-dot menu (sets `is_active = false` on auth record)
-- Add "Send Password Reset" option in the 3-dot menu (triggers the forgot-password flow for that contact's email)
+### 3. Update `LabelItemCard.tsx` (minor)
+**File**: `src/components/labels/items/LabelItemCard.tsx`
 
-## Technical Flow
+- No structural changes needed -- this component remains the proof-view card
+- Quantity remains fully editable here as the single source of truth
 
+## Technical Details
+
+### PrintReadyItemCard Layout
 ```text
-CLIENT FORGOT PASSWORD:
-  Login page --> "Forgot password?" link
-    --> Enter email --> POST /forgot-password
-    --> Edge fn generates reset token, stores in DB
-    --> Sends email via Resend with link to /labels/portal/reset-password?token=xxx
-    --> Client clicks link --> enters new password
-    --> POST /reset-password --> validates token + expiry --> updates hash --> done
-
-CLIENT CHANGE PASSWORD (logged in):
-  Account page --> current + new password
-    --> POST /change-password (with JWT)
-    --> Verifies current password, updates hash
-
-ADMIN CONTROLS:
-  Customer detail panel --> 3-dot menu on contact
-    --> "Set Portal Password" (existing)
-    --> "Send Password Reset" (new - triggers email)
-    --> "Revoke Portal Access" (new - disables auth)
++------------------------------------------+
+|  PROOF (left)      |  PRINT-READY (right) |
+|  [proof thumb]     |  [print thumb]       |
+|                    |                      |
+|  Item Name         |  Status: Ready       |
+|  Qty: 3000 (ro)    |  [Auto-Crop] [Use]   |
+|  120.5 x 85.0mm    |                      |
++------------------------------------------+
 ```
+
+### Grid Columns by View Mode
+- **Proof view**: 2-6 columns (existing, narrow vertical cards)
+- **Print-ready view**: 1-3 columns (wider horizontal cards for side-by-side layout)
+
+### Data Flow
+- Both views read from the same `label_item` record
+- Quantity is only written from the Proof view via `onQuantityChange`
+- Print-ready view reads `item.quantity` as display-only
+- Proof thumbnail comes from `item.proof_thumbnail_url` or `item.proof_pdf_url`
+- Print-ready thumbnail comes from `item.artwork_thumbnail_url` or `item.print_pdf_url`
 
 ## Files Summary
 
 | File | Action |
 |------|--------|
-| `supabase/functions/label-client-auth/index.ts` | Add 3 new endpoints: forgot-password, reset-password, change-password |
-| `src/pages/labels/portal/ClientPortalLogin.tsx` | Add "Forgot password?" link + email input mode |
-| `src/pages/labels/portal/ClientResetPassword.tsx` | New page for token-based password reset |
-| `src/pages/labels/portal/ClientAccount.tsx` | New page for profile view + change password |
-| `src/pages/labels/portal/index.ts` | Export new pages |
-| `src/pages/labels/portal/ClientPortalDashboard.tsx` | Add "Account" link in header |
-| `src/components/labels/customers/CustomerDetailPanel.tsx` | Add portal status badges, revoke access + send reset options |
-| `src/hooks/labels/useClientAuth.tsx` | Add changePassword method to context |
-| `src/App.tsx` | Add routes for `/labels/portal/reset-password` and `/labels/portal/account` |
-| Database migration | Add `password_reset_token` and `password_reset_expires_at` columns to `label_client_auth` |
+| `src/components/labels/items/PrintReadyItemCard.tsx` | Create -- new horizontal card for print-ready view |
+| `src/components/labels/items/LabelItemsGrid.tsx` | Edit -- conditionally render PrintReadyItemCard when viewMode is 'print', adjust grid columns |
 
