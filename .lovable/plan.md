@@ -1,42 +1,49 @@
 
 
-# Searchable Dieline Selector
+# Fix Print-Ready Artwork Display and Add CRUD Controls
 
-## Problem
-The dieline dropdown in the "New Label Order" dialog lists all active dielines in a flat `<Select>`. With a growing library, it's become unwieldy to scroll through and find the right one.
+## Problems
+
+1. **Print-ready thumbnails show proof artwork instead of actual print-ready artwork**: The system stores all thumbnails in a single `artwork_thumbnail_url` field. When proof artwork is uploaded first, this field gets the proof thumbnail. When print-ready artwork is later matched to the same item, no separate print thumbnail is generated or stored -- so the card keeps showing the old proof image.
+
+2. **No edit/delete actions on print-ready cards**: The Print-Ready view cards are completely read-only. Admins cannot delete a print-ready file or replace it with a corrected version.
 
 ## Solution
-Replace the plain `<Select>` with a searchable combobox using the existing `cmdk` Command component (already installed). Users will be able to type dimensions or names to instantly filter the list.
 
-### How it works for you:
-- Click the dieline field and a dropdown opens with a **search box** at the top
-- Type part of a name or dimension (e.g. "75x50" or "320") to instantly filter
-- Results are grouped by roll width for easier scanning
-- Select a dieline and the dropdown closes, showing your selection
+### 1. Add `print_thumbnail_url` column to the database
 
-## Technical Changes
+A new column on `label_items` to store print-ready artwork thumbnails separately from proof thumbnails.
 
-### 1. Create `DielineCombobox.tsx`
-**File**: `src/components/labels/DielineCombobox.tsx`
+### 2. Update type definitions
 
-A reusable combobox component that:
-- Uses `Popover` + `Command` (both already available in the project)
-- Accepts `dielines`, `value`, `onValueChange`, and `disabled` props
-- Groups dielines by `roll_width_mm` (e.g., "250mm Roll", "320mm Roll")
-- Shows the selected dieline name in the trigger button
-- Includes `CommandInput` for type-to-search filtering
-- Closes on selection
+Add `print_thumbnail_url` to the `LabelItem` interface and `CreateLabelItemInput` in `src/types/labels.ts`.
 
-### 2. Update `NewLabelOrderDialog.tsx`
-**File**: `src/components/labels/NewLabelOrderDialog.tsx` (lines ~346-368)
+### 3. Fix thumbnail generation for print-ready uploads
 
-- Replace the `<Select>` / `<SelectContent>` / `<SelectItem>` block with the new `<DielineCombobox>` component
-- Wire it into the existing `react-hook-form` field (`dieline_id`)
+In `LabelOrderModal.tsx`, when generating thumbnails for print-ready child items after a split:
+- Store the thumbnail in `print_thumbnail_url` (not `artwork_thumbnail_url`)
+- For single-page print-ready matches, generate and store a print thumbnail too
 
-### Files Summary
+### 4. Fix PrintReadyItemCard thumbnail resolution
 
-| File | Action |
+In `PrintReadyItemCard.tsx`, change the print thumbnail path to use a dedicated `print_thumbnail_url` field first, falling back to proof thumbnail only if no print thumbnail exists.
+
+### 5. Add CRUD controls to PrintReadyItemCard
+
+Add the following interactive controls to the print-ready side of the card:
+- **Delete** button (trash icon) to remove the print-ready file (clears `print_pdf_url` and `print_thumbnail_url`, resets `print_pdf_status` to `pending`)
+- **Replace** button (upload icon) to upload a replacement print-ready PDF
+
+This requires passing `onDeletePrintFile` and `onReplacePrintFile` callbacks from `LabelItemsGrid` into `PrintReadyItemCard`.
+
+## Files to Change
+
+| File | Change |
 |------|--------|
-| `src/components/labels/DielineCombobox.tsx` | Create -- searchable combobox for dieline selection |
-| `src/components/labels/NewLabelOrderDialog.tsx` | Edit -- swap Select for DielineCombobox on the dieline_id field |
+| Database migration | Add `print_thumbnail_url TEXT` column to `label_items` |
+| `src/types/labels.ts` | Add `print_thumbnail_url` to `LabelItem` and `CreateLabelItemInput` |
+| `src/hooks/labels/useLabelItems.ts` | Include `print_thumbnail_url` in create mutation |
+| `src/components/labels/items/PrintReadyItemCard.tsx` | Use `print_thumbnail_url` for the print side; add delete and replace buttons |
+| `src/components/labels/items/LabelItemsGrid.tsx` | Wire up delete/replace handlers and pass them to `PrintReadyItemCard` |
+| `src/components/labels/order/LabelOrderModal.tsx` | Store print thumbnails in `print_thumbnail_url`; generate thumbnails for print-ready splits into the correct field |
 
