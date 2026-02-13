@@ -68,6 +68,7 @@ export function useClientPortalApprovals(orderId: string | undefined) {
   });
 }
 
+// Legacy order-level approval
 export function useClientPortalApprove() {
   const queryClient = useQueryClient();
   const clientFetch = useClientFetch();
@@ -95,6 +96,79 @@ export function useClientPortalApprove() {
     onError: (error) => {
       console.error('Approval error:', error);
       toast.error('Failed to submit approval');
+    },
+  });
+}
+
+// Item-level approval
+export function useClientPortalApproveItems() {
+  const queryClient = useQueryClient();
+  const clientFetch = useClientFetch();
+
+  return useMutation({
+    mutationFn: async (input: {
+      order_id: string;
+      item_ids: string[];
+      action: 'approved' | 'rejected';
+      comment?: string;
+    }) => {
+      const data = await clientFetch('/approve-items', {
+        method: 'POST',
+        body: input,
+      });
+      return data as { success: boolean; all_approved?: boolean; auto_impose_triggered?: boolean };
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: CLIENT_ORDERS_KEY });
+      queryClient.invalidateQueries({ queryKey: [...CLIENT_ORDERS_KEY, variables.order_id] });
+      queryClient.invalidateQueries({ queryKey: ['label_proof_approvals', variables.order_id] });
+
+      if (data.all_approved) {
+        toast.success('All items approved — order moving to production!');
+      } else if (variables.action === 'approved') {
+        toast.success(`${variables.item_ids.length} item(s) approved`);
+      } else {
+        toast.success('Changes requested — feedback sent');
+      }
+    },
+    onError: (error) => {
+      console.error('Item approval error:', error);
+      toast.error('Failed to submit approval');
+    },
+  });
+}
+
+// Client artwork upload
+export function useClientPortalUploadArtwork() {
+  const queryClient = useQueryClient();
+  const { token } = useClientAuth();
+
+  return useMutation({
+    mutationFn: async (input: { order_id: string; item_id: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('order_id', input.order_id);
+      formData.append('item_id', input.item_id);
+      formData.append('file', input.file);
+
+      const { data, error } = await supabase.functions.invoke('label-client-data/upload-artwork', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (error) throw new Error('Upload failed');
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [...CLIENT_ORDERS_KEY, variables.order_id] });
+      toast.success('Artwork uploaded — our team will review it shortly');
+    },
+    onError: (error) => {
+      console.error('Upload error:', error);
+      toast.error('Failed to upload artwork');
     },
   });
 }
