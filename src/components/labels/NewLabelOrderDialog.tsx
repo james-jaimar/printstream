@@ -350,13 +350,11 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Dieline Template</FormLabel>
-                      <FormControl>
-                        <DielineCombobox
-                          dielines={dielines ?? []}
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        />
-                      </FormControl>
+                      <DielineCombobox
+                        dielines={dielines ?? []}
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      />
                       <FormMessage />
                     </FormItem>
                   )}
