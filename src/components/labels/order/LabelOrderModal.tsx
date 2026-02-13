@@ -151,10 +151,33 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             // Split in 'print' mode to update existing children's print_pdf_url
             const pdfUrl = file.url;
             splitPdf(existingParentId, pdfUrl, order.id, 'print')
-              .then(splitResult => {
+              .then(async (splitResult) => {
                 console.log('Print-ready split complete (matched to proof children):', splitResult);
                 toast.success(`Matched ${splitResult.page_count} print-ready pages to proof items`);
-                refetch();
+                const { data: refetchedOrder } = await refetch();
+                if (!refetchedOrder?.items) return;
+                // Generate print-ready thumbnails for children that need them
+                const childrenNeedingThumbs = refetchedOrder.items.filter(
+                  i => i.parent_item_id === existingParentId
+                    && i.print_pdf_url
+                    && !i.print_thumbnail_url
+                );
+                for (const child of childrenNeedingThumbs) {
+                  try {
+                    const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
+                    const thumbDataUrl = await generatePdfThumbnailFromUrl(child.print_pdf_url!, 300);
+                    const blob = dataUrlToBlob(thumbDataUrl);
+                    const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}-print.png`;
+                    const { error } = await supabase.storage
+                      .from('label-files')
+                      .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
+                    if (!error) {
+                      updateItem.mutate({ id: child.id, updates: { print_thumbnail_url: thumbPath } });
+                    }
+                  } catch (err) {
+                    console.warn('Print thumbnail gen failed for child:', child.id, err);
+                  }
+                }
               })
               .catch(err => {
                 console.error('Print-ready split failed:', err);
