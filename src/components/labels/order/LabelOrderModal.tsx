@@ -79,13 +79,13 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     );
     
     if (artworkTab === 'proof') {
+      // Proof view: items with proof artwork or legacy artwork_pdf_url (but not print-only items)
       return visibleItems.filter(item => 
-        item.proof_pdf_url || item.artwork_pdf_url
+        item.proof_pdf_url || (item.artwork_pdf_url && !item.print_pdf_url)
       );
     } else {
-      return visibleItems.filter(item => 
-        item.print_pdf_url
-      );
+      // Print-ready view: show ALL visible items so admin can see which still need print artwork
+      return visibleItems;
     }
   }, [order?.items, artworkTab]);
 
@@ -123,32 +123,77 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     for (const file of files) {
       try {
         const normalizedFileName = normalizeItemName(file.name);
+        const isProof = file.isProof;
         
-        // Check if an item with this name already exists (for adding print-ready to existing)
-        const existingItem = order.items?.find(item => 
-          normalizeItemName(item.name) === normalizedFileName
-        );
-
-        if (existingItem && !file.isProof) {
-          // Update existing item with print-ready artwork
-          updateItem.mutate({
-            id: existingItem.id,
-            updates: {
+        if (!isProof) {
+          // PRINT-READY UPLOAD: Try to match existing proof items first
+          
+          // Check for existing child items (from proof split) that match by parent name
+          const existingChildren = order.items?.filter(item => 
+            item.parent_item_id && normalizeItemName(item.name.replace(/ - Page \d+$/i, '')) === normalizedFileName
+          ) || [];
+          
+          if (existingChildren.length > 0 && (file.page_count ?? 1) > 1) {
+            // Multi-page print-ready PDF with existing proof children
+            // Create a temporary parent item to hold the PDF, then split in 'print' mode
+            const result = await createItem.mutateAsync({
+              order_id: order.id,
+              name: file.name.replace('.pdf', ''),
+              quantity: 1,
               print_pdf_url: file.url,
               print_pdf_status: 'ready',
-            }
-          });
-          continue;
+              artwork_thumbnail_url: file.thumbnailUrl,
+              width_mm: file.width_mm ?? order.dieline?.label_width_mm,
+              height_mm: file.height_mm ?? order.dieline?.label_height_mm,
+              preflight_status: file.preflightStatus,
+              preflight_report: file.preflightReport,
+              needs_rotation: file.needs_rotation ?? false,
+              page_count: file.page_count ?? 1,
+            });
+            
+            // Split in 'print' mode to update existing children's print_pdf_url
+            const pdfUrl = file.url;
+            splitPdf(result.id, pdfUrl, order.id, 'print')
+              .then(splitResult => {
+                console.log('Print-ready split complete (matched to proof children):', splitResult);
+                toast.success(`Matched ${splitResult.page_count} print-ready pages to proof items`);
+                refetch();
+              })
+              .catch(err => {
+                console.error('Print-ready split failed:', err);
+                toast.error('Failed to split print-ready PDF');
+              });
+            continue;
+          }
+          
+          // Check for single existing item match
+          const existingItem = order.items?.find(item => 
+            normalizeItemName(item.name) === normalizedFileName
+          );
+          
+          if (existingItem) {
+            // Update existing item with print-ready artwork
+            updateItem.mutate({
+              id: existingItem.id,
+              updates: {
+                print_pdf_url: file.url,
+                print_pdf_status: 'ready',
+              }
+            });
+            continue;
+          }
         }
 
-        // Create new item
+        // Create new item - route fields based on isProof
         const result = await createItem.mutateAsync({
           order_id: order.id,
           name: file.name.replace('.pdf', ''),
           quantity: 1,
-          // Set proof or print URLs based on upload type
-          artwork_pdf_url: file.isProof ? file.url : null,
-          artwork_thumbnail_url: file.thumbnailUrl, // Always store thumbnail for preview
+          // Route to correct URL fields based on upload type
+          ...(isProof 
+            ? { proof_pdf_url: file.url, artwork_pdf_url: file.url }
+            : { print_pdf_url: file.url, print_pdf_status: 'ready' as const }),
+          artwork_thumbnail_url: file.thumbnailUrl,
           width_mm: file.width_mm ?? order.dieline?.label_width_mm,
           height_mm: file.height_mm ?? order.dieline?.label_height_mm,
           preflight_status: file.preflightStatus,
@@ -156,17 +201,6 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
           needs_rotation: file.needs_rotation ?? false,
           page_count: file.page_count ?? 1,
         });
-
-        // If it's print-ready, also update print fields
-        if (!file.isProof) {
-          updateItem.mutate({
-            id: result.id,
-            updates: {
-              print_pdf_url: file.url,
-              print_pdf_status: 'ready',
-            }
-          });
-        }
 
         // Store analysis for the new item (for immediate UI feedback)
         if (file.preflightReport) {
@@ -182,6 +216,9 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
         // Fire async VPS calls for accurate analysis
         const pdfUrl = file.url;
         if (pdfUrl) {
+          // Capture isProof in closure for async callbacks
+          const uploadIsProof = isProof;
+          
           // 1. Get page boxes (TrimBox, BleedBox) for accurate dimension validation
           getPageBoxes(pdfUrl, result.id)
             .then(boxResult => {
@@ -230,7 +267,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
               const pageCount = boxResult.page_count ?? 1;
               if (pageCount > 1) {
                 console.log(`Multi-page PDF detected (${pageCount} pages), triggering split for item:`, result.id);
-                splitPdf(result.id, pdfUrl, order.id, artworkTab === 'print' ? 'print' : 'proof')
+                // Use captured isProof flag instead of artworkTab state
+                splitPdf(result.id, pdfUrl, order.id, uploadIsProof ? 'proof' : 'print')
                   .then(splitResult => {
                 console.log('PDF split complete:', splitResult);
                     toast.success(`Split into ${splitResult.page_count} items`);
@@ -242,10 +280,11 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                           i.parent_item_id === result.id && !i.artwork_thumbnail_url
                       );
                       for (const child of childItems) {
-                        if (!child.artwork_pdf_url) continue;
+                        const childPdfUrl = child.artwork_pdf_url || child.print_pdf_url;
+                        if (!childPdfUrl) continue;
                         try {
                           const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
-                          const dataUrl = await generatePdfThumbnailFromUrl(child.artwork_pdf_url, 300);
+                          const dataUrl = await generatePdfThumbnailFromUrl(childPdfUrl, 300);
                           const blob = dataUrlToBlob(dataUrl);
                           const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}.png`;
                           const { error: upErr } = await supabase.storage

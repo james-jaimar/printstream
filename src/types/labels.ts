@@ -333,8 +333,12 @@ export interface CreateLabelItemInput {
   order_id: string;
   name: string;
   quantity: number;
-  artwork_pdf_url?: string;
-  artwork_thumbnail_url?: string;
+  artwork_pdf_url?: string | null;
+  artwork_thumbnail_url?: string | null;
+  proof_pdf_url?: string | null;
+  proof_thumbnail_url?: string | null;
+  print_pdf_url?: string | null;
+  print_pdf_status?: PrintPdfStatus;
   width_mm?: number;
   height_mm?: number;
   preflight_status?: PreflightStatus;
