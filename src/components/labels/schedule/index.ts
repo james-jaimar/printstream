@@ -3,6 +3,6 @@
  */
 
 export * from './LabelScheduleBoard';
-export * from './ScheduleRunCard';
+export * from './ScheduleOrderCard';
 export * from './DayColumn';
 export * from './UnscheduledPanel';
