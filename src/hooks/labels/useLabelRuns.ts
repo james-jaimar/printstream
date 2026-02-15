@@ -286,3 +286,42 @@ export function useUpdateRunStatus() {
     },
   });
 }
+
+export function useUpdateRunSlots() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ 
+      id, 
+      slot_assignments 
+    }: { 
+      id: string; 
+      slot_assignments: SlotAssignment[];
+    }): Promise<LabelRun> => {
+      const { data, error } = await supabase
+        .from('label_runs')
+        .update({ slot_assignments: toJsonSlotAssignments(slot_assignments) })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error updating run slots:', error);
+        throw error;
+      }
+
+      return {
+        ...data,
+        slot_assignments: parseSlotAssignments(data.slot_assignments),
+      } as LabelRun;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ['label_orders', data.order_id] });
+      toast.success('Slot assignments updated');
+    },
+    onError: (error) => {
+      toast.error(`Failed to update slots: ${error.message}`);
+    },
+  });
+}

@@ -18,8 +18,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { RunDetailModal } from '@/components/labels/production';
 import { RunLayoutDiagram } from '@/components/labels/optimizer/RunLayoutDiagram';
 import { useBatchImpose } from '@/hooks/labels/useBatchImpose';
+import { useUpdateRunStatus } from '@/hooks/labels/useLabelRuns';
 import type { LabelRun, LabelRunStatus, LabelItem, LabelDieline } from '@/types/labels';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
+import { toast } from 'sonner';
 
 interface LabelRunsCardProps {
   runs: LabelRun[];
@@ -54,6 +56,8 @@ export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpo
     items,
     dieline
   );
+
+  const updateStatus = useUpdateRunStatus();
   
   const getItemName = (itemId: string) => {
     return items.find(i => i.id === itemId)?.name || 'Unknown';
@@ -76,12 +80,35 @@ export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpo
     onImpositionComplete?.();
   };
 
+  const handleStartAllPrinting = async () => {
+    const approvedRuns = runs.filter(r => r.status === 'approved');
+    for (const run of approvedRuns) {
+      await updateStatus.mutateAsync({ id: run.id, status: 'printing' });
+    }
+    toast.success(`Started printing ${approvedRuns.length} runs`);
+  };
+
+  const handleCompleteAllRuns = async () => {
+    const printingRuns = runs.filter(r => r.status === 'printing');
+    for (const run of printingRuns) {
+      await updateStatus.mutateAsync({ 
+        id: run.id, 
+        status: 'completed',
+        actual_meters_printed: run.meters_to_print || 0,
+      });
+    }
+    toast.success(`Completed ${printingRuns.length} runs`);
+  };
+
   const completedRuns = runs.filter(r => r.status === 'completed').length;
   const totalMeters = runs.reduce((sum, r) => sum + (r.meters_to_print || 0), 0);
   const totalFrames = runs.reduce((sum, r) => sum + (r.frames_count || 0), 0);
 
   const hasPlannedRuns = runs.some(r => r.status === 'planned');
   const allApprovedOrBeyond = runs.length > 0 && runs.every(r => r.status !== 'planned');
+  const allApproved = runs.length > 0 && runs.every(r => r.status === 'approved');
+  const allPrinting = runs.length > 0 && runs.every(r => r.status === 'printing');
+  const allCompleted = runs.length > 0 && runs.every(r => r.status === 'completed');
   const canSendToPrint = hasPlannedRuns && !!dieline && !!orderId && !isImposing;
 
   return (
@@ -98,7 +125,7 @@ export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpo
             </CardDescription>
           </div>
           <div className="flex items-center gap-3">
-            {/* Send to Print / Status */}
+            {/* Order-level controls */}
             {runs.length > 0 && (
               <>
                 {isImposing ? (
@@ -106,6 +133,39 @@ export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpo
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span>Imposing Run {progress.currentRunNumber} ({progress.current + 1}/{progress.total})...</span>
                   </div>
+                ) : allCompleted ? (
+                  <Badge variant="default" className="gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    All Completed
+                  </Badge>
+                ) : allPrinting ? (
+                  <Button
+                    size="sm"
+                    onClick={handleCompleteAllRuns}
+                    disabled={updateStatus.isPending}
+                    className="gap-1 bg-green-600 hover:bg-green-700"
+                  >
+                    {updateStatus.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    Complete All Runs
+                  </Button>
+                ) : allApproved ? (
+                  <Button
+                    size="sm"
+                    onClick={handleStartAllPrinting}
+                    disabled={updateStatus.isPending}
+                    className="gap-1"
+                  >
+                    {updateStatus.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                    Start Printing
+                  </Button>
                 ) : allApprovedOrBeyond ? (
                   <Badge variant="default" className="gap-1">
                     <CheckCircle2 className="h-3 w-3" />

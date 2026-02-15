@@ -1,10 +1,28 @@
 /**
  * Run Detail Modal
- * Production execution UI for starting/completing runs and recording actual meters
+ * Production execution UI for completing runs, recording actual meters,
+ * and drag-and-drop reordering of slot assignments
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   Dialog,
   DialogContent,
@@ -20,16 +38,16 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import {
-  Play,
   CheckCircle2,
   Clock,
   Layers,
   Ruler,
   AlertTriangle,
   Loader2,
+  GripVertical,
 } from 'lucide-react';
-import { useUpdateRunStatus } from '@/hooks/labels/useLabelRuns';
-import type { LabelRun, LabelRunStatus, LabelItem } from '@/types/labels';
+import { useUpdateRunStatus, useUpdateRunSlots } from '@/hooks/labels/useLabelRuns';
+import type { LabelRun, LabelRunStatus, LabelItem, SlotAssignment } from '@/types/labels';
 
 interface RunDetailModalProps {
   run: LabelRun | null;
@@ -50,32 +68,96 @@ const statusConfig: Record<LabelRunStatus, {
   cancelled: { label: 'Cancelled', color: 'text-red-600', bgColor: 'bg-red-100' },
 };
 
+// Sortable slot row component
+function SortableSlotRow({ 
+  slot, 
+  index, 
+  itemName 
+}: { 
+  slot: SlotAssignment; 
+  index: number; 
+  itemName: string;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: `slot-${index}` });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div 
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center justify-between text-sm p-2 bg-muted/50 rounded"
+    >
+      <button
+        className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground hover:text-foreground"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <span className="font-mono ml-1">Slot {slot.slot}</span>
+      <span className="truncate mx-2 flex-1">{itemName}</span>
+      <span className="text-muted-foreground">×{slot.quantity_in_slot}</span>
+    </div>
+  );
+}
+
 export function RunDetailModal({ run, items, open, onOpenChange }: RunDetailModalProps) {
   const [actualMeters, setActualMeters] = useState<string>('');
   const [showCompleteForm, setShowCompleteForm] = useState(false);
+  const [localSlots, setLocalSlots] = useState<SlotAssignment[]>([]);
   
   const updateStatus = useUpdateRunStatus();
+  const updateSlots = useUpdateRunSlots();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  // Sync local slots when run changes
+  useEffect(() => {
+    if (run?.slot_assignments) {
+      setLocalSlots(run.slot_assignments);
+    }
+  }, [run?.slot_assignments]);
 
   if (!run) return null;
 
   const status = statusConfig[run.status];
-  const canStart = run.status === 'planned' || run.status === 'approved';
   const canComplete = run.status === 'printing';
   const isCompleted = run.status === 'completed';
+  const canReorder = run.status === 'planned' || run.status === 'approved';
 
   const getItemName = (itemId: string) => {
     return items.find(i => i.id === itemId)?.name || 'Unknown';
   };
 
-  const handleStartRun = () => {
-    updateStatus.mutate(
-      { id: run.id, status: 'printing' },
-      {
-        onSuccess: () => {
-          // Reset form state
-        },
-      }
-    );
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = localSlots.findIndex((_, i) => `slot-${i}` === active.id);
+    const newIndex = localSlots.findIndex((_, i) => `slot-${i}` === over.id);
+
+    const newSlots = arrayMove(localSlots, oldIndex, newIndex).map((slot, idx) => ({
+      ...slot,
+      slot: idx + 1,
+    }));
+
+    setLocalSlots(newSlots);
+    updateSlots.mutate({ id: run.id, slot_assignments: newSlots });
   };
 
   const handleCompleteRun = () => {
@@ -156,22 +238,51 @@ export function RunDetailModal({ run, items, open, onOpenChange }: RunDetailModa
             </div>
           )}
 
-          {/* Slot Assignments */}
-          {run.slot_assignments && run.slot_assignments.length > 0 && (
+          {/* Slot Assignments with Drag-and-Drop */}
+          {localSlots.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium mb-2">Slot Assignments</h4>
-              <div className="space-y-1">
-                {run.slot_assignments.map((slot, idx) => (
-                  <div 
-                    key={idx} 
-                    className="flex items-center justify-between text-sm p-2 bg-muted/50 rounded"
-                  >
-                    <span className="font-mono">Slot {slot.slot}</span>
-                    <span className="truncate mx-2 flex-1">{getItemName(slot.item_id)}</span>
-                    <span className="text-muted-foreground">×{slot.quantity_in_slot}</span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium">Slot Assignments</h4>
+                {canReorder && (
+                  <span className="text-xs text-muted-foreground">Drag to reorder</span>
+                )}
               </div>
+              {canReorder ? (
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={localSlots.map((_, i) => `slot-${i}`)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-1">
+                      {localSlots.map((slot, idx) => (
+                        <SortableSlotRow
+                          key={`slot-${idx}`}
+                          slot={slot}
+                          index={idx}
+                          itemName={getItemName(slot.item_id)}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              ) : (
+                <div className="space-y-1">
+                  {localSlots.map((slot, idx) => (
+                    <div 
+                      key={idx} 
+                      className="flex items-center justify-between text-sm p-2 bg-muted/50 rounded"
+                    >
+                      <span className="font-mono">Slot {slot.slot}</span>
+                      <span className="truncate mx-2 flex-1">{getItemName(slot.item_id)}</span>
+                      <span className="text-muted-foreground">×{slot.quantity_in_slot}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -239,21 +350,6 @@ export function RunDetailModal({ run, items, open, onOpenChange }: RunDetailModa
         </div>
 
         <DialogFooter className="gap-2">
-          {canStart && (
-            <Button
-              onClick={handleStartRun}
-              disabled={updateStatus.isPending}
-              className="gap-2"
-            >
-              {updateStatus.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              Start Printing
-            </Button>
-          )}
-          
           {canComplete && !showCompleteForm && (
             <Button
               onClick={() => setShowCompleteForm(true)}
