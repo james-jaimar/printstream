@@ -1,6 +1,6 @@
 /**
  * Label Schedule Board
- * Kanban-style drag-and-drop scheduling for label production runs
+ * Kanban-style drag-and-drop scheduling at the ORDER level
  */
 
 import { useState, useMemo } from 'react';
@@ -14,171 +14,153 @@ import {
   useSensors,
   DragStartEvent,
   DragEndEvent,
-  DragOverEvent,
 } from '@dnd-kit/core';
-import {
-  sortableKeyboardCoordinates,
-} from '@dnd-kit/sortable';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { format, addDays, startOfWeek } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { DayColumn } from './DayColumn';
 import { UnscheduledPanel } from './UnscheduledPanel';
-import { ScheduleRunCard } from './ScheduleRunCard';
+import { ScheduleOrderCard } from './ScheduleOrderCard';
 import {
   useLabelSchedule,
   useUnscheduledRuns,
-  useScheduleRun,
-  useRescheduleRun,
-  useUnscheduleRun,
+  useScheduleOrder,
+  useRescheduleOrder,
+  useUnscheduleOrder,
   useReorderSchedule,
-  type ScheduledRunWithDetails,
-  type ScheduleRunDetails,
+  type ScheduledOrderGroup,
+  type UnscheduledOrderGroup,
 } from '@/hooks/labels/useLabelSchedule';
 
 interface LabelScheduleBoardProps {
-  onRunClick?: (run: ScheduleRunDetails) => void;
+  onRunClick?: (run: any) => void;
 }
 
 export function LabelScheduleBoard({ onRunClick }: LabelScheduleBoardProps) {
-  // Week navigation
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
-  
-  // Generate 5 weekdays
-  const weekDays = useMemo(() => {
-    return Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
-  }, [weekStart]);
 
+  const weekDays = useMemo(() => Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const weekEnd = weekDays[weekDays.length - 1];
 
-  // Fetch data
-  const { data: scheduledRuns = [], isLoading: loadingScheduled } = useLabelSchedule(weekStart, weekEnd);
-  const { data: unscheduledRuns = [], isLoading: loadingUnscheduled } = useUnscheduledRuns();
+  // Fetch data (now returns order-grouped data)
+  const { data: scheduledOrders = [], isLoading: loadingScheduled } = useLabelSchedule(weekStart, weekEnd);
+  const { data: unscheduledOrders = [], isLoading: loadingUnscheduled } = useUnscheduledRuns();
 
   // Mutations
-  const scheduleRun = useScheduleRun();
-  const rescheduleRun = useRescheduleRun();
-  const unscheduleRun = useUnscheduleRun();
+  const scheduleOrder = useScheduleOrder();
+  const rescheduleOrder = useRescheduleOrder();
+  const unscheduleOrder = useUnscheduleOrder();
   const reorderSchedule = useReorderSchedule();
 
   // Drag state
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [activeRun, setActiveRun] = useState<ScheduleRunDetails | null>(null);
+  const [activeOrder, setActiveOrder] = useState<{ order_number: string; customer_name: string; run_count: number; total_meters: number; total_frames: number; total_duration_minutes: number } | null>(null);
 
-  // Group scheduled runs by date
-  const runsByDate = useMemo(() => {
-    const grouped: Record<string, ScheduledRunWithDetails[]> = {};
+  // Group scheduled orders by date
+  const ordersByDate = useMemo(() => {
+    const grouped: Record<string, ScheduledOrderGroup[]> = {};
     weekDays.forEach(day => {
       grouped[format(day, 'yyyy-MM-dd')] = [];
     });
-    scheduledRuns.forEach(schedule => {
-      const dateKey = schedule.scheduled_date;
-      if (grouped[dateKey]) {
-        grouped[dateKey].push(schedule);
+    scheduledOrders.forEach(order => {
+      if (grouped[order.scheduled_date]) {
+        grouped[order.scheduled_date].push(order);
       }
     });
     return grouped;
-  }, [scheduledRuns, weekDays]);
+  }, [scheduledOrders, weekDays]);
 
-  // Sensors for drag detection
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Handle drag start
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    setActiveId(active.id as string);
+    const idStr = active.id as string;
+    setActiveId(idStr);
 
-    // Find the run being dragged
-    if (typeof active.id === 'string' && active.id.startsWith('unscheduled-')) {
-      const runId = active.id.replace('unscheduled-', '');
-      const run = unscheduledRuns.find(r => r.id === runId);
-      if (run) setActiveRun(run);
+    if (idStr.startsWith('unscheduled-')) {
+      const orderId = idStr.replace('unscheduled-', '');
+      const order = unscheduledOrders.find(o => o.order_id === orderId);
+      if (order) setActiveOrder(order);
     } else {
-      const schedule = scheduledRuns.find(s => s.id === active.id);
-      if (schedule?.run) setActiveRun(schedule.run);
+      const order = scheduledOrders.find(o => o.schedule_id === idStr);
+      if (order) setActiveOrder(order);
     }
   };
 
-  // Handle drag end
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveId(null);
-    setActiveRun(null);
+    setActiveOrder(null);
 
     if (!over) return;
 
     const activeIdStr = active.id as string;
     const overIdStr = over.id as string;
 
-    // Determine source
     const isFromUnscheduled = activeIdStr.startsWith('unscheduled-');
-    const runId = isFromUnscheduled ? activeIdStr.replace('unscheduled-', '') : null;
-    const scheduleId = isFromUnscheduled ? null : activeIdStr;
-
-    // Determine destination
     const isToUnscheduled = overIdStr === 'unscheduled';
     const isToDay = overIdStr.startsWith('day-');
     const targetDate = isToDay ? overIdStr.replace('day-', '') : null;
 
-    // Handle different scenarios
-    if (isFromUnscheduled && isToDay && runId && targetDate) {
-      // Schedule an unscheduled run
-      scheduleRun.mutate({
-        run_id: runId,
-        scheduled_date: targetDate,
-      });
-    } else if (!isFromUnscheduled && isToUnscheduled && scheduleId) {
-      // Unschedule a run
-      unscheduleRun.mutate(scheduleId);
-    } else if (!isFromUnscheduled && isToDay && scheduleId && targetDate) {
-      // Move to different day
-      const currentSchedule = scheduledRuns.find(s => s.id === scheduleId);
-      if (currentSchedule && currentSchedule.scheduled_date !== targetDate) {
-        rescheduleRun.mutate({
-          scheduleId,
+    if (isFromUnscheduled && isToDay && targetDate) {
+      // Schedule an unscheduled order
+      const orderId = activeIdStr.replace('unscheduled-', '');
+      const order = unscheduledOrders.find(o => o.order_id === orderId);
+      if (order) {
+        scheduleOrder.mutate({
+          order_id: orderId,
+          run_ids: order.runs.map(r => r.id),
+          scheduled_date: targetDate,
+        });
+      }
+    } else if (!isFromUnscheduled && isToUnscheduled) {
+      // Unschedule an order
+      const order = scheduledOrders.find(o => o.schedule_id === activeIdStr);
+      if (order) {
+        unscheduleOrder.mutate(order.schedule_entries.map(e => e.id));
+      }
+    } else if (!isFromUnscheduled && isToDay && targetDate) {
+      // Move order to a different day
+      const order = scheduledOrders.find(o => o.schedule_id === activeIdStr);
+      if (order && order.scheduled_date !== targetDate) {
+        const dayOrders = ordersByDate[targetDate] || [];
+        rescheduleOrder.mutate({
+          schedule_entry_ids: order.schedule_entries.map(e => e.id),
           newDate: targetDate,
-          newSortOrder: (runsByDate[targetDate]?.length || 0) + 1,
+          newBaseSortOrder: (dayOrders.length + 1),
         });
       }
     } else if (!isFromUnscheduled && !isToUnscheduled && !isToDay) {
-      // Reorder within same day (dropped on another card)
-      const overSchedule = scheduledRuns.find(s => s.id === overIdStr);
-      const activeSchedule = scheduledRuns.find(s => s.id === scheduleId);
-      
-      if (overSchedule && activeSchedule && overSchedule.scheduled_date === activeSchedule.scheduled_date) {
-        const dayRuns = runsByDate[activeSchedule.scheduled_date] || [];
-        const oldIndex = dayRuns.findIndex(r => r.id === activeSchedule.id);
-        const newIndex = dayRuns.findIndex(r => r.id === overSchedule.id);
-        
+      // Reorder within same day
+      const overOrder = scheduledOrders.find(o => o.schedule_id === overIdStr);
+      const activeOrder = scheduledOrders.find(o => o.schedule_id === activeIdStr);
+
+      if (overOrder && activeOrder && overOrder.scheduled_date === activeOrder.scheduled_date) {
+        const dayOrders = ordersByDate[activeOrder.scheduled_date] || [];
+        const oldIndex = dayOrders.findIndex(o => o.schedule_id === activeIdStr);
+        const newIndex = dayOrders.findIndex(o => o.schedule_id === overIdStr);
+
         if (oldIndex !== newIndex) {
-          // Create new order
-          const reordered = [...dayRuns];
+          const reordered = [...dayOrders];
           const [removed] = reordered.splice(oldIndex, 1);
           reordered.splice(newIndex, 0, removed);
-          
+
+          // Update sort_order for the first schedule entry of each order
           reorderSchedule.mutate(
-            reordered.map((r, i) => ({ id: r.id, sort_order: i + 1 }))
+            reordered.map((o, i) => ({ id: o.schedule_id, sort_order: i + 1 }))
           );
         }
       }
     }
   };
 
-  // Navigation
   const goToPreviousWeek = () => setWeekStart(prev => addDays(prev, -7));
   const goToNextWeek = () => setWeekStart(prev => addDays(prev, 7));
   const goToCurrentWeek = () => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }));
-
-  const isLoading = loadingScheduled || loadingUnscheduled;
 
   return (
     <DndContext
@@ -188,7 +170,6 @@ export function LabelScheduleBoard({ onRunClick }: LabelScheduleBoardProps) {
       onDragEnd={handleDragEnd}
     >
       <div className="flex flex-col h-full">
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b bg-background">
           <div className="flex items-center gap-2">
             <Button variant="outline" size="icon" onClick={goToPreviousWeek}>
@@ -207,32 +188,24 @@ export function LabelScheduleBoard({ onRunClick }: LabelScheduleBoardProps) {
           </div>
         </div>
 
-        {/* Board */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Unscheduled sidebar */}
-          <UnscheduledPanel
-            runs={unscheduledRuns}
-            onRunClick={onRunClick}
-          />
+          <UnscheduledPanel orders={unscheduledOrders} />
 
-          {/* Day columns */}
           <div className="flex-1 flex gap-2 p-4 overflow-x-auto">
             {weekDays.map((day) => (
               <DayColumn
                 key={format(day, 'yyyy-MM-dd')}
                 date={day}
-                scheduledRuns={runsByDate[format(day, 'yyyy-MM-dd')] || []}
-                onRunClick={(schedule) => schedule.run && onRunClick?.(schedule.run)}
+                scheduledOrders={ordersByDate[format(day, 'yyyy-MM-dd')] || []}
               />
             ))}
           </div>
         </div>
       </div>
 
-      {/* Drag overlay */}
       <DragOverlay>
-        {activeId && activeRun ? (
-          <ScheduleRunCard run={activeRun} isDragging />
+        {activeId && activeOrder ? (
+          <ScheduleOrderCard order={activeOrder} isDragging />
         ) : null}
       </DragOverlay>
     </DndContext>

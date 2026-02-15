@@ -1,16 +1,17 @@
 /**
  * Hook for managing label schedule (label_schedule table)
+ * Schedule operates at ORDER level - all runs for an order are grouped together
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { LabelSchedule, LabelScheduleStatus } from '@/types/labels';
-import { format, startOfWeek, addDays } from 'date-fns';
+import { format } from 'date-fns';
 
 const QUERY_KEY = ['label_schedule'];
 
-// Lightweight run details for schedule display (not the full LabelRun type)
+/** Lightweight run details for schedule display */
 export interface ScheduleRunDetails {
   id: string;
   run_number: number;
@@ -27,17 +28,60 @@ export interface ScheduleRunDetails {
   };
 }
 
+/** A single schedule entry with its run details */
 export interface ScheduledRunWithDetails extends Omit<LabelSchedule, 'run'> {
   run?: ScheduleRunDetails;
 }
 
+/** Order-level grouping for schedule display */
+export interface ScheduledOrderGroup {
+  order_id: string;
+  order_number: string;
+  customer_name: string;
+  substrate_id: string | null;
+  scheduled_date: string;
+  /** The first schedule entry id (used as the draggable id) */
+  schedule_id: string;
+  sort_order: number;
+  runs: ScheduleRunDetails[];
+  schedule_entries: ScheduledRunWithDetails[];
+  // Aggregated metrics
+  total_meters: number;
+  total_frames: number;
+  total_duration_minutes: number;
+  run_count: number;
+  status: string;
+}
+
+/** Order-level grouping for unscheduled display */
+export interface UnscheduledOrderGroup {
+  order_id: string;
+  order_number: string;
+  customer_name: string;
+  substrate_id: string | null;
+  runs: ScheduleRunDetails[];
+  total_meters: number;
+  total_frames: number;
+  total_duration_minutes: number;
+  run_count: number;
+}
+
+function aggregateRuns(runs: ScheduleRunDetails[]) {
+  return {
+    total_meters: runs.reduce((s, r) => s + (r.meters_to_print || 0), 0),
+    total_frames: runs.reduce((s, r) => s + (r.frames_count || 0), 0),
+    total_duration_minutes: runs.reduce((s, r) => s + (r.estimated_duration_minutes || 0), 0),
+    run_count: runs.length,
+  };
+}
+
 /**
- * Fetch scheduled runs for a date range
+ * Fetch scheduled runs for a date range, grouped by order
  */
 export function useLabelSchedule(startDate?: Date, endDate?: Date) {
   return useQuery({
     queryKey: [...QUERY_KEY, startDate?.toISOString(), endDate?.toISOString()],
-    queryFn: async (): Promise<ScheduledRunWithDetails[]> => {
+    queryFn: async (): Promise<ScheduledOrderGroup[]> => {
       let query = supabase
         .from('label_schedule')
         .select(`
@@ -69,29 +113,58 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
       }
 
       const { data, error } = await query;
+      if (error) throw error;
 
-      if (error) {
-        console.error('Error fetching label schedule:', error);
-        throw error;
-      }
-
-      // Flatten the nested run data
-      return (data || []).map(schedule => ({
+      // Flatten run data
+      const entries: ScheduledRunWithDetails[] = (data || []).map(schedule => ({
         ...schedule,
         run: Array.isArray(schedule.run) ? schedule.run[0] : schedule.run,
       })) as ScheduledRunWithDetails[];
+
+      // Group by order_id + scheduled_date
+      const groupMap = new Map<string, ScheduledOrderGroup>();
+      for (const entry of entries) {
+        if (!entry.run) continue;
+        const key = `${entry.run.order_id}::${entry.scheduled_date}`;
+        if (!groupMap.has(key)) {
+          const order = entry.run.order;
+          groupMap.set(key, {
+            order_id: entry.run.order_id,
+            order_number: order?.order_number || '',
+            customer_name: order?.customer_name || '',
+            substrate_id: order?.substrate_id || null,
+            scheduled_date: entry.scheduled_date,
+            schedule_id: entry.id,
+            sort_order: entry.sort_order,
+            runs: [],
+            schedule_entries: [],
+            status: entry.status,
+            ...aggregateRuns([]),
+          });
+        }
+        const group = groupMap.get(key)!;
+        group.runs.push(entry.run);
+        group.schedule_entries.push(entry);
+      }
+
+      // Recalculate aggregates
+      for (const group of groupMap.values()) {
+        Object.assign(group, aggregateRuns(group.runs));
+      }
+
+      return Array.from(groupMap.values());
     },
   });
 }
 
 /**
- * Fetch unscheduled runs (approved runs without schedule entries)
+ * Fetch unscheduled runs, grouped by order
  */
 export function useUnscheduledRuns() {
   return useQuery({
     queryKey: [...QUERY_KEY, 'unscheduled'],
-    queryFn: async () => {
-      // Get runs that are approved but not in schedule
+    queryFn: async (): Promise<UnscheduledOrderGroup[]> => {
+      // Get runs that are already scheduled
       const { data: scheduledRunIds } = await supabase
         .from('label_schedule')
         .select('run_id');
@@ -118,119 +191,118 @@ export function useUnscheduledRuns() {
         .in('status', ['planned', 'approved'])
         .order('created_at', { ascending: true });
 
-      // Exclude already scheduled runs
       if (scheduledIds.length > 0) {
         query = query.not('id', 'in', `(${scheduledIds.join(',')})`);
       }
 
       const { data, error } = await query;
+      if (error) throw error;
 
-      if (error) {
-        console.error('Error fetching unscheduled runs:', error);
-        throw error;
-      }
-
-      return (data || []).map(run => ({
+      const runs: ScheduleRunDetails[] = (data || []).map(run => ({
         ...run,
         order: Array.isArray(run.order) ? run.order[0] : run.order,
       }));
+
+      // Group by order_id
+      const groupMap = new Map<string, UnscheduledOrderGroup>();
+      for (const run of runs) {
+        if (!groupMap.has(run.order_id)) {
+          const order = run.order;
+          groupMap.set(run.order_id, {
+            order_id: run.order_id,
+            order_number: order?.order_number || '',
+            customer_name: order?.customer_name || '',
+            substrate_id: order?.substrate_id || null,
+            runs: [],
+            ...aggregateRuns([]),
+          });
+        }
+        groupMap.get(run.order_id)!.runs.push(run);
+      }
+
+      // Recalculate aggregates
+      for (const group of groupMap.values()) {
+        Object.assign(group, aggregateRuns(group.runs));
+      }
+
+      return Array.from(groupMap.values());
     },
   });
 }
 
-interface ScheduleRunInput {
-  run_id: string;
-  scheduled_date: string;
-  scheduled_start_time?: string;
-  scheduled_end_time?: string;
-  printer_id?: string;
-  operator_id?: string;
-  notes?: string;
-  sort_order?: number;
-}
-
-export function useScheduleRun() {
+/**
+ * Schedule an entire order (all its unscheduled runs) to a date
+ */
+export function useScheduleOrder() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: ScheduleRunInput): Promise<LabelSchedule> => {
+    mutationFn: async ({ order_id, run_ids, scheduled_date }: {
+      order_id: string;
+      run_ids: string[];
+      scheduled_date: string;
+    }) => {
       // Get max sort order for this date
       const { data: existing } = await supabase
         .from('label_schedule')
         .select('sort_order')
-        .eq('scheduled_date', input.scheduled_date)
+        .eq('scheduled_date', scheduled_date)
         .order('sort_order', { ascending: false })
         .limit(1);
 
-      const sortOrder = input.sort_order ?? ((existing?.[0]?.sort_order || 0) + 1);
+      const baseSortOrder = (existing?.[0]?.sort_order || 0) + 1;
 
-      const { data, error } = await supabase
+      // Insert schedule entries for all runs
+      const inserts = run_ids.map((run_id, i) => ({
+        run_id,
+        scheduled_date,
+        sort_order: baseSortOrder + i,
+        status: 'scheduled' as const,
+      }));
+
+      const { error } = await supabase
         .from('label_schedule')
-        .insert({
-          run_id: input.run_id,
-          scheduled_date: input.scheduled_date,
-          scheduled_start_time: input.scheduled_start_time || null,
-          scheduled_end_time: input.scheduled_end_time || null,
-          printer_id: input.printer_id || null,
-          operator_id: input.operator_id || null,
-          notes: input.notes || null,
-          sort_order: sortOrder,
-          status: 'scheduled',
-        })
-        .select()
-        .single();
+        .insert(inserts);
 
-      if (error) {
-        console.error('Error scheduling run:', error);
-        throw error;
-      }
-
-      return data as LabelSchedule;
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['label_runs'] });
-      toast.success('Run scheduled');
+      toast.success('Order scheduled');
     },
     onError: (error) => {
-      toast.error(`Failed to schedule run: ${error.message}`);
+      toast.error(`Failed to schedule order: ${error.message}`);
     },
   });
 }
 
-export function useRescheduleRun() {
+/**
+ * Reschedule an order (move all its schedule entries to a new date)
+ */
+export function useRescheduleOrder() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      scheduleId,
-      newDate,
-      newSortOrder,
-    }: {
-      scheduleId: string;
+    mutationFn: async ({ schedule_entry_ids, newDate, newBaseSortOrder }: {
+      schedule_entry_ids: string[];
       newDate: string;
-      newSortOrder: number;
-    }): Promise<LabelSchedule> => {
-      const { data, error } = await supabase
-        .from('label_schedule')
-        .update({
-          scheduled_date: newDate,
-          sort_order: newSortOrder,
-        })
-        .eq('id', scheduleId)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error rescheduling run:', error);
-        throw error;
+      newBaseSortOrder: number;
+    }) => {
+      for (let i = 0; i < schedule_entry_ids.length; i++) {
+        const { error } = await supabase
+          .from('label_schedule')
+          .update({
+            scheduled_date: newDate,
+            sort_order: newBaseSortOrder + i,
+          })
+          .eq('id', schedule_entry_ids[i]);
+        if (error) throw error;
       }
-
-      return data as LabelSchedule;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      toast.success('Run rescheduled');
+      toast.success('Order rescheduled');
     },
     onError: (error) => {
       toast.error(`Failed to reschedule: ${error.message}`);
@@ -238,25 +310,26 @@ export function useRescheduleRun() {
   });
 }
 
-export function useUnscheduleRun() {
+/**
+ * Unschedule an order (delete all its schedule entries)
+ */
+export function useUnscheduleOrder() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (scheduleId: string): Promise<void> => {
-      const { error } = await supabase
-        .from('label_schedule')
-        .delete()
-        .eq('id', scheduleId);
-
-      if (error) {
-        console.error('Error unscheduling run:', error);
-        throw error;
+    mutationFn: async (schedule_entry_ids: string[]) => {
+      for (const id of schedule_entry_ids) {
+        const { error } = await supabase
+          .from('label_schedule')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['label_runs'] });
-      toast.success('Run unscheduled');
+      toast.success('Order unscheduled');
     },
     onError: (error) => {
       toast.error(`Failed to unschedule: ${error.message}`);
@@ -300,11 +373,7 @@ export function useUpdateScheduleStatus() {
         .select()
         .single();
 
-      if (error) {
-        console.error('Error updating schedule status:', error);
-        throw error;
-      }
-
+      if (error) throw error;
       return data as LabelSchedule;
     },
     onSuccess: (data) => {
@@ -319,23 +388,19 @@ export function useUpdateScheduleStatus() {
 }
 
 /**
- * Reorder runs within a day
+ * Reorder orders within a day
  */
 export function useReorderSchedule() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (updates: { id: string; sort_order: number }[]): Promise<void> => {
-      // Update each schedule entry's sort order
+    mutationFn: async (updates: { id: string; sort_order: number }[]) => {
       for (const update of updates) {
         const { error } = await supabase
           .from('label_schedule')
           .update({ sort_order: update.sort_order })
           .eq('id', update.id);
-
-        if (error) {
-          throw error;
-        }
+        if (error) throw error;
       }
     },
     onSuccess: () => {
@@ -346,3 +411,8 @@ export function useReorderSchedule() {
     },
   });
 }
+
+// Keep legacy exports for backward compat
+export function useScheduleRun() { return useScheduleOrder(); }
+export function useRescheduleRun() { return useRescheduleOrder(); }
+export function useUnscheduleRun() { return useUnscheduleOrder(); }
