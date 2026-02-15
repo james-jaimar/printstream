@@ -29,9 +29,9 @@ export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile
   const proofThumbPath = item.proof_thumbnail_url || item.artwork_thumbnail_url || null;
   const { url: proofThumbUrl, isLoading: proofLoading } = useThumbnailUrl(proofThumbPath);
 
-  // Print-ready thumbnail: prefer print_thumbnail_url, fall back to proof thumbnail
+  // Print-ready thumbnail: ONLY use print_thumbnail_url (no proof fallback)
   const printThumbPath = item.print_pdf_url
-    ? (item.print_thumbnail_url || item.proof_thumbnail_url || item.artwork_thumbnail_url || null)
+    ? (item.print_thumbnail_url || null)
     : null;
   const { url: printThumbUrl, isLoading: printLoading } = useThumbnailUrl(printThumbPath);
 
