@@ -190,8 +190,11 @@ Deno.serve(async (req) => {
       if (error) throw error;
       if (!data) return jsonResponse({ error: "Order not found" }, 404);
 
-      // Enrich items with signed URLs
+      // Filter out parent items that were split into child pages
       if (data.items) {
+        data.items = data.items.filter(
+          (item: any) => !(item.page_count > 1 && !item.parent_item_id)
+        );
         data.items = await enrichItemsWithSignedUrls(supabase, data.items);
       }
 
