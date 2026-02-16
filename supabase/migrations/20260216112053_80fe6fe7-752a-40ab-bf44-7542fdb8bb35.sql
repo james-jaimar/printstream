@@ -1,0 +1,2 @@
+ALTER TABLE label_proof_approvals
+  DROP CONSTRAINT label_proof_approvals_approved_by_fkey;
