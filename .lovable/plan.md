@@ -1,84 +1,35 @@
 
 
-# Client Portal Order Detail Fixes
+# Fix: Approval Foreign Key Constraint Error
 
-## Overview
+## Root Cause
 
-Five targeted fixes to polish the client order detail experience based on the issues identified.
+The `label_proof_approvals.approved_by` column has a foreign key constraint referencing `auth.users(id)`. However, when a client approves items through the portal, the edge function inserts the `contactId` (from `label_client_auth` table) into `approved_by`. Since portal clients are not in `auth.users`, the FK constraint fails with:
 
-## Changes
+```
+Key (approved_by)=(566605d8-...) is not present in table "users"
+```
 
-### 1. Filter out parent/original PDF items (fixes "25 items" showing instead of 24)
+## Fix
 
-The edge function returns all items including the original multi-page parent PDF. The admin modal already filters these with `!(item.page_count > 1 && !item.parent_item_id)` but the client portal does not.
-
-**Fix**: Apply the same filter in `ClientOrderDetail.tsx` when rendering items, and in the edge function's `/order/:id` endpoint to exclude parent items server-side.
-
-### 2. Add "Select All" checkbox
-
-Currently there is a "Select All" button in the sticky toolbar, but no checkbox at the top of the items list. Add a checkbox header row above the item cards when there are items awaiting review, with a "Select All (N items)" label.
-
-### 3. Remove Production Runs / Layout section
-
-The entire "Production Layout" card (lines 273-308 in `ClientOrderDetail.tsx`) should be removed. Clients do not need to see internal production run data.
-
-### 4. Enable client artwork upload for whole order or individual items
-
-Currently upload only works for items in `client_needs_upload` status. Add:
-- An "Upload New Artwork" button at the order level (visible when order status is `pending_approval`)
-- This opens a dialog letting the client pick which item(s) to replace, or upload for all
-- Individual item upload already works via `ClientArtworkUpload` component
-
-### 5. Wrap approval/reject handlers in try-catch (fixes intermittent error)
-
-The `handleConfirmApproval` and `handleConfirmReject` functions use `await` without try-catch, which can cause unhandled rejections on network errors.
+Drop the foreign key constraint on `approved_by` so it can accept both staff user IDs (from `auth.users`) and client contact IDs (from `label_client_auth`).
 
 ## Technical Details
+
+### Database Migration
+
+```sql
+ALTER TABLE label_proof_approvals
+  DROP CONSTRAINT label_proof_approvals_approved_by_fkey;
+```
+
+This is the safest fix since the two auth systems (staff via `auth.users`, clients via `label_client_auth`) use separate tables. The column still stores UUIDs -- it just won't enforce that they exist in one specific table.
 
 ### Files Modified
 
 | File | Changes |
 |------|---------|
-| `src/pages/labels/portal/ClientOrderDetail.tsx` | Filter parent items, add select-all checkbox header, remove production runs section, add order-level upload button, wrap handlers in try-catch |
-| `supabase/functions/label-client-data/index.ts` | Filter parent items from `/order/:id` response server-side |
+| Database migration | Drop the FK constraint on `approved_by` |
 
-### Item Filtering Logic
-
-```typescript
-// Filter out parent items that were split into child pages
-const visibleItems = (order.items || []).filter(
-  item => !(item.page_count > 1 && !item.parent_item_id)
-);
-```
-
-Applied both client-side in the component and server-side in the edge function for consistency.
-
-### Select All Checkbox
-
-A checkbox row above the item cards list:
-
-```text
-[x] Select All (23 awaiting review)
-```
-
-Wired to the existing `handleSelectAll` logic which already toggles all awaiting items.
-
-### Error Handling
-
-```typescript
-const handleConfirmApproval = async () => {
-  if (!orderId || approveItemIds.length === 0) return;
-  try {
-    await approveItemsMutation.mutateAsync({ ... });
-    setDisclaimerOpen(false);
-    setApproveItemIds([]);
-    setSelectedItemIds([]);
-  } catch (error) {
-    console.error('Approval error:', error);
-    // Toast already shown by mutation's onError
-  }
-};
-```
-
-### No Database Changes Required
+No edge function or frontend code changes needed -- the logic is correct, it's just the FK constraint blocking the insert.
 
