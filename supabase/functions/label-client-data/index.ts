@@ -348,14 +348,18 @@ Deno.serve(async (req) => {
 
       if (approvalErr) throw approvalErr;
 
-      // Check if ALL items in the order are now approved
+      // Check if ALL visible items in the order are now approved
+      // Filter out parent multi-page items (they aren't approved individually)
       const { data: allItems } = await supabase
         .from("label_items")
-        .select("id, proofing_status, print_pdf_url")
+        .select("id, proofing_status, print_pdf_url, page_count, parent_item_id")
         .eq("order_id", order_id);
 
-      const allApproved =
-        allItems && allItems.every((i) => i.proofing_status === "approved");
+      const visibleItems = allItems?.filter(
+        (i: any) => !(i.page_count > 1 && !i.parent_item_id)
+      ) || [];
+      const allApproved = visibleItems.length > 0 &&
+        visibleItems.every((i) => i.proofing_status === "approved");
 
       if (allApproved) {
         // Update order status to approved
