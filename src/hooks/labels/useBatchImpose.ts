@@ -20,6 +20,13 @@ const initialProgress: BatchImposeProgress = {
   errors: [],
 };
 
+const DELAY_BETWEEN_RUNS_MS = 2000;
+const MAX_CONSECUTIVE_FAILURES = 2;
+
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function useBatchImpose(
   orderId: string,
   runs: LabelRun[],
@@ -47,9 +54,20 @@ export function useBatchImpose(
     });
 
     const errors: { runNumber: number; error: string }[] = [];
+    let consecutiveFailures = 0;
 
     for (let i = 0; i < plannedRuns.length; i++) {
       const run = plannedRuns[i];
+
+      // Abort if too many consecutive failures (VPS is likely down)
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        const remaining = plannedRuns.length - i;
+        toast.error(`Aborting: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures. VPS may be down.`);
+        for (let j = i; j < plannedRuns.length; j++) {
+          errors.push({ runNumber: plannedRuns[j].run_number, error: 'Skipped — aborted after consecutive failures' });
+        }
+        break;
+      }
 
       setProgress(prev => ({
         ...prev,
@@ -58,7 +76,6 @@ export function useBatchImpose(
       }));
 
       try {
-        // Build slot assignments with pdf_url from items
         const slotAssignments: ImpositionSlot[] = (run.slot_assignments || []).map(slot => {
           const item = items.find(it => it.id === slot.item_id);
           return {
@@ -98,9 +115,18 @@ export function useBatchImpose(
           .update({ status: 'approved' })
           .eq('id', run.id);
 
+        consecutiveFailures = 0;
+
       } catch (err: any) {
         console.error(`Imposition failed for run ${run.run_number}:`, err);
-        errors.push({ runNumber: run.run_number, error: err.message || 'Unknown error' });
+        const errorMsg = err.message || 'Unknown error';
+        errors.push({ runNumber: run.run_number, error: errorMsg });
+        consecutiveFailures++;
+      }
+
+      // Delay between runs to let VPS clear memory
+      if (i < plannedRuns.length - 1) {
+        await delay(DELAY_BETWEEN_RUNS_MS);
       }
     }
 
