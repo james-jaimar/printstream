@@ -1,22 +1,64 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
 import { format } from 'date-fns';
-import { Package, Eye, Clock, CheckCircle, AlertCircle, LogOut, Boxes, User } from 'lucide-react';
+import {
+  Package,
+  Eye,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  LogOut,
+  User,
+  Upload,
+  ArrowRight,
+  Inbox,
+} from 'lucide-react';
 import { useClientAuth } from '@/hooks/labels/useClientAuth';
 import { useClientPortalOrders } from '@/hooks/labels/useClientPortalData';
-import type { LabelOrderStatus } from '@/types/labels';
+import type { LabelOrder, LabelOrderStatus } from '@/types/labels';
 
-const statusConfig: Record<LabelOrderStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
-  quote: { label: 'Quote', variant: 'outline', icon: <Clock className="h-3 w-3" /> },
-  pending_approval: { label: 'Pending Approval', variant: 'secondary', icon: <AlertCircle className="h-3 w-3" /> },
-  approved: { label: 'Approved', variant: 'default', icon: <CheckCircle className="h-3 w-3" /> },
-  in_production: { label: 'In Production', variant: 'default', icon: <Package className="h-3 w-3" /> },
-  completed: { label: 'Completed', variant: 'secondary', icon: <CheckCircle className="h-3 w-3" /> },
-  cancelled: { label: 'Cancelled', variant: 'destructive', icon: <AlertCircle className="h-3 w-3" /> },
-};
+const statusSteps: { key: string; label: string }[] = [
+  { key: 'pending_approval', label: 'Review' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'in_production', label: 'Production' },
+  { key: 'completed', label: 'Complete' },
+];
+
+function getStepIndex(status: string) {
+  const idx = statusSteps.findIndex((s) => s.key === status);
+  return idx >= 0 ? idx : 0;
+}
+
+function OrderProgressBar({ status }: { status: string }) {
+  const step = getStepIndex(status);
+  const pct = ((step + 1) / statusSteps.length) * 100;
+  return (
+    <div className="space-y-1.5">
+      <Progress value={pct} className="h-1.5" />
+      <div className="flex justify-between">
+        {statusSteps.map((s, i) => (
+          <span
+            key={s.key}
+            className={`text-[10px] font-medium ${i <= step ? 'text-primary' : 'text-muted-foreground/50'}`}
+          >
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function needsAction(order: LabelOrder): boolean {
+  if (order.status === 'pending_approval') return true;
+  return (order.items || []).some(
+    (i) => i.proofing_status === 'awaiting_client' || i.proofing_status === 'client_needs_upload'
+  );
+}
 
 export default function ClientPortalDashboard() {
   const navigate = useNavigate();
@@ -28,139 +70,166 @@ export default function ClientPortalDashboard() {
     navigate('/labels/portal/login');
   };
 
-  const pendingApprovalOrders = orders?.filter(o => o.status === 'pending_approval') || [];
-  const otherOrders = orders?.filter(o => o.status !== 'pending_approval') || [];
+  const actionOrders = useMemo(() => orders?.filter(needsAction) || [], [orders]);
+  const inProgressOrders = useMemo(
+    () => orders?.filter((o) => !needsAction(o) && o.status !== 'completed') || [],
+    [orders]
+  );
+  const completedOrders = useMemo(
+    () => orders?.filter((o) => o.status === 'completed') || [],
+    [orders]
+  );
+
+  const renderOrderCard = (order: LabelOrder, highlight?: boolean) => {
+    const awaitingCount = (order.items || []).filter(
+      (i) => i.proofing_status === 'awaiting_client' || i.proofing_status === 'client_needs_upload'
+    ).length;
+
+    return (
+      <Card
+        key={order.id}
+        className={`group cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
+          highlight ? 'border-destructive/40 bg-destructive/5' : ''
+        }`}
+        onClick={() => navigate(`/labels/portal/order/${order.id}`)}
+      >
+        <CardContent className="p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 min-w-0">
+              <p className="font-semibold text-base truncate">{order.order_number}</p>
+              <p className="text-xs text-muted-foreground">{order.customer_name}</p>
+            </div>
+            <div className="flex flex-col items-end gap-1.5">
+              {highlight && awaitingCount > 0 && (
+                <Badge variant="destructive" className="gap-1 text-[10px]">
+                  <AlertCircle className="h-3 w-3" />
+                  {awaitingCount} to review
+                </Badge>
+              )}
+              {order.due_date && (
+                <span className="text-[11px] text-muted-foreground">
+                  Due {format(new Date(order.due_date), 'dd MMM')}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-4 text-xs text-muted-foreground">
+            <span>{order.items?.length || 0} items</span>
+            <span>{order.total_label_count.toLocaleString()} labels</span>
+          </div>
+
+          <OrderProgressBar status={order.status} />
+
+          {highlight && (
+            <Button size="sm" className="w-full gap-2" variant="default">
+              <Eye className="h-3.5 w-3.5" />
+              Review & Approve
+              <ArrowRight className="h-3.5 w-3.5 ml-auto" />
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Boxes className="h-6 w-6 text-primary" />
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Package className="h-5 w-5 text-primary" />
+            </div>
             <div>
-              <h1 className="font-semibold">Label Client Portal</h1>
-              <p className="text-sm text-muted-foreground">
+              <h1 className="font-semibold text-sm">Client Portal</h1>
+              <p className="text-xs text-muted-foreground">
                 {contact?.company_name || 'Welcome'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={() => navigate('/labels/portal/account')}>
-              <User className="h-4 w-4 mr-2" />
+              <User className="h-4 w-4 mr-1.5" />
               Account
             </Button>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
-              <LogOut className="h-4 w-4 mr-2" />
+              <LogOut className="h-4 w-4 mr-1.5" />
               Sign Out
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 space-y-8">
-        {/* Pending Approvals */}
-        {pendingApprovalOrders.length > 0 && (
-          <section>
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-yellow-500" />
-              Pending Your Approval
-            </h2>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {pendingApprovalOrders.map((order) => (
-                <Card key={order.id} className="border-yellow-500/50 bg-yellow-500/5">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">{order.order_number}</CardTitle>
-                      <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                        Needs Approval
-                      </Badge>
-                    </div>
-                    <CardDescription>{order.customer_name}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Items</span>
-                        <span>{order.items?.length || 0}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Total Labels</span>
-                        <span>{order.total_label_count.toLocaleString()}</span>
-                      </div>
-                      {order.due_date && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Due Date</span>
-                          <span>{format(new Date(order.due_date), 'dd MMM yyyy')}</span>
-                        </div>
-                      )}
-                    </div>
-                    <Button 
-                      className="w-full mt-4"
-                      onClick={() => navigate(`/labels/portal/order/${order.id}`)}
-                    >
-                      <Eye className="h-4 w-4 mr-2" />
-                      Review & Approve
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </section>
-        )}
+      <main className="container mx-auto px-4 py-8 space-y-10 max-w-5xl">
+        {/* Welcome Hero */}
+        <div className="rounded-xl bg-primary/5 border border-primary/10 p-6 lg:p-8">
+          <h2 className="text-2xl font-bold text-foreground">
+            Welcome back{contact?.name ? `, ${contact.name.split(' ')[0]}` : ''}
+          </h2>
+          <p className="text-muted-foreground mt-1">
+            {actionOrders.length > 0
+              ? `You have ${actionOrders.length} order${actionOrders.length !== 1 ? 's' : ''} that need${actionOrders.length === 1 ? 's' : ''} your attention.`
+              : 'All your orders are up to date.'}
+          </p>
+        </div>
 
-        {/* All Orders */}
-        <section>
-          <h2 className="text-xl font-semibold mb-4">Your Orders</h2>
-          {isLoading ? (
-            <p className="text-muted-foreground text-center py-8">Loading orders...</p>
-          ) : orders?.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No orders yet</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <ScrollArea className="h-[500px]">
-              <div className="space-y-3">
-                {otherOrders.map((order) => {
-                  const config = statusConfig[order.status as LabelOrderStatus];
-                  return (
-                    <Card 
-                      key={order.id} 
-                      className="cursor-pointer hover:shadow-md transition-shadow"
-                      onClick={() => navigate(`/labels/portal/order/${order.id}`)}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{order.order_number}</span>
-                              <Badge variant={config?.variant || 'outline'}>
-                                {config?.icon}
-                                <span className="ml-1">{config?.label || order.status}</span>
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              {order.items?.length || 0} items · {order.total_label_count.toLocaleString()} labels
-                            </p>
-                          </div>
-                          <div className="text-right text-sm text-muted-foreground">
-                            <p>{format(new Date(order.created_at), 'dd MMM yyyy')}</p>
-                            {order.due_date && (
-                              <p>Due: {format(new Date(order.due_date), 'dd MMM')}</p>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </ScrollArea>
-          )}
-        </section>
+        {isLoading ? (
+          <div className="text-center py-16 text-muted-foreground">Loading your orders...</div>
+        ) : !orders?.length ? (
+          <Card>
+            <CardContent className="py-16 text-center space-y-3">
+              <Inbox className="h-12 w-12 mx-auto text-muted-foreground/40" />
+              <p className="text-lg font-medium text-muted-foreground">No orders yet</p>
+              <p className="text-sm text-muted-foreground/70">
+                When your label orders are ready for review, they'll appear here.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* Action Required */}
+            {actionOrders.length > 0 && (
+              <section className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                  <h3 className="text-lg font-semibold">Action Required</h3>
+                  <Badge variant="destructive" className="ml-1">{actionOrders.length}</Badge>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {actionOrders.map((o) => renderOrderCard(o, true))}
+                </div>
+              </section>
+            )}
+
+            {/* In Progress */}
+            {inProgressOrders.length > 0 && (
+              <section className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="text-lg font-semibold">In Progress</h3>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {inProgressOrders.map((o) => renderOrderCard(o))}
+                </div>
+              </section>
+            )}
+
+            {/* Completed */}
+            {completedOrders.length > 0 && (
+              <section className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="text-lg font-semibold">Completed</h3>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {completedOrders.map((o) => renderOrderCard(o))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
       </main>
     </div>
   );

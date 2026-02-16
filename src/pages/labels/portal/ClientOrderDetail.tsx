@@ -23,6 +23,9 @@ import {
   FileText,
   Loader2,
   CheckCheck,
+  Upload,
+  Eye,
+  Package,
 } from 'lucide-react';
 import {
   useClientPortalOrder,
@@ -32,6 +35,59 @@ import {
 } from '@/hooks/labels/useClientPortalData';
 import ClientItemCard from '@/components/labels/portal/ClientItemCard';
 import ApprovalDisclaimer from '@/components/labels/portal/ApprovalDisclaimer';
+
+const workflowSteps = [
+  { key: 'upload', label: 'Upload', icon: Upload },
+  { key: 'review', label: 'Review', icon: Eye },
+  { key: 'approve', label: 'Approve', icon: CheckCircle },
+  { key: 'production', label: 'Production', icon: Package },
+];
+
+function getWorkflowStep(status: string): number {
+  switch (status) {
+    case 'pending_approval': return 1;
+    case 'approved': return 2;
+    case 'in_production': return 3;
+    case 'completed': return 3;
+    default: return 0;
+  }
+}
+
+function WorkflowStepper({ status }: { status: string }) {
+  const current = getWorkflowStep(status);
+  return (
+    <div className="flex items-center justify-between gap-1 py-4 px-2">
+      {workflowSteps.map((step, i) => {
+        const isComplete = i < current;
+        const isCurrent = i === current;
+        const Icon = step.icon;
+        return (
+          <div key={step.key} className="flex items-center gap-1 flex-1 last:flex-initial">
+            <div className="flex flex-col items-center gap-1.5">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                  isComplete
+                    ? 'bg-primary text-primary-foreground'
+                    : isCurrent
+                      ? 'bg-primary/20 text-primary border-2 border-primary'
+                      : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {isComplete ? <CheckCircle className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+              </div>
+              <span className={`text-[10px] font-medium ${isComplete || isCurrent ? 'text-primary' : 'text-muted-foreground'}`}>
+                {step.label}
+              </span>
+            </div>
+            {i < workflowSteps.length - 1 && (
+              <div className={`flex-1 h-0.5 mx-1 mb-5 ${isComplete ? 'bg-primary' : 'bg-border'}`} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function ClientOrderDetail() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -49,7 +105,6 @@ export default function ClientOrderDetail() {
   const approveItemsMutation = useClientPortalApproveItems();
   const uploadMutation = useClientPortalUploadArtwork();
 
-  // Items that are awaiting client review
   const awaitingItems = useMemo(
     () => order?.items?.filter((i) => i.proofing_status === 'awaiting_client') || [],
     [order]
@@ -60,14 +115,12 @@ export default function ClientOrderDetail() {
     [order]
   );
 
-  // Toggle selection
   const handleToggleSelect = (id: string) => {
     setSelectedItemIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   };
 
-  // Select all awaiting items
   const handleSelectAll = () => {
     if (selectedItemIds.length === awaitingItems.length) {
       setSelectedItemIds([]);
@@ -76,7 +129,6 @@ export default function ClientOrderDetail() {
     }
   };
 
-  // Approve flow — opens disclaimer
   const handleApprove = (itemIds: string[]) => {
     setApproveItemIds(itemIds);
     setDisclaimerOpen(true);
@@ -94,7 +146,6 @@ export default function ClientOrderDetail() {
     setSelectedItemIds([]);
   };
 
-  // Reject flow — opens comment dialog
   const handleReject = (itemIds: string[]) => {
     setRejectItemIds(itemIds);
     setRejectDialogOpen(true);
@@ -114,7 +165,6 @@ export default function ClientOrderDetail() {
     setSelectedItemIds([]);
   };
 
-  // Artwork upload
   const handleUploadArtwork = async (itemId: string, file: File) => {
     if (!orderId) return;
     await uploadMutation.mutateAsync({ order_id: orderId, item_id: itemId, file });
@@ -151,14 +201,14 @@ export default function ClientOrderDetail() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-card sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
+      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-3 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/labels/portal')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="flex-1">
-            <h1 className="font-semibold">{order.order_number}</h1>
-            <p className="text-sm text-muted-foreground">{order.customer_name}</p>
+          <div className="flex-1 min-w-0">
+            <h1 className="font-semibold truncate">{order.order_number}</h1>
+            <p className="text-xs text-muted-foreground">{order.customer_name}</p>
           </div>
           {isApproved && (
             <Badge variant="default" className="gap-1">
@@ -169,43 +219,17 @@ export default function ClientOrderDetail() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Items */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Bulk actions */}
-            {awaitingItems.length > 0 && (
-              <div className="flex items-center justify-between bg-card border rounded-lg p-3">
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" onClick={handleSelectAll}>
-                    {selectedItemIds.length === awaitingItems.length ? 'Deselect All' : 'Select All'}
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    {awaitingItems.length} item{awaitingItems.length !== 1 ? 's' : ''} awaiting review
-                  </span>
-                </div>
-                {selectedItemIds.length > 0 && (
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleReject(selectedItemIds)}
-                    >
-                      <XCircle className="h-3.5 w-3.5 mr-1" />
-                      Request Changes ({selectedItemIds.length})
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleApprove(selectedItemIds)}
-                    >
-                      <CheckCheck className="h-3.5 w-3.5 mr-1" />
-                      Approve ({selectedItemIds.length})
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
+      <main className="container mx-auto px-4 py-6 max-w-5xl">
+        {/* Workflow Stepper */}
+        <Card className="mb-6">
+          <CardContent className="p-4">
+            <WorkflowStepper status={order.status} />
+          </CardContent>
+        </Card>
 
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Items */}
+          <div className="lg:col-span-2 space-y-5">
             {/* All approved banner */}
             {allItemsApproved && (
               <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-lg p-4">
@@ -221,7 +245,7 @@ export default function ClientOrderDetail() {
 
             {/* Item cards */}
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Label Items</CardTitle>
                 <CardDescription>
                   {order.items?.length || 0} items in this order
@@ -248,11 +272,9 @@ export default function ClientOrderDetail() {
             {/* Production Runs */}
             {order.runs && order.runs.length > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Production Layout</CardTitle>
-                  <CardDescription>
-                    Optimized print runs for your order
-                  </CardDescription>
+                  <CardDescription>Optimized print runs for your order</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
@@ -287,13 +309,13 @@ export default function ClientOrderDetail() {
           </div>
 
           {/* Sidebar */}
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Order Summary */}
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Order Summary</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Total Labels</span>
                   <span className="font-medium">{order.total_label_count.toLocaleString()}</span>
@@ -333,7 +355,7 @@ export default function ClientOrderDetail() {
             {/* Approval History */}
             {approvals && approvals.length > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Approval History</CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -342,9 +364,9 @@ export default function ClientOrderDetail() {
                       {approvals.map((approval: any) => (
                         <div key={approval.id} className="flex gap-3 text-sm">
                           {approval.action === 'approved' ? (
-                            <CheckCircle className="h-4 w-4 text-primary mt-0.5" />
+                            <CheckCircle className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                           ) : (
-                            <XCircle className="h-4 w-4 text-destructive mt-0.5" />
+                            <XCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
                           )}
                           <div>
                             <p className="font-medium">
@@ -367,6 +389,38 @@ export default function ClientOrderDetail() {
           </div>
         </div>
       </main>
+
+      {/* Sticky Approval Toolbar */}
+      {awaitingItems.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-sm border-t shadow-lg z-20">
+          <div className="container mx-auto px-4 py-3 max-w-5xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={handleSelectAll}>
+                {selectedItemIds.length === awaitingItems.length ? 'Deselect All' : 'Select All'}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {selectedItemIds.length} of {awaitingItems.length} selected
+              </span>
+            </div>
+            {selectedItemIds.length > 0 && (
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleReject(selectedItemIds)}
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                  Request Changes
+                </Button>
+                <Button size="sm" onClick={() => handleApprove(selectedItemIds)}>
+                  <CheckCheck className="h-3.5 w-3.5 mr-1" />
+                  Approve ({selectedItemIds.length})
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Approval Disclaimer Dialog */}
       <ApprovalDisclaimer
