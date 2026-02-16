@@ -1,89 +1,103 @@
 
 
-# Premium Client Portal Redesign — Matching Reference Quality
+# Fix Auto-Imposition from Client Portal
 
-## What's Wrong Now
+## Problem
 
-The current dashboard is a single-column, top-to-bottom layout with plain stat counters, a basic table, and resource cards. It looks like a data report, not a client-facing portal.
+The auto-imposition code in `label-client-data/index.ts` only sends `{ run_id }` to the `label-impose` edge function, but `label-impose` requires a full request payload including dieline config, slot assignments with PDF URLs, meters to print, etc. Every auto-impose call silently fails.
 
-## What the Reference Shows (and What We'll Build)
+Additionally, this order was marked `approved` via a manual SQL migration before the approval flow could trigger naturally, so auto-imposition was never attempted.
 
-The reference image demonstrates a **multi-panel dashboard** with distinct content zones arranged in a grid. Here's what we'll replicate using the data we actually have:
+## Fix
 
-### Layout Structure
+Update the auto-imposition section in `label-client-data/index.ts` to build the complete `ImposeRequest` for each run by:
 
-```text
-+------+------------------------------------------+
-|      |  Welcome back, James                     |
-| SIDE |  Stats Cards (with CTAs + thumbnails)     |
-| BAR  |                                           |
-|      +---------------------+--------------------+
-| Dash |  Recent Orders      | Track Your Order   |
-| My   |  (table view)       | (visual progress   |
-| Ord  |                     |  stepper for most   |
-| Acct |                     |  recent active)     |
-| Help +---------------------+--------------------+
-|      |  Resources & Support (icon grid)          |
-+------+------------------------------------------+
+1. Fetching the order's dieline config from `label_dielines` (via `label_orders.dieline_id`)
+2. For each planned run, reading its `slot_assignments` and enriching each slot with the item's `print_pdf_url` from `label_items`
+3. Sending the full payload to `label-impose`
+
+### What changes in `label-client-data/index.ts`
+
+Replace the fire-and-forget block (lines ~377-402) with:
+
+```typescript
+// Fetch dieline for this order
+const { data: orderWithDieline } = await supabase
+  .from("label_orders")
+  .select("dieline_id, label_dielines(*)")
+  .eq("id", order_id)
+  .single();
+
+const dieline = orderWithDieline?.label_dielines;
+
+if (dieline && runs && runs.length > 0) {
+  // Build item PDF lookup map
+  const itemPdfMap = new Map(
+    (allItems || [])
+      .filter((i: any) => i.print_pdf_url)
+      .map((i: any) => [i.id, i.print_pdf_url])
+  );
+
+  for (const run of runs) {
+    // Enrich slot assignments with pdf_url
+    const slots = (run.slot_assignments || []).map((slot: any) => ({
+      slot: slot.slot,
+      item_id: slot.item_id,
+      quantity_in_slot: slot.quantity_in_slot,
+      needs_rotation: slot.needs_rotation || false,
+      pdf_url: itemPdfMap.get(slot.item_id) || "",
+    }));
+
+    const imposePayload = {
+      run_id: run.id,
+      order_id: order_id,
+      dieline: {
+        roll_width_mm: dieline.roll_width_mm,
+        label_width_mm: dieline.label_width_mm,
+        label_height_mm: dieline.label_height_mm,
+        columns_across: dieline.columns_across,
+        rows_around: dieline.rows_around,
+        horizontal_gap_mm: dieline.horizontal_gap_mm,
+        vertical_gap_mm: dieline.vertical_gap_mm,
+        corner_radius_mm: dieline.corner_radius_mm,
+      },
+      slot_assignments: slots,
+      include_dielines: true,
+      meters_to_print: run.meters_to_print || 1,
+    };
+
+    fetch(`${supabaseUrl}/functions/v1/label-impose`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(imposePayload),
+    }).catch((err) =>
+      console.error("Auto-impose error for run", run.id, err)
+    );
+  }
+}
 ```
 
-### Specific Changes
+Also update the runs query to include `slot_assignments` and `meters_to_print`:
+```typescript
+const { data: runs } = await supabase
+  .from("label_runs")
+  .select("id, slot_assignments, meters_to_print")
+  .eq("order_id", order_id)
+  .eq("status", "planned");
+```
 
-**1. Add a Left Sidebar**
-- Compact sidebar (~220px) with navigation: Dashboard, My Orders (links to same page filtered), Account Settings, Help Center
-- Branded with Impress logo at top, teal accent on active item
-- Collapses on mobile to a top bar or hamburger
+### Testing
 
-**2. Rich Stats Cards (with CTAs)**
-- Each stat card gets a "View" CTA button (e.g., "View Orders >")
-- Subtle product thumbnail strip at the bottom of cards that have orders (using signed thumbnail URLs from the first few items)
-- Slightly larger cards with more visual weight
+After deploying, we need to re-trigger the approval flow. Since the order is already approved, we can either:
+- Reset the order status to `pending_approval` and re-approve from the portal, OR
+- Manually trigger `label-impose` for each run using the operator "Send to Print" button
 
-**3. Two-Column Content Grid**
-- Left column: "Recent Orders" table (same data, better styling)
-- Right column: "Track Your Order" widget showing the workflow stepper for the most recent active order (reusing the existing `WorkflowStepper` pattern from OrderDetail)
-
-**4. Resources Section**
-- Icon-centric grid (larger icons, centered layout) matching the reference's compact resource cards
-
-**5. Overall Visual Polish**
-- Subtle gray background (`bg-gray-50`) for the main content area
-- White card surfaces with refined shadows (`shadow-sm`)
-- Larger section headers with bolder typography
-- More generous padding and spacing throughout
-- Professional footer
-
-### What We Won't Build (Not Applicable to Our Data)
-- "Quick Reorder" — we don't have reorder functionality
-- "Saved Designs" — we don't store design templates per client
-- "Invoices" — not part of the label portal scope
-- Shopping cart / notifications badge — not applicable
-
-These sections from the reference rely on features outside our current system. The plan focuses on making maximum visual impact with the data we have.
-
----
-
-## Technical Details
-
-### Files Modified
+## Files Modified
 
 | File | Changes |
 |------|---------|
-| `src/pages/labels/portal/ClientPortalDashboard.tsx` | Complete rewrite: sidebar + grid layout, rich stat cards with CTAs and thumbnails, tracking widget, two-column content area |
-
-### No New Files or Dependencies Required
-
-The sidebar will be built inline (not using shadcn Sidebar component) since this is a standalone portal page outside the main app layout. Simple `div`-based sidebar with responsive behavior.
-
-### Key Implementation Details
-
-**Sidebar Navigation** -- Simple static nav component rendered as a left column within the dashboard. Links to `/labels/portal` (Dashboard), `/labels/portal` with filter params for "My Orders", `/labels/portal/account` for Account Settings, and a mailto link for Help.
-
-**Stats Cards with Thumbnails** -- For each stat category (Awaiting, In Production, etc.), filter orders matching that status, grab the first item's `signed_proof_thumbnail_url`, and display it as a small preview strip at the bottom of the card. Add a teal CTA button "View Orders >".
-
-**Track Your Order Widget** -- Find the most recent non-completed order. Render the workflow stepper (reuse `getWorkflowStep` logic) inside a card in the right column. Show order number, description, and a "Track Shipment" style CTA.
-
-**Two-Column Grid** -- Use `grid grid-cols-1 lg:grid-cols-5` with the sidebar taking `lg:col-span-1` and main content `lg:col-span-4`. Inside main, the orders table and tracking widget use `grid grid-cols-1 lg:grid-cols-2`.
-
-**Mobile Responsive** -- Sidebar collapses to a horizontal nav bar on mobile. Stats cards go to 2-column grid. Content sections stack vertically.
+| `supabase/functions/label-client-data/index.ts` | Build full impose request with dieline, enriched slots, and meters |
 
