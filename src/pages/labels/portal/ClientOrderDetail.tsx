@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +21,6 @@ import {
   ArrowLeft,
   CheckCircle,
   XCircle,
-  FileText,
   Loader2,
   CheckCheck,
   Upload,
@@ -105,14 +105,22 @@ export default function ClientOrderDetail() {
   const approveItemsMutation = useClientPortalApproveItems();
   const uploadMutation = useClientPortalUploadArtwork();
 
-  const awaitingItems = useMemo(
-    () => order?.items?.filter((i) => i.proofing_status === 'awaiting_client') || [],
+  // Filter out parent/original PDF items (multi-page parents that were split)
+  const visibleItems = useMemo(
+    () => (order?.items || []).filter(
+      (item) => !(item.page_count > 1 && !item.parent_item_id)
+    ),
     [order]
   );
 
+  const awaitingItems = useMemo(
+    () => visibleItems.filter((i) => i.proofing_status === 'awaiting_client'),
+    [visibleItems]
+  );
+
   const allItemsApproved = useMemo(
-    () => order?.items?.length && order.items.every((i) => i.proofing_status === 'approved'),
-    [order]
+    () => visibleItems.length > 0 && visibleItems.every((i) => i.proofing_status === 'approved'),
+    [visibleItems]
   );
 
   const handleToggleSelect = (id: string) => {
@@ -136,14 +144,18 @@ export default function ClientOrderDetail() {
 
   const handleConfirmApproval = async () => {
     if (!orderId || approveItemIds.length === 0) return;
-    await approveItemsMutation.mutateAsync({
-      order_id: orderId,
-      item_ids: approveItemIds,
-      action: 'approved',
-    });
-    setDisclaimerOpen(false);
-    setApproveItemIds([]);
-    setSelectedItemIds([]);
+    try {
+      await approveItemsMutation.mutateAsync({
+        order_id: orderId,
+        item_ids: approveItemIds,
+        action: 'approved',
+      });
+      setDisclaimerOpen(false);
+      setApproveItemIds([]);
+      setSelectedItemIds([]);
+    } catch (error) {
+      console.error('Approval error:', error);
+    }
   };
 
   const handleReject = (itemIds: string[]) => {
@@ -153,16 +165,20 @@ export default function ClientOrderDetail() {
 
   const handleConfirmReject = async () => {
     if (!orderId || rejectItemIds.length === 0 || !rejectComment.trim()) return;
-    await approveItemsMutation.mutateAsync({
-      order_id: orderId,
-      item_ids: rejectItemIds,
-      action: 'rejected',
-      comment: rejectComment,
-    });
-    setRejectDialogOpen(false);
-    setRejectComment('');
-    setRejectItemIds([]);
-    setSelectedItemIds([]);
+    try {
+      await approveItemsMutation.mutateAsync({
+        order_id: orderId,
+        item_ids: rejectItemIds,
+        action: 'rejected',
+        comment: rejectComment,
+      });
+      setRejectDialogOpen(false);
+      setRejectComment('');
+      setRejectItemIds([]);
+      setSelectedItemIds([]);
+    } catch (error) {
+      console.error('Reject error:', error);
+    }
   };
 
   const handleUploadArtwork = async (itemId: string, file: File) => {
@@ -248,12 +264,24 @@ export default function ClientOrderDetail() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Label Items</CardTitle>
                 <CardDescription>
-                  {order.items?.length || 0} items in this order
+                  {visibleItems.length} items in this order
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {/* Select All checkbox */}
+                {awaitingItems.length > 0 && (
+                  <div className="flex items-center gap-2 mb-4 p-3 bg-muted/50 rounded-lg border">
+                    <Checkbox
+                      checked={selectedItemIds.length === awaitingItems.length && awaitingItems.length > 0}
+                      onCheckedChange={handleSelectAll}
+                    />
+                    <span className="text-sm font-medium">
+                      Select All ({awaitingItems.length} awaiting review)
+                    </span>
+                  </div>
+                )}
                 <div className="space-y-3">
-                  {order.items?.map((item) => (
+                  {visibleItems.map((item) => (
                     <ClientItemCard
                       key={item.id}
                       item={item as any}
@@ -268,44 +296,6 @@ export default function ClientOrderDetail() {
                 </div>
               </CardContent>
             </Card>
-
-            {/* Production Runs */}
-            {order.runs && order.runs.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Production Layout</CardTitle>
-                  <CardDescription>Optimized print runs for your order</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {order.runs.map((run) => (
-                      <div key={run.id} className="p-4 border rounded-lg">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-medium">Run {run.run_number}</span>
-                          <Badge variant="outline">
-                            {run.frames_count} frames · {run.meters_to_print?.toFixed(1)}m
-                          </Badge>
-                        </div>
-                        {run.ai_reasoning && (
-                          <p className="text-sm text-muted-foreground">{run.ai_reasoning}</p>
-                        )}
-                        {run.imposed_pdf_with_dielines_url && (
-                          <a
-                            href={run.imposed_pdf_with_dielines_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-sm text-primary hover:underline mt-2"
-                          >
-                            <FileText className="h-3 w-3" />
-                            View Proof PDF
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Sidebar */}
