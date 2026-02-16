@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
     }));
 
     // Call VPS PDF API imposition endpoint
-    const response = await fetch(`${VPS_PDF_API_URL}/impose/labels`, {
+    const response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
