@@ -1,104 +1,65 @@
 
 
-# Fix "Action Required" Bug + Premium Portal UI Redesign
+# Premium Client Portal Redesign — Matching Reference Quality
 
-## 1. Bug Fix: "Action Required" when all items are approved
+## What's Wrong Now
 
-### Root Cause
-The edge function's `allApproved` check (line 357-358 in `label-client-data/index.ts`) checks ALL items including the parent multi-page item. The parent item (`page_count: 24`, no `parent_item_id`) still has `proofing_status: 'awaiting_client'` because clients only approve the individual child pages. So the check never passes and the order stays `pending_approval`.
+The current dashboard is a single-column, top-to-bottom layout with plain stat counters, a basic table, and resource cards. It looks like a data report, not a client-facing portal.
 
-### Fix (two parts)
+## What the Reference Shows (and What We'll Build)
 
-**A. Edge function** -- Filter parent items from the `allApproved` check:
-```typescript
-const visibleItems = allItems?.filter(
-  (i: any) => !(i.page_count > 1 && !i.parent_item_id)
-) || [];
-const allApproved = visibleItems.length > 0 && 
-  visibleItems.every((i) => i.proofing_status === "approved");
-```
+The reference image demonstrates a **multi-panel dashboard** with distinct content zones arranged in a grid. Here's what we'll replicate using the data we actually have:
 
-**B. Dashboard `needsAction` function** -- Also account for the case where the order is `pending_approval` but all visible items are approved (handles stale order status):
-```typescript
-function needsAction(order: LabelOrder): boolean {
-  const items = getVisibleItems(order);
-  const allApproved = items.length > 0 && items.every(i => i.proofing_status === 'approved');
-  if (allApproved) return false; // Override even if order.status is pending_approval
-  if (order.status === 'pending_approval') return true;
-  return items.some(
-    i => i.proofing_status === 'awaiting_client' || i.proofing_status === 'client_needs_upload'
-  );
-}
-```
-
-**C. Data fix** -- Update the current stuck order to `approved`:
-```sql
-UPDATE label_orders SET status = 'approved', 
-  client_approved_at = NOW() 
-WHERE order_number = 'LBL-2026-0001' AND status = 'pending_approval';
-```
-
----
-
-## 2. Premium Portal UI Redesign
-
-Inspired by the reference image, transform the dashboard into a rich, multi-section layout.
-
-### Dashboard Layout (new structure)
+### Layout Structure
 
 ```text
-+--------------------------------------------------+
-| [Impress Logo] Client Portal    [Account] [Logout]|
-| ================================================= |
-|                                                    |
-| Welcome back, James                                |
-| Manage your label orders and track your prints.    |
-|                                                    |
-| +----------+ +----------+ +-----------+ +-------+ |
-| | Awaiting | | In Prod. | | Completed | | Total | |
-| | Approval | |    0     | |     0     | |   1   | |
-| |    1     | |          | |           | |       | |
-| +----------+ +----------+ +-----------+ +-------+ |
-|                                                    |
-| Action Required                                    |
-| +-----------------------------------------------+ |
-| | [Thumbnail] LBL-2026-0001                     | |
-| |             24 items - 26,000 labels           | |
-| |             [Review] [Approved] [Prod] [Done]  | |
-| |             [Review & Approve ->]              | |
-| +-----------------------------------------------+ |
-|                                                    |
-| Recent Orders (table view)                         |
-| +-----------------------------------------------+ |
-| | Order #   | Status | Items | Due Date         | |
-| | LBL-001   | Review |  24   | 15 Mar           | |
-| +-----------------------------------------------+ |
-|                                                    |
-| Resources & Support                                |
-| +----------+ +----------+ +----------+            |
-| | File     | | Artwork  | | Contact  |            |
-| | Guide    | | Templates| | Support  |            |
-| +----------+ +----------+ +----------+            |
-|                                                    |
-| Footer                                             |
-+--------------------------------------------------+
++------+------------------------------------------+
+|      |  Welcome back, James                     |
+| SIDE |  Stats Cards (with CTAs + thumbnails)     |
+| BAR  |                                           |
+|      +---------------------+--------------------+
+| Dash |  Recent Orders      | Track Your Order   |
+| My   |  (table view)       | (visual progress   |
+| Ord  |                     |  stepper for most   |
+| Acct |                     |  recent active)     |
+| Help +---------------------+--------------------+
+|      |  Resources & Support (icon grid)          |
++------+------------------------------------------+
 ```
 
-### Key UI Changes
+### Specific Changes
 
-**Stats Cards Row** -- Four metric cards at the top: Awaiting Approval, In Production, Completed, Total Orders. Each with a count and subtle icon.
+**1. Add a Left Sidebar**
+- Compact sidebar (~220px) with navigation: Dashboard, My Orders (links to same page filtered), Account Settings, Help Center
+- Branded with Impress logo at top, teal accent on active item
+- Collapses on mobile to a top bar or hamburger
 
-**Order Cards** -- Larger, with thumbnail preview, progress stepper inline, and prominent CTA button. Cards have subtle gradient backgrounds when action is needed.
+**2. Rich Stats Cards (with CTAs)**
+- Each stat card gets a "View" CTA button (e.g., "View Orders >")
+- Subtle product thumbnail strip at the bottom of cards that have orders (using signed thumbnail URLs from the first few items)
+- Slightly larger cards with more visual weight
 
-**Recent Orders Table** -- Below the action cards, a clean table showing all orders with status badges, item counts, and due dates.
+**3. Two-Column Content Grid**
+- Left column: "Recent Orders" table (same data, better styling)
+- Right column: "Track Your Order" widget showing the workflow stepper for the most recent active order (reusing the existing `WorkflowStepper` pattern from OrderDetail)
 
-**Resources & Support Section** -- Three cards linking to file guidelines, artwork templates, and customer support contact.
+**4. Resources Section**
+- Icon-centric grid (larger icons, centered layout) matching the reference's compact resource cards
 
-**Overall Polish** -- More whitespace, larger typography, subtle shadows, rounded corners, professional spacing throughout.
+**5. Overall Visual Polish**
+- Subtle gray background (`bg-gray-50`) for the main content area
+- White card surfaces with refined shadows (`shadow-sm`)
+- Larger section headers with bolder typography
+- More generous padding and spacing throughout
+- Professional footer
 
-### Order Detail Page
-- Keep current layout (it's already well-structured with stepper, sidebar, items grid)
-- No major changes needed
+### What We Won't Build (Not Applicable to Our Data)
+- "Quick Reorder" — we don't have reorder functionality
+- "Saved Designs" — we don't store design templates per client
+- "Invoices" — not part of the label portal scope
+- Shopping cart / notifications badge — not applicable
+
+These sections from the reference rely on features outside our current system. The plan focuses on making maximum visual impact with the data we have.
 
 ---
 
@@ -108,9 +69,21 @@ Inspired by the reference image, transform the dashboard into a rich, multi-sect
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/label-client-data/index.ts` | Filter parent items from `allApproved` check |
-| `src/pages/labels/portal/ClientPortalDashboard.tsx` | Premium multi-section layout with stats cards, table, resources |
-| Database (one-time fix) | Update LBL-2026-0001 order status to `approved` |
+| `src/pages/labels/portal/ClientPortalDashboard.tsx` | Complete rewrite: sidebar + grid layout, rich stat cards with CTAs and thumbnails, tracking widget, two-column content area |
 
-### No new dependencies required
+### No New Files or Dependencies Required
+
+The sidebar will be built inline (not using shadcn Sidebar component) since this is a standalone portal page outside the main app layout. Simple `div`-based sidebar with responsive behavior.
+
+### Key Implementation Details
+
+**Sidebar Navigation** -- Simple static nav component rendered as a left column within the dashboard. Links to `/labels/portal` (Dashboard), `/labels/portal` with filter params for "My Orders", `/labels/portal/account` for Account Settings, and a mailto link for Help.
+
+**Stats Cards with Thumbnails** -- For each stat category (Awaiting, In Production, etc.), filter orders matching that status, grab the first item's `signed_proof_thumbnail_url`, and display it as a small preview strip at the bottom of the card. Add a teal CTA button "View Orders >".
+
+**Track Your Order Widget** -- Find the most recent non-completed order. Render the workflow stepper (reuse `getWorkflowStep` logic) inside a card in the right column. Show order number, description, and a "Track Shipment" style CTA.
+
+**Two-Column Grid** -- Use `grid grid-cols-1 lg:grid-cols-5` with the sidebar taking `lg:col-span-1` and main content `lg:col-span-4`. Inside main, the orders table and tracking widget use `grid grid-cols-1 lg:grid-cols-2`.
+
+**Mobile Responsive** -- Sidebar collapses to a horizontal nav bar on mobile. Stats cards go to 2-column grid. Content sections stack vertically.
 
