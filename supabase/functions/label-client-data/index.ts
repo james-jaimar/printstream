@@ -147,6 +147,8 @@ Deno.serve(async (req) => {
       req.method === "GET" &&
       (path === "/orders" || path === "" || path === "/")
     ) {
+      // Only show orders that are client-visible (not internal quotes/drafts)
+      const clientVisibleStatuses = ['pending_approval', 'approved', 'in_production', 'completed'];
       const { data, error } = await supabase
         .from("label_orders")
         .select(
@@ -159,6 +161,7 @@ Deno.serve(async (req) => {
         `
         )
         .eq("customer_id", customerId)
+        .in("status", clientVisibleStatuses)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
