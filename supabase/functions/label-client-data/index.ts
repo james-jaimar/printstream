@@ -165,6 +165,18 @@ Deno.serve(async (req) => {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
+
+      // Filter out parent items that were split into child pages
+      if (data) {
+        for (const order of data) {
+          if (order.items) {
+            order.items = order.items.filter(
+              (item: any) => !(item.page_count > 1 && !item.parent_item_id)
+            );
+          }
+        }
+      }
+
       return jsonResponse({ orders: data || [] });
     }
 
