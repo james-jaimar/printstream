@@ -36,6 +36,7 @@ import {
 } from '@/hooks/labels/useClientPortalData';
 import ClientItemCard from '@/components/labels/portal/ClientItemCard';
 import ApprovalDisclaimer from '@/components/labels/portal/ApprovalDisclaimer';
+import impressLogo from '@/assets/impress-logo-colour.png';
 
 const workflowSteps = [
   { key: 'upload', label: 'Upload', icon: Upload },
@@ -57,31 +58,35 @@ function getWorkflowStep(status: string): number {
 function WorkflowStepper({ status }: { status: string }) {
   const current = getWorkflowStep(status);
   return (
-    <div className="flex items-center justify-between gap-1 py-4 px-2">
+    <div className="flex items-center justify-between gap-1 py-6 px-4">
       {workflowSteps.map((step, i) => {
         const isComplete = i < current;
         const isCurrent = i === current;
         const Icon = step.icon;
         return (
           <div key={step.key} className="flex items-center gap-1 flex-1 last:flex-initial">
-            <div className="flex flex-col items-center gap-1.5">
+            <div className="flex flex-col items-center gap-2">
               <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
                   isComplete
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'text-primary-foreground'
                     : isCurrent
-                      ? 'bg-primary/20 text-primary border-2 border-primary'
+                      ? 'text-primary border-2 border-primary bg-primary/10'
                       : 'bg-muted text-muted-foreground'
                 }`}
+                style={isComplete ? { background: '#00B8D4' } : undefined}
               >
-                {isComplete ? <CheckCircle className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                {isComplete ? <CheckCircle className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
               </div>
-              <span className={`text-[10px] font-medium ${isComplete || isCurrent ? 'text-primary' : 'text-muted-foreground'}`}>
+              <span className={`text-xs font-medium ${isComplete || isCurrent ? 'text-foreground' : 'text-muted-foreground'}`}>
                 {step.label}
               </span>
             </div>
             {i < workflowSteps.length - 1 && (
-              <div className={`flex-1 h-0.5 mx-1 mb-5 ${isComplete ? 'bg-primary' : 'bg-border'}`} />
+              <div
+                className={`flex-1 h-0.5 mx-2 mb-6 rounded-full ${isComplete ? '' : 'bg-border'}`}
+                style={isComplete ? { background: '#00B8D4' } : undefined}
+              />
             )}
           </div>
         );
@@ -94,6 +99,7 @@ export default function ClientOrderDetail() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
 
+  // All state declarations
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
@@ -128,6 +134,7 @@ export default function ClientOrderDetail() {
     [visibleItems]
   );
 
+  // All handler functions: handleToggleSelect, handleSelectAll, handleApprove, handleConfirmApproval, handleReject, handleConfirmReject, handleUploadArtwork, handleOrderUpload
   const handleToggleSelect = (id: string) => {
     setSelectedItemIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -238,14 +245,17 @@ export default function ClientOrderDetail() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-10">
+      {/* Branded Header */}
+      <header className="border-b bg-card sticky top-0 z-10">
+        <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, #00B8D4, #0097A7)' }} />
         <div className="container mx-auto px-4 py-3 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/labels/portal')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
+          <img src={impressLogo} alt="Impress" className="h-7 object-contain hidden sm:block" />
+          <div className="hidden sm:block h-6 w-px bg-border" />
           <div className="flex-1 min-w-0">
-            <h1 className="font-semibold truncate">{order.order_number}</h1>
+            <h1 className="font-bold truncate">{order.order_number}</h1>
             <p className="text-xs text-muted-foreground">{order.customer_name}</p>
           </div>
           {order.status === 'pending_approval' && (
@@ -266,7 +276,7 @@ export default function ClientOrderDetail() {
       <main className="container mx-auto px-4 py-6 max-w-5xl">
         {/* Workflow Stepper */}
         <Card className="mb-6">
-          <CardContent className="p-4">
+          <CardContent className="p-2">
             <WorkflowStepper status={order.status} />
           </CardContent>
         </Card>
@@ -276,8 +286,8 @@ export default function ClientOrderDetail() {
           <div className="lg:col-span-2 space-y-5">
             {/* All approved banner */}
             {allItemsApproved && (
-              <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-lg p-4">
-                <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+              <div className="flex items-center gap-3 rounded-lg p-4 border" style={{ background: 'hsl(187 100% 42% / 0.08)', borderColor: 'hsl(187 100% 42% / 0.2)' }}>
+                <CheckCircle className="h-5 w-5 flex-shrink-0" style={{ color: '#00B8D4' }} />
                 <div>
                   <p className="font-medium text-sm">All items approved</p>
                   <p className="text-xs text-muted-foreground">
@@ -410,7 +420,7 @@ export default function ClientOrderDetail() {
 
       {/* Sticky Approval Toolbar */}
       {awaitingItems.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-sm border-t shadow-lg z-20">
+        <div className="fixed bottom-0 left-0 right-0 border-t shadow-lg z-20" style={{ background: 'hsl(var(--card) / 0.95)', backdropFilter: 'blur(8px)' }}>
           <div className="container mx-auto px-4 py-3 max-w-5xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm" onClick={handleSelectAll}>

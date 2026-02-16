@@ -6,20 +6,27 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { format } from 'date-fns';
 import {
-  Package,
   Eye,
   Clock,
   CheckCircle,
   AlertCircle,
   LogOut,
   User,
-  Upload,
   ArrowRight,
   Inbox,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useClientAuth } from '@/hooks/labels/useClientAuth';
 import { useClientPortalOrders } from '@/hooks/labels/useClientPortalData';
-import type { LabelOrder, LabelOrderStatus } from '@/types/labels';
+import impressLogo from '@/assets/impress-logo-colour.png';
+import type { LabelOrder } from '@/types/labels';
+
+/** Filter out parent items that were split into child pages */
+function getVisibleItems(order: LabelOrder) {
+  return (order.items || []).filter(
+    (i) => !(i.page_count > 1 && !i.parent_item_id)
+  );
+}
 
 const statusSteps: { key: string; label: string }[] = [
   { key: 'pending_approval', label: 'Review' },
@@ -55,7 +62,8 @@ function OrderProgressBar({ status }: { status: string }) {
 
 function needsAction(order: LabelOrder): boolean {
   if (order.status === 'pending_approval') return true;
-  return (order.items || []).some(
+  const items = getVisibleItems(order);
+  return items.some(
     (i) => i.proofing_status === 'awaiting_client' || i.proofing_status === 'client_needs_upload'
   );
 }
@@ -81,22 +89,40 @@ export default function ClientPortalDashboard() {
   );
 
   const renderOrderCard = (order: LabelOrder, highlight?: boolean) => {
-    const awaitingCount = (order.items || []).filter(
+    const visibleItems = getVisibleItems(order);
+    const awaitingCount = visibleItems.filter(
       (i) => i.proofing_status === 'awaiting_client' || i.proofing_status === 'client_needs_upload'
     ).length;
+
+    // Get first item thumbnail for visual preview
+    const firstThumb = visibleItems.find(
+      (i) => (i as any).signed_proof_thumbnail_url || (i as any).signed_artwork_thumbnail_url
+    );
+    const thumbUrl = firstThumb
+      ? (firstThumb as any).signed_proof_thumbnail_url || (firstThumb as any).signed_artwork_thumbnail_url
+      : null;
 
     return (
       <Card
         key={order.id}
-        className={`group cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
+        className={`group cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 overflow-hidden ${
           highlight ? 'border-destructive/40 bg-destructive/5' : ''
         }`}
         onClick={() => navigate(`/labels/portal/order/${order.id}`)}
       >
-        <CardContent className="p-5 space-y-4">
+        {/* Thumbnail strip */}
+        <div className="h-32 bg-muted flex items-center justify-center overflow-hidden">
+          {thumbUrl ? (
+            <img src={thumbUrl} alt={order.order_number} className="w-full h-full object-contain" />
+          ) : (
+            <ImageIcon className="h-10 w-10 text-muted-foreground/30" />
+          )}
+        </div>
+
+        <CardContent className="p-5 space-y-3">
           <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1 min-w-0">
-              <p className="font-semibold text-base truncate">{order.order_number}</p>
+            <div className="space-y-0.5 min-w-0">
+              <p className="font-bold text-base truncate">{order.order_number}</p>
               <p className="text-xs text-muted-foreground">{order.customer_name}</p>
             </div>
             <div className="flex flex-col items-end gap-1.5">
@@ -115,7 +141,7 @@ export default function ClientPortalDashboard() {
           </div>
 
           <div className="flex gap-4 text-xs text-muted-foreground">
-            <span>{order.items?.length || 0} items</span>
+            <span>{visibleItems.length} items</span>
             <span>{order.total_label_count.toLocaleString()} labels</span>
           </div>
 
@@ -135,14 +161,14 @@ export default function ClientPortalDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-10">
+      {/* Branded Header */}
+      <header className="border-b bg-card sticky top-0 z-10">
+        <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, #00B8D4, #0097A7)' }} />
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Package className="h-5 w-5 text-primary" />
-            </div>
-            <div>
+          <div className="flex items-center gap-4">
+            <img src={impressLogo} alt="Impress" className="h-8 object-contain" />
+            <div className="hidden sm:block h-6 w-px bg-border" />
+            <div className="hidden sm:block">
               <h1 className="font-semibold text-sm">Client Portal</h1>
               <p className="text-xs text-muted-foreground">
                 {contact?.company_name || 'Welcome'}
@@ -152,11 +178,11 @@ export default function ClientPortalDashboard() {
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={() => navigate('/labels/portal/account')}>
               <User className="h-4 w-4 mr-1.5" />
-              Account
+              <span className="hidden sm:inline">Account</span>
             </Button>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-1.5" />
-              Sign Out
+              <span className="hidden sm:inline">Sign Out</span>
             </Button>
           </div>
         </div>
@@ -164,7 +190,7 @@ export default function ClientPortalDashboard() {
 
       <main className="container mx-auto px-4 py-8 space-y-10 max-w-5xl">
         {/* Welcome Hero */}
-        <div className="rounded-xl bg-primary/5 border border-primary/10 p-6 lg:p-8">
+        <div className="rounded-xl border p-6 lg:p-8" style={{ background: 'linear-gradient(135deg, hsl(187 100% 42% / 0.08), hsl(187 100% 42% / 0.02))' }}>
           <h2 className="text-2xl font-bold text-foreground">
             Welcome back{contact?.name ? `, ${contact.name.split(' ')[0]}` : ''}
           </h2>
@@ -231,6 +257,12 @@ export default function ClientPortalDashboard() {
           </>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t mt-16 py-6 text-center text-xs text-muted-foreground">
+        <p>© {new Date().getFullYear()} Impress Digital · Litho · Web · Packaging · Signage</p>
+        <p className="mt-1">Need help? Contact your account manager or email support@impress.co.za</p>
+      </footer>
     </div>
   );
 }

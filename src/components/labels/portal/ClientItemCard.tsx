@@ -22,7 +22,6 @@ type ProofingBadge = {
   label: string;
   variant: 'default' | 'secondary' | 'destructive' | 'outline';
   icon: React.ReactNode;
-  className?: string;
 };
 
 const proofingBadges: Record<string, ProofingBadge> = {
@@ -77,34 +76,33 @@ export default function ClientItemCard({
   const needsUpload = status === 'client_needs_upload';
   const isApproved = status === 'approved';
 
+  // SECURITY: Only use signed URLs — never expose raw Supabase storage paths
   const thumbnailUrl =
     item.signed_proof_thumbnail_url ||
     item.signed_artwork_thumbnail_url ||
-    item.proof_thumbnail_url ||
-    item.artwork_thumbnail_url;
+    null;
 
   const pdfUrl =
     item.signed_proof_pdf_url ||
     item.signed_artwork_pdf_url ||
-    item.proof_pdf_url ||
-    item.artwork_pdf_url;
-
-  const borderClass = isApproved
-    ? 'border-primary/30 bg-primary/5'
-    : canReview
-      ? 'border-destructive/30 bg-destructive/5'
-      : needsUpload
-        ? 'border-destructive/30'
-        : '';
+    null;
 
   return (
     <>
-      <Card className={`transition-all ${selected ? 'ring-2 ring-primary' : ''} ${borderClass}`}>
-        <CardContent className="p-4">
-          <div className="flex gap-4">
+      <Card className={`transition-all overflow-hidden ${selected ? 'ring-2 ring-primary' : ''} ${
+        isApproved
+          ? 'border-primary/30 bg-primary/5'
+          : canReview
+            ? 'border-destructive/30 bg-destructive/5'
+            : needsUpload
+              ? 'border-destructive/30'
+              : ''
+      }`}>
+        <CardContent className="p-0">
+          <div className="flex">
             {/* Checkbox */}
             {canReview && (
-              <div className="flex items-start pt-1">
+              <div className="flex items-center px-3 border-r bg-muted/30">
                 <input
                   type="checkbox"
                   checked={selected}
@@ -114,11 +112,11 @@ export default function ClientItemCard({
               </div>
             )}
 
-            {/* Thumbnail — larger & clickable */}
+            {/* Thumbnail — large preview */}
             <button
               type="button"
               onClick={() => thumbnailUrl && setLightboxOpen(true)}
-              className="relative w-28 h-28 bg-muted rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden group cursor-pointer"
+              className="relative w-32 h-32 sm:w-40 sm:h-40 bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden group cursor-pointer"
               disabled={!thumbnailUrl}
             >
               {thumbnailUrl ? (
@@ -126,32 +124,30 @@ export default function ClientItemCard({
                   <img
                     src={thumbnailUrl}
                     alt={item.name}
-                    className="w-full h-full object-contain rounded-lg"
+                    className="w-full h-full object-contain"
                   />
-                  <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/10 transition-colors rounded-lg flex items-center justify-center">
+                  <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/10 transition-colors flex items-center justify-center">
                     <ZoomIn className="h-5 w-5 text-foreground opacity-0 group-hover:opacity-70 transition-opacity" />
                   </div>
                 </>
               ) : (
-                <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
               )}
             </button>
 
             {/* Details */}
-            <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex-1 min-w-0 p-4 space-y-2.5">
               <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1">
-                  <h4 className="font-semibold text-sm truncate">{item.name}</h4>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={badge.variant} className="gap-1 text-[10px]">
-                      {badge.icon}
-                      {badge.label}
-                    </Badge>
-                  </div>
+                <div className="space-y-1.5">
+                  <h4 className="font-semibold text-sm leading-tight truncate">{item.name}</h4>
+                  <Badge variant={badge.variant} className="gap-1 text-[10px]">
+                    {badge.icon}
+                    {badge.label}
+                  </Badge>
                 </div>
               </div>
 
-              {/* Metadata grid */}
+              {/* Metadata */}
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>Qty: <strong className="text-foreground">{item.quantity.toLocaleString()}</strong></span>
                 {item.width_mm && item.height_mm && (
