@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +26,7 @@ import {
   Upload,
   Eye,
   Package,
+  FileUp,
 } from 'lucide-react';
 import {
   useClientPortalOrder,
@@ -99,6 +100,10 @@ export default function ClientOrderDetail() {
   const [rejectItemIds, setRejectItemIds] = useState<string[]>([]);
   const [disclaimerOpen, setDisclaimerOpen] = useState(false);
   const [approveItemIds, setApproveItemIds] = useState<string[]>([]);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadTargetItemId, setUploadTargetItemId] = useState<string>('');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const { data: order, isLoading } = useClientPortalOrder(orderId);
   const { data: approvals } = useClientPortalApprovals(orderId);
@@ -186,6 +191,23 @@ export default function ClientOrderDetail() {
     await uploadMutation.mutateAsync({ order_id: orderId, item_id: itemId, file });
   };
 
+  const handleOrderUpload = async () => {
+    if (!orderId || !uploadTargetItemId || !uploadFile) return;
+    try {
+      await uploadMutation.mutateAsync({
+        order_id: orderId,
+        item_id: uploadTargetItemId,
+        file: uploadFile,
+      });
+      setUploadDialogOpen(false);
+      setUploadTargetItemId('');
+      setUploadFile(null);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    } catch (error) {
+      console.error('Upload error:', error);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -226,6 +248,12 @@ export default function ClientOrderDetail() {
             <h1 className="font-semibold truncate">{order.order_number}</h1>
             <p className="text-xs text-muted-foreground">{order.customer_name}</p>
           </div>
+          {order.status === 'pending_approval' && (
+            <Button variant="outline" size="sm" onClick={() => setUploadDialogOpen(true)}>
+              <Upload className="h-3.5 w-3.5 mr-1" />
+              Upload Artwork
+            </Button>
+          )}
           {isApproved && (
             <Badge variant="default" className="gap-1">
               <CheckCircle className="h-3 w-3" />
@@ -458,6 +486,75 @@ export default function ClientOrderDetail() {
                 <XCircle className="h-4 w-4 mr-2" />
               )}
               Submit Feedback
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Artwork Dialog */}
+      <Dialog open={uploadDialogOpen} onOpenChange={(open) => {
+        setUploadDialogOpen(open);
+        if (!open) {
+          setUploadTargetItemId('');
+          setUploadFile(null);
+          if (uploadInputRef.current) uploadInputRef.current.value = '';
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload New Artwork</DialogTitle>
+            <DialogDescription>
+              Select which item to replace artwork for, then upload a PDF file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="upload-item">Select Item</Label>
+              <select
+                id="upload-item"
+                className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={uploadTargetItemId}
+                onChange={(e) => setUploadTargetItemId(e.target.value)}
+              >
+                <option value="">Choose an item...</option>
+                {visibleItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} (Page {item.item_number})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="upload-file">PDF File</Label>
+              <input
+                ref={uploadInputRef}
+                id="upload-file"
+                type="file"
+                accept=".pdf"
+                className="mt-2 w-full text-sm"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            {uploadFile && (
+              <p className="text-xs text-muted-foreground">
+                Selected: {uploadFile.name}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleOrderUpload}
+              disabled={!uploadTargetItemId || !uploadFile || uploadMutation.isPending}
+            >
+              {uploadMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FileUp className="h-4 w-4 mr-2" />
+              )}
+              Upload
             </Button>
           </DialogFooter>
         </DialogContent>
