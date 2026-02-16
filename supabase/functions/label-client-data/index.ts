@@ -376,25 +376,67 @@ Deno.serve(async (req) => {
 
         // Check if auto-imposition is possible (all items have print-ready PDFs)
         const allPrintReady =
-          allItems && allItems.every((i) => i.print_pdf_url);
+          visibleItems.length > 0 && visibleItems.every((i: any) => i.print_pdf_url);
         if (allPrintReady) {
-          // Trigger imposition for each run
+          // Fetch dieline for this order
+          const { data: orderWithDieline } = await supabase
+            .from("label_orders")
+            .select("dieline_id, label_dielines(*)")
+            .eq("id", order_id)
+            .single();
+
+          const dieline = (orderWithDieline as any)?.label_dielines;
+
+          // Fetch runs with slot assignments
           const { data: runs } = await supabase
             .from("label_runs")
-            .select("id")
+            .select("id, slot_assignments, meters_to_print")
             .eq("order_id", order_id)
             .eq("status", "planned");
 
-          if (runs && runs.length > 0) {
-            // Fire and forget — imposition runs in the background
+          if (dieline && runs && runs.length > 0) {
+            // Build item PDF lookup map
+            const itemPdfMap = new Map(
+              (allItems || [])
+                .filter((i: any) => i.print_pdf_url)
+                .map((i: any) => [i.id, i.print_pdf_url])
+            );
+
             for (const run of runs) {
+              // Enrich slot assignments with pdf_url
+              const slots = ((run as any).slot_assignments || []).map((slot: any) => ({
+                slot: slot.slot,
+                item_id: slot.item_id,
+                quantity_in_slot: slot.quantity_in_slot,
+                needs_rotation: slot.needs_rotation || false,
+                pdf_url: itemPdfMap.get(slot.item_id) || "",
+              }));
+
+              const imposePayload = {
+                run_id: run.id,
+                order_id: order_id,
+                dieline: {
+                  roll_width_mm: dieline.roll_width_mm,
+                  label_width_mm: dieline.label_width_mm,
+                  label_height_mm: dieline.label_height_mm,
+                  columns_across: dieline.columns_across,
+                  rows_around: dieline.rows_around,
+                  horizontal_gap_mm: dieline.horizontal_gap_mm,
+                  vertical_gap_mm: dieline.vertical_gap_mm,
+                  corner_radius_mm: dieline.corner_radius_mm,
+                },
+                slot_assignments: slots,
+                include_dielines: true,
+                meters_to_print: (run as any).meters_to_print || 1,
+              };
+
               fetch(`${supabaseUrl}/functions/v1/label-impose`, {
                 method: "POST",
                 headers: {
                   Authorization: `Bearer ${serviceRoleKey}`,
                   "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ run_id: run.id }),
+                body: JSON.stringify(imposePayload),
               }).catch((err) =>
                 console.error("Auto-impose error for run", run.id, err)
               );
