@@ -1,81 +1,136 @@
 
 
-# Client Portal Makeover: E-Commerce Style Login and Proofing Workflow
+# Proofing Workflow: Version-Controlled "Send Proof" with Lock-Down
 
 ## Overview
 
-Transform the client portal into a polished, e-commerce-grade experience with a stunning login page, proper order visibility filtering, and a refined proofing workflow.
+Transform the "Send Proof" button into a proper workflow step that locks the order, tracks proof versions, makes it visible to the client, and handles the approval/changes loop cleanly.
+
+## Current State
+
+- "Send Proof" opens a dialog to select contacts and send email notifications
+- Items have `proofing_status` but nothing tracks version numbers
+- Order status stays at `quote` -- nothing transitions it to `pending_approval`
+- No lock-down mechanism prevents edits while the client is reviewing
+- No admin UI for handling client-requested changes
 
 ## What Changes
 
-### 1. Fabulous Login Page (`ClientPortalLogin.tsx`)
+### 1. Database: Add Proof Version Tracking
 
-Complete visual redesign of the login page:
+Add a `proof_version` column to `label_orders`:
 
-- Full-screen split layout: branded hero panel on the left, login form on the right
-- Company branding with a gradient hero section, tagline, and feature highlights (e.g. "Review proofs", "Track orders", "Approve artwork")
-- Larger, more spacious form with subtle animations
-- Polished input styling with icons (Mail, Lock)
-- "Forgot password" flow remains but visually integrated into the new layout
-- Responsive: on mobile, hero stacks above the form
-- Dark/light mode compatible using existing Tailwind theme tokens
+```sql
+ALTER TABLE label_orders ADD COLUMN proof_version integer NOT NULL DEFAULT 0;
+```
 
-### 2. Order Visibility Filter (Edge Function)
+- Starts at `0` (no proof sent yet)
+- Incremented to `1` when "Send Proof" is first clicked, `2` on revision, etc.
+- Client portal will show "v1", "v2" so they can see revisions
 
-**Key change**: Clients should only see orders that are ready for their review, not internal drafts.
+### 2. "Send Proof" Button Workflow (LabelOrderModal)
 
-Update `label-client-data/index.ts` `/orders` endpoint to filter out orders in early internal statuses:
-- Exclude orders with status `quote` -- these are internal-only
-- Only return orders where at least one item has a `proofing_status` of `awaiting_client`, `approved`, or `client_needs_upload`, OR the order status is `pending_approval`, `approved`, `in_production`, or `completed`
-- This ensures clients never see orders still being prepared internally
+When the admin clicks "Send Proof":
 
-### 3. Dashboard Polish (`ClientPortalDashboard.tsx`)
+1. Increment `proof_version` on the order (0 to 1, or N to N+1)
+2. Set order status to `pending_approval`
+3. Mark all draft items with artwork as `ready_for_proof`
+4. Open the existing `SendProofingDialog` to pick contacts and send emails
+5. The order is now visible in the client portal (status is `pending_approval`)
 
-- Add a welcome hero section with the client's company name and a summary (e.g. "2 orders need your attention")
-- Visual order status timeline/progress indicator on each card
-- Separate sections: "Action Required" (needs approval/upload), "In Progress" (in production), "Completed"
-- Empty state with friendly illustration messaging
-- Add subtle hover animations on order cards
+The button label changes based on state:
+- First time: "Send Proof"
+- After changes: "Send Proof v2" / "Send Proof v3"
 
-### 4. Order Detail Proofing Experience (`ClientOrderDetail.tsx`)
+### 3. Order Lock-Down While Awaiting Client
 
-- Add a progress stepper at the top showing the proofing workflow stages (Upload > Review > Approve > Production)
-- Larger proof thumbnails with click-to-zoom (lightbox-style overlay)
-- Clearer quantity display per item with label dimensions
-- Sticky approval toolbar at the bottom when items are selected
-- Better visual distinction between approved items (green tint) and items needing attention (amber/red)
+When order status is `pending_approval`:
+- Disable the artwork upload zone (proof tab)
+- Disable item deletion
+- Show a banner: "Order is locked -- awaiting client approval (v1)"
+- Keep print-ready uploads enabled (they don't affect proofs)
+- "Bypass Proof" toggle remains available as an escape hatch
 
-### 5. Item Card Enhancement (`ClientItemCard.tsx`)
+### 4. Admin UI for Handling Client Changes
 
-- Larger thumbnail preview area (clickable for full-size view)
-- Clearer status badges with colour coding
-- Better layout of item metadata (name, qty, dimensions) in a clean grid
-- Upload area with drag-and-drop visual feedback (for `client_needs_upload` status)
+When the client requests changes (items get `client_needs_upload` status), the admin needs a clear workflow:
+
+- Add a **"Changes Requested" banner** at the top of the order when any items have `client_needs_upload` or `artwork_issue`
+- The banner shows which items need attention and the client's comments
+- A **"Revise & Resend"** button that:
+  1. Unlocks the order for editing (sets status back to `quote` temporarily)
+  2. Lets admin upload corrected artwork
+  3. When ready, "Send Proof v2" re-locks and sends to client again
+
+### 5. Auto-Imposition on Full Approval
+
+This already works in the edge function (`label-client-data` approve-items endpoint, lines 358-384). When all items are approved AND have `print_pdf_url`, imposition fires automatically. No changes needed here.
+
+### 6. Types Update
+
+Add `proof_version` to the `LabelOrder` interface.
 
 ## Technical Details
 
 ### Files Modified
 
 | File | Changes |
-|------|---------|
-| `src/pages/labels/portal/ClientPortalLogin.tsx` | Complete visual redesign with split-panel layout |
-| `src/pages/labels/portal/ClientPortalDashboard.tsx` | Welcome hero, categorised order sections, progress indicators |
-| `src/pages/labels/portal/ClientOrderDetail.tsx` | Progress stepper, larger thumbnails, sticky approval bar |
-| `src/components/labels/portal/ClientItemCard.tsx` | Bigger thumbnails, click-to-zoom, improved layout |
-| `supabase/functions/label-client-data/index.ts` | Filter `/orders` to exclude internal-only statuses |
+|------|--------|
+| `src/types/labels.ts` | Add `proof_version: number` to `LabelOrder` |
+| `src/components/labels/order/LabelOrderModal.tsx` | Lock-down banner, disable uploads when pending, version-aware "Send Proof" button, "Changes Requested" banner with "Revise & Resend" |
+| `src/components/labels/proofing/SendProofingDialog.tsx` | Before sending: increment `proof_version`, set status to `pending_approval`, mark items `ready_for_proof` |
+| `src/hooks/labels/useLabelOrders.ts` | No changes needed (generic update mutation already exists) |
 
-### Edge Function Filter Logic
+### Database Migration
 
 ```sql
--- Only return orders visible to clients
--- Either the order status indicates it's been shared with the client,
--- or at least one item is in a client-facing proofing state
-.in('status', ['pending_approval', 'approved', 'in_production', 'completed'])
+ALTER TABLE label_orders ADD COLUMN proof_version integer NOT NULL DEFAULT 0;
 ```
 
-Orders in `quote` status are purely internal and will be hidden from the portal until the admin moves them forward.
+### Workflow State Machine
 
-### No Database Changes Required
+```text
+  quote (v0)
+    |
+    | "Send Proof" -> increments to v1
+    v
+  pending_approval (v1) -- LOCKED
+    |
+    |--- Client approves all --> approved --> auto-impose if print-ready
+    |
+    |--- Client requests changes --> items marked client_needs_upload
+    |        |
+    |        | Admin clicks "Revise & Resend" --> unlocks to quote
+    |        | Admin fixes artwork
+    |        | "Send Proof v2" --> pending_approval (v2) -- LOCKED
+    |        v
+    |     (repeat loop)
+```
 
-All changes are purely UI and edge function filtering logic. No new tables or columns needed.
+### Lock-Down Rules
+
+When `status === 'pending_approval'`:
+- Proof artwork upload zone: DISABLED (greyed out with message)
+- Item delete buttons: HIDDEN
+- Print-ready uploads: STILL ENABLED (doesn't affect proofs)
+- "Bypass Proof" toggle: STILL ENABLED (admin override)
+- "Request Artwork" button: STILL ENABLED (can flag issues)
+
+### Changes Requested Banner
+
+Shown when any items have `proofing_status === 'client_needs_upload'`:
+
+```text
++----------------------------------------------------------+
+|  ! Changes Requested by Client                           |
+|                                                          |
+|  Items needing revision:                                 |
+|  - Pizza Picasso Chicken: "Logo needs to be bigger"      |
+|  - Pizza Picasso Steak: "Wrong background colour"        |
+|                                                          |
+|  [Revise & Resend]                                       |
++----------------------------------------------------------+
+```
+
+"Revise & Resend" sets order status back to `quote`, allowing the admin to make changes. Once done, clicking "Send Proof v2" repeats the cycle.
 
