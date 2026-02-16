@@ -1,0 +1,1 @@
+ALTER TABLE label_orders ADD COLUMN proof_version integer NOT NULL DEFAULT 0;

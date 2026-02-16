@@ -14,7 +14,10 @@ import {
   Sparkles,
   X,
   Send,
-  ImageOff
+  ImageOff,
+  Lock,
+  RefreshCw,
+  AlertOctagon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,8 +28,9 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@/components/ui/visually-hidden';
-import { useLabelOrder } from '@/hooks/labels/useLabelOrders';
+import { useLabelOrder, useUpdateLabelOrder } from '@/hooks/labels/useLabelOrders';
 import { useCreateLabelItem, useUpdateLabelItem } from '@/hooks/labels/useLabelItems';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { DualArtworkUploadZone } from '../items/DualArtworkUploadZone';
 import { LabelItemsGrid } from '../items/LabelItemsGrid';
 import { LabelRunsCard } from '../LabelRunsCard';
@@ -62,12 +66,26 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const { data: order, isLoading, error, refetch } = useLabelOrder(orderId);
   const createItem = useCreateLabelItem();
   const updateItem = useUpdateLabelItem();
+  const updateOrder = useUpdateLabelOrder();
   const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
   const [sendProofDialogOpen, setSendProofDialogOpen] = useState(false);
   const [requestArtworkDialogOpen, setRequestArtworkDialogOpen] = useState(false);
   const [itemAnalyses, setItemAnalyses] = useState<Record<string, unknown>>({});
   const [artworkTab, setArtworkTab] = useState<'proof' | 'print'>('proof');
   const [bypassProof, setBypassProof] = useState(false);
+
+  // Lock-down state
+  const isLocked = order?.status === 'pending_approval';
+  const proofVersion = order?.proof_version ?? 0;
+  
+  // Items needing revision (client requested changes)
+  const changesRequestedItems = useMemo(() => 
+    (order?.items || []).filter(item => 
+      item.proofing_status === 'client_needs_upload' || item.artwork_issue
+    ),
+    [order?.items]
+  );
+  const hasChangesRequested = changesRequestedItems.length > 0;
 
   // Filter items based on active artwork tab, hiding split parents
   const filteredItems = useMemo(() => {
@@ -466,10 +484,10 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     variant="outline" 
                     size="sm"
                     onClick={() => setSendProofDialogOpen(true)}
-                    disabled={(order.items?.length || 0) === 0}
+                    disabled={(order.items?.length || 0) === 0 || isLocked}
                   >
                     <Send className="h-4 w-4 mr-2" />
-                    Send Proof
+                    {proofVersion === 0 ? 'Send Proof' : `Send Proof v${proofVersion + 1}`}
                   </Button>
 
                   {/* AI Layout Dialog */}
@@ -501,6 +519,61 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                 </div>
               </div>
             </div>
+
+            {/* Lock-down Banner */}
+            {isLocked && !hasChangesRequested && (
+              <div className="mx-4 mt-2">
+                <Alert className="border-amber-500/50 bg-amber-500/10">
+                  <Lock className="h-4 w-4 text-amber-600" />
+                  <AlertTitle className="text-amber-700 dark:text-amber-400">
+                    Order Locked — Awaiting Client Approval (v{proofVersion})
+                  </AlertTitle>
+                  <AlertDescription className="text-amber-600 dark:text-amber-300 text-xs">
+                    Proof artwork uploads are disabled while the client is reviewing. Print-ready uploads remain enabled.
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+
+            {/* Changes Requested Banner */}
+            {hasChangesRequested && (
+              <div className="mx-4 mt-2">
+                <Alert className="border-destructive/50 bg-destructive/10">
+                  <AlertOctagon className="h-4 w-4 text-destructive" />
+                  <AlertTitle className="text-destructive">Changes Requested by Client</AlertTitle>
+                  <AlertDescription>
+                    <div className="space-y-2 mt-1">
+                      <ul className="text-sm space-y-1">
+                        {changesRequestedItems.map(item => (
+                          <li key={item.id} className="flex items-start gap-2">
+                            <span className="font-medium">{item.name}:</span>
+                            <span className="text-muted-foreground italic">
+                              {item.artwork_issue || 'Changes requested'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2"
+                        onClick={async () => {
+                          await updateOrder.mutateAsync({
+                            id: order.id,
+                            updates: { status: 'quote' as const },
+                          });
+                          toast.success('Order unlocked for revision');
+                        }}
+                        disabled={updateOrder.isPending}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        {updateOrder.isPending ? 'Unlocking...' : 'Revise & Resend'}
+                      </Button>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
 
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -589,7 +662,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   orderId={order.id}
                   dieline={order.dieline || null}
                   onFilesUploaded={handleDualFilesUploaded}
-                  disabled={!order.dieline}
+                  disabled={!order.dieline || (isLocked && artworkTab === 'proof')}
                   activeTab={artworkTab}
                   onTabChange={setArtworkTab}
                 />

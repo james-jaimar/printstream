@@ -1,6 +1,8 @@
 /**
  * Send Proofing Dialog
- * Allows admin to select contacts and send proof notifications
+ * Before sending: increments proof_version, sets status to pending_approval,
+ * marks draft items as ready_for_proof.
+ * Then allows admin to select contacts and send proof notifications.
  */
 
 import { useState, useMemo } from 'react';
@@ -21,6 +23,8 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useCustomerContacts } from '@/hooks/labels/useCustomerContacts';
 import { useSendProofNotification } from '@/hooks/labels/useProofingWorkflow';
+import { useUpdateLabelOrder } from '@/hooks/labels/useLabelOrders';
+import { supabase } from '@/integrations/supabase/client';
 import type { LabelOrder, LabelItem } from '@/types/labels';
 
 interface SendProofingDialogProps {
@@ -41,6 +45,9 @@ export function SendProofingDialog({
   
   const { data: contacts = [], isLoading: contactsLoading } = useCustomerContacts(order.customer_id ?? undefined);
   const sendProof = useSendProofNotification();
+  const updateOrder = useUpdateLabelOrder();
+
+  const nextVersion = (order.proof_version ?? 0) + 1;
 
   // Filter contacts that can receive proofs
   const proofContacts = useMemo(() => 
@@ -52,7 +59,8 @@ export function SendProofingDialog({
   const readyItems = useMemo(() => 
     items.filter(item => 
       item.proofing_status === 'ready_for_proof' || 
-      (item.proofing_status === 'draft' && (item.proof_pdf_url || item.artwork_pdf_url))
+      item.proofing_status === 'draft' ||
+      (item.proof_pdf_url || item.artwork_pdf_url)
     ),
     [items]
   );
@@ -69,16 +77,39 @@ export function SendProofingDialog({
     if (selectedContactIds.length === 0) return;
 
     try {
+      // 1. Increment proof_version and set status to pending_approval
+      await updateOrder.mutateAsync({
+        id: order.id,
+        updates: {
+          proof_version: nextVersion,
+          status: 'pending_approval' as const,
+        },
+      });
+
+      // 2. Mark all draft/ready items with artwork as ready_for_proof
+      const itemsToMark = items.filter(item =>
+        (item.proofing_status === 'draft' || item.proofing_status === 'client_needs_upload') &&
+        (item.proof_pdf_url || item.artwork_pdf_url)
+      );
+      if (itemsToMark.length > 0) {
+        await supabase
+          .from('label_items')
+          .update({ proofing_status: 'ready_for_proof' })
+          .in('id', itemsToMark.map(i => i.id));
+      }
+
+      // 3. Send proof notification emails
       await sendProof.mutateAsync({
         orderId: order.id,
         contactIds: selectedContactIds,
         message: message.trim() || undefined,
       });
+
       onOpenChange(false);
       setSelectedContactIds([]);
       setMessage('');
     } catch {
-      // Error handled by hook
+      // Error handled by hooks
     }
   };
 
@@ -88,7 +119,7 @@ export function SendProofingDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-5 w-5" />
-            Send Proof for Approval
+            Send Proof v{nextVersion} for Approval
           </DialogTitle>
           <DialogDescription>
             Select contacts to notify about the proof for order {order.order_number}
@@ -98,7 +129,7 @@ export function SendProofingDialog({
         <div className="space-y-6 py-4">
           {/* Summary */}
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Items ready for proofing:</span>
+            <span className="text-muted-foreground">Items to include in proof:</span>
             <Badge variant={readyItems.length > 0 ? 'default' : 'secondary'}>
               {readyItems.length} of {items.length}
             </Badge>
@@ -108,7 +139,16 @@ export function SendProofingDialog({
             <Alert>
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
-                No items are marked as ready for proofing. Upload proof artwork first.
+                No items have artwork uploaded. Upload proof artwork first.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Version info */}
+          {(order.proof_version ?? 0) > 0 && (
+            <Alert>
+              <AlertDescription className="text-sm">
+                This will send <strong>revision v{nextVersion}</strong> to the client. Previous version was v{order.proof_version}.
               </AlertDescription>
             </Alert>
           )}
@@ -190,9 +230,9 @@ export function SendProofingDialog({
           </Button>
           <Button
             onClick={handleSend}
-            disabled={selectedContactIds.length === 0 || readyItems.length === 0 || sendProof.isPending}
+            disabled={selectedContactIds.length === 0 || readyItems.length === 0 || sendProof.isPending || updateOrder.isPending}
           >
-            {sendProof.isPending ? (
+            {sendProof.isPending || updateOrder.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Sending...
@@ -200,7 +240,7 @@ export function SendProofingDialog({
             ) : (
               <>
                 <Send className="h-4 w-4 mr-2" />
-                Send Proof Notification
+                Send Proof v{nextVersion}
               </>
             )}
           </Button>
