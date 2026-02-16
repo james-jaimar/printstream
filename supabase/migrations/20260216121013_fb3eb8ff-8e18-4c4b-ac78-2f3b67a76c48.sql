@@ -1,0 +1,1 @@
+UPDATE label_orders SET status = 'approved', client_approved_at = NOW() WHERE order_number = 'LBL-2026-0001' AND status = 'pending_approval';
