@@ -157,6 +157,7 @@ export interface LabelOrder {
   client_approved_at: string | null;
   client_approved_by: string | null;
   proof_token: string | null;
+  proof_version: number;
   notes: string | null;
   created_by: string | null;
   created_at: string;

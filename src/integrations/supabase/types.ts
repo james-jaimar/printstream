@@ -1575,6 +1575,7 @@ export type Database = {
           notes: string | null
           order_number: string
           proof_token: string | null
+          proof_version: number
           quickeasy_wo_no: string | null
           roll_width_mm: number | null
           status: string
@@ -1600,6 +1601,7 @@ export type Database = {
           notes?: string | null
           order_number: string
           proof_token?: string | null
+          proof_version?: number
           quickeasy_wo_no?: string | null
           roll_width_mm?: number | null
           status?: string
@@ -1625,6 +1627,7 @@ export type Database = {
           notes?: string | null
           order_number?: string
           proof_token?: string | null
+          proof_version?: number
           quickeasy_wo_no?: string | null
           roll_width_mm?: number | null
           status?: string
