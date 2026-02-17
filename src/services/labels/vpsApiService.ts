@@ -185,7 +185,7 @@ export interface ImpositionRequest {
 export interface ImpositionResponse {
   success: boolean;
   run_id?: string;
-  status?: 'processing' | 'complete';
+  status?: 'processing' | 'complete' | 'vps_busy';
   imposed_pdf_url?: string;
   imposed_pdf_with_dielines_url?: string;
   frame_count?: number;

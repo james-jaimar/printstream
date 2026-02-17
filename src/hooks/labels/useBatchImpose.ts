@@ -24,21 +24,12 @@ const initialProgress: BatchImposeProgress = {
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_DURATION_MS = 5 * 60 * 1000; // 5 min per run
-const MAX_CONSECUTIVE_FAILURES = 999; // Effectively disabled — never abort early
-const INVOCATION_TIMEOUT_MS = 30_000; // 30s client-side timeout for edge function
+const VPS_BUSY_MAX_RETRIES = 3;
+const VPS_BUSY_RETRY_DELAY_MS = 5000;
+const INTER_RUN_DELAY_MS = 5000;
 
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/** Wrap a promise with a timeout */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
 }
 
 /** Poll a single run until it leaves 'imposing' status */
@@ -86,6 +77,36 @@ async function persistRunError(runId: string, errorMessage: string) {
   } catch (e) {
     console.error(`[BatchImpose] Failed to persist error for run ${runId}:`, e);
   }
+}
+
+/** Invoke createImposition with client-side retry for vps_busy */
+async function invokeWithBusyRetry(
+  request: ImpositionRequest,
+  runNumber: number
+): Promise<{ result: any; vpsBusyExhausted: boolean }> {
+  for (let attempt = 0; attempt <= VPS_BUSY_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[BatchImpose] Run #${runNumber}: VPS busy, retry ${attempt}/${VPS_BUSY_MAX_RETRIES} in ${VPS_BUSY_RETRY_DELAY_MS / 1000}s...`);
+      toast.info(`Run ${runNumber}: VPS busy, retrying (${attempt}/${VPS_BUSY_MAX_RETRIES})...`);
+      await delay(VPS_BUSY_RETRY_DELAY_MS);
+    }
+
+    const result = await createImposition(request);
+    console.log(`[BatchImpose] Run #${runNumber} attempt ${attempt} response:`, JSON.stringify(result));
+
+    if (result.status === 'vps_busy') {
+      console.warn(`[BatchImpose] Run #${runNumber}: got vps_busy on attempt ${attempt}`);
+      if (attempt === VPS_BUSY_MAX_RETRIES) {
+        return { result, vpsBusyExhausted: true };
+      }
+      continue;
+    }
+
+    return { result, vpsBusyExhausted: false };
+  }
+
+  // Should never reach here, but satisfy TS
+  return { result: { status: 'vps_busy' }, vpsBusyExhausted: true };
 }
 
 export function useBatchImpose(
@@ -136,7 +157,6 @@ export function useBatchImpose(
 
     const errors: { runNumber: number; error: string }[] = [];
     const completedRunIds: string[] = [];
-    let consecutiveFailures = 0;
 
     for (let i = 0; i < targetRuns.length; i++) {
       if (abortRef.current) {
@@ -145,16 +165,6 @@ export function useBatchImpose(
       }
 
       const run = targetRuns[i];
-
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        const remaining = targetRuns.length - i;
-        console.error(`[BatchImpose] ABORT: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
-        toast.error(`Aborting: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
-        for (let j = i; j < targetRuns.length; j++) {
-          errors.push({ runNumber: targetRuns[j].run_number, error: 'Skipped — aborted after consecutive failures' });
-        }
-        break;
-      }
 
       console.log(`[BatchImpose] === Run ${i + 1}/${targetRuns.length}: #${run.run_number} (${run.id}) ===`);
 
@@ -201,33 +211,40 @@ export function useBatchImpose(
         };
 
         console.log(`[BatchImpose] Invoking createImposition for run #${run.run_number}...`);
-        const result = await withTimeout(
-          createImposition(request),
-          INVOCATION_TIMEOUT_MS,
-          `Edge function invocation for run #${run.run_number}`
-        );
-        console.log(`[BatchImpose] createImposition response for run #${run.run_number}:`, JSON.stringify(result));
+        const { result, vpsBusyExhausted } = await invokeWithBusyRetry(request, run.run_number);
 
-        if (result.status === 'processing') {
+        if (vpsBusyExhausted) {
+          const errMsg = `VPS busy after ${VPS_BUSY_MAX_RETRIES + 1} attempts`;
+          errors.push({ runNumber: run.run_number, error: errMsg });
+          await persistRunError(run.id, errMsg);
+          toast.error(`Run ${run.run_number} failed: ${errMsg}`);
+        } else if (result.status === 'processing') {
           console.log(`[BatchImpose] Run #${run.run_number} sent to VPS, polling for completion...`);
           const outcome = await waitForRunCompletion(run.id);
           console.log(`[BatchImpose] Poll outcome for run #${run.run_number}: ${outcome}`);
 
           if (outcome === 'approved') {
             completedRunIds.push(run.id);
-            consecutiveFailures = 0;
             toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
           } else {
             const errMsg = 'VPS processing failed or timed out during polling';
             errors.push({ runNumber: run.run_number, error: errMsg });
-            consecutiveFailures++;
             await persistRunError(run.id, errMsg);
             toast.error(`Run ${run.run_number} failed: ${errMsg}`);
           }
-        } else {
+        } else if (result.status === 'complete') {
           completedRunIds.push(run.id);
-          consecutiveFailures = 0;
           console.log(`[BatchImpose] Run #${run.run_number} completed immediately`);
+          toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
+        } else if (!result.success) {
+          const errMsg = result.error || 'Unknown edge function error';
+          errors.push({ runNumber: run.run_number, error: errMsg });
+          await persistRunError(run.id, errMsg);
+          toast.error(`Run ${run.run_number} failed: ${errMsg}`);
+        } else {
+          // Fallback: treat as processing
+          completedRunIds.push(run.id);
+          console.log(`[BatchImpose] Run #${run.run_number} returned unknown status, treating as success`);
           toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
         }
 
@@ -235,7 +252,6 @@ export function useBatchImpose(
         const errMsg = err.message || 'Unknown error';
         console.error(`[BatchImpose] FAILED run #${run.run_number}:`, errMsg, err);
         errors.push({ runNumber: run.run_number, error: errMsg });
-        consecutiveFailures++;
         await persistRunError(run.id, errMsg);
         toast.error(`Run ${run.run_number} failed: ${errMsg}`);
       }
@@ -249,8 +265,8 @@ export function useBatchImpose(
 
       // Give VPS breathing room between runs
       if (i < targetRuns.length - 1) {
-        console.log(`[BatchImpose] Waiting 3s before next run...`);
-        await delay(3000);
+        console.log(`[BatchImpose] Waiting ${INTER_RUN_DELAY_MS / 1000}s before next run...`);
+        await delay(INTER_RUN_DELAY_MS);
       }
     }
 

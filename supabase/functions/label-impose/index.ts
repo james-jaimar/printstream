@@ -182,59 +182,30 @@ Deno.serve(async (req) => {
 
     const payloadSizeKB = (new TextEncoder().encode(vpsPayload).length / 1024).toFixed(1);
     console.log(`[label-impose] VPS payload size: ${payloadSizeKB} KB`);
-    console.log(`[label-impose] Firing VPS request with 503 retry logic`);
+    console.log(`[label-impose] Firing single VPS request (no retry — client handles 503)`);
 
-    const MAX_RETRIES = 3;
-    const RETRY_BASE_DELAY_MS = 5000;
-
+    const controller = new AbortController();
+    const acceptTimeout = setTimeout(() => controller.abort(), 10000);
     let response: Response | null = null;
-    let lastError = '';
     let aborted = false;
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      if (attempt > 0) {
-        const waitMs = attempt * RETRY_BASE_DELAY_MS;
-        console.log(`[label-impose] VPS busy (503), retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
-        await new Promise(r => setTimeout(r, waitMs));
-      }
-
-      const controller = new AbortController();
-      const acceptTimeout = setTimeout(() => controller.abort(), 10000);
-
-      try {
-        response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey,
-          },
-          signal: controller.signal,
-          body: vpsPayload,
-        });
-
-        clearTimeout(acceptTimeout);
-
-        if (response.status === 503 && attempt < MAX_RETRIES) {
-          lastError = await response.text();
-          console.warn(`[label-impose] VPS returned 503: ${lastError.substring(0, 200)}`);
-          response = null;
-          continue;
-        }
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          console.error(`[label-impose] VPS non-OK response: status=${response.status} body=${errorBody.substring(0, 500)}`);
-        }
-
-        break;
-      } catch (fetchError) {
-        clearTimeout(acceptTimeout);
-        if (fetchError.name === "AbortError") {
-          console.log(`[label-impose] VPS accepted request (10s timeout hit — processing asynchronously via callback)`);
-          response = null;
-          aborted = true;
-          break;
-        }
+    try {
+      response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+        },
+        signal: controller.signal,
+        body: vpsPayload,
+      });
+      clearTimeout(acceptTimeout);
+    } catch (fetchError) {
+      clearTimeout(acceptTimeout);
+      if (fetchError.name === "AbortError") {
+        console.log(`[label-impose] VPS accepted request (10s timeout hit — processing asynchronously via callback)`);
+        aborted = true;
+      } else {
         console.error(`[label-impose] VPS connection error:`, fetchError.message);
         await supabase
           .from("label_runs")
@@ -250,6 +221,21 @@ Deno.serve(async (req) => {
 
     // Handle VPS response
     if (response) {
+      if (response.status === 503) {
+        const busyBody = await response.text().catch(() => '');
+        console.warn(`[label-impose] VPS returned 503 (busy): ${busyBody.substring(0, 200)}`);
+        // Reset status back to planned so client can retry
+        await supabase
+          .from("label_runs")
+          .update({ status: "planned", updated_at: new Date().toISOString() })
+          .eq("id", imposeRequest.run_id);
+
+        return new Response(
+          JSON.stringify({ success: false, status: "vps_busy", error: "VPS is busy" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       if (response.ok) {
         const vpsResult = await response.json();
         console.log(`[label-impose] VPS responded immediately: ${vpsResult.frame_count} frames`);
@@ -277,17 +263,6 @@ Deno.serve(async (req) => {
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-    } else if (!aborted) {
-      console.error(`[label-impose] VPS busy after ${MAX_RETRIES + 1} attempts: ${lastError.substring(0, 200)}`);
-      await supabase
-        .from("label_runs")
-        .update({ status: "planned", updated_at: new Date().toISOString() })
-        .eq("id", imposeRequest.run_id);
-
-      return new Response(
-        JSON.stringify({ success: false, error: `VPS busy after ${MAX_RETRIES + 1} attempts` }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
     console.log(`[label-impose] === DONE run=${imposeRequest.run_id} ===`);
@@ -295,7 +270,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        status: "processing",
+        status: aborted ? "processing" : "complete",
         run_id: imposeRequest.run_id,
         imposed_pdf_url: productionPublicUrl,
         imposed_pdf_with_dielines_url: proofPublicUrl,
