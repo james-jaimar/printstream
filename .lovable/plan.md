@@ -1,134 +1,80 @@
 
 
-## Root Cause: Client Timeout vs Edge Function Retry Loop Race Condition
+## VPS Diagnostic Tool: Direct Health Check and Test Imposition
 
-I traced every step from click to failure. Here is the exact flow and where it breaks.
+### Problem
 
-### The Complete Flow (byte by byte)
+Runs are failing on LBL-2026-0003 but all 9 succeeded on LBL-2026-0001. The edge function logs are empty in analytics (likely a retention/indexing lag). You need to determine whether failures are caused by:
 
-```text
-YOU CLICK "Reprocess All"
-        |
-        v
-handleReprocessAll() --> impose(true)
-        |
-        v
-[1] Reset all runs: status='planned', clear PDF URLs (Supabase UPDATE)
-        |
-        v
-[2] Loop: for each run, sequentially...
-        |
-        v
-[3] Build slot_assignments + dielineConfig from local data
-        |
-        v
-[4] Call createImposition(request) -- WRAPPED IN 30-SECOND CLIENT TIMEOUT
-        |
-        v
-[5] supabase.functions.invoke("label-impose", { body: request })
-        |
-        v
-   ============ EDGE FUNCTION STARTS ============
-        |
-        v
-[6] Create signed upload URLs for production + proof PDFs (~200ms)
-        |
-        v
-[7] Expand 4 column slots to 12 grid slots
-        |
-        v
-[8] Set run status to "imposing" in database
-        |
-        v
-[9] Calculate page dimensions (292x309mm) -- CORRECT
-        |
-        v
-[10] Fire VPS request with 10-second abort timeout
-        |
-        v
-   --- VPS RESPONDS ---
-   CASE A: VPS responds in <10s --> immediate success
-   CASE B: VPS takes >10s --> abort fires, "processing asynchronously"
-   CASE C: VPS returns 503 "busy" --> RETRY LOOP BEGINS
+- (a) The VPS Docker container being unavailable/overloaded
+- (b) The edge function invocation failing before reaching the VPS
+- (c) Network issues between Supabase edge functions and your VPS
+
+### Solution: Two-Part Diagnostic
+
+#### 1. New Edge Function: `label-vps-health`
+
+A lightweight edge function that hits the VPS directly and reports back detailed diagnostics:
+
+- **Ping test**: `GET /` or `/health` on `pdf-api.jaimar.dev` -- measures response time
+- **Endpoint probe**: `POST /imposition/labels` with a minimal invalid payload to confirm the endpoint is alive and authenticating (expects a 400/422, NOT a 503)
+- **DNS + TLS timing**: Records how long the connection takes
+- Returns a structured report:
+  - VPS reachable: yes/no
+  - Response time (ms)
+  - HTTP status received
+  - Response body snippet
+  - Timestamp
+
+#### 2. Client-Side "Test VPS" Button
+
+Add a "Test VPS" button to the Labels page (near the order detail or in a diagnostics section) that:
+
+- Calls the `label-vps-health` edge function
+- Displays the result in a toast or dialog
+- Shows: reachable/unreachable, response time, any error details
+
+#### 3. Enhanced Batch Error Capture
+
+Right now, `supabase.functions.invoke()` can fail silently when the edge function itself fails to boot (cold start timeout, memory limit). The `createImposition` function in `vpsApiService.ts` throws on `error` but does not capture HTTP-level failures from the invoke response.
+
+Add a check: if `supabase.functions.invoke` returns a non-2xx response in `data`, log the full response before throwing.
+
+### Technical Details
+
+**New file: `supabase/functions/label-vps-health/index.ts`**
+
+```typescript
+// Hits VPS with 3 probes:
+// 1. GET / (basic connectivity)
+// 2. GET /health (if endpoint exists)  
+// 3. POST /imposition/labels with empty body (confirm auth + endpoint alive)
+// Returns timing and status for each probe
 ```
 
-### THE BUG: Case C (503 Retry Loop)
+**Modified file: `src/services/labels/vpsApiService.ts`**
 
-When the VPS returns 503, the edge function enters a retry loop:
+- Add `checkVpsHealth()` function that calls the new edge function (replace the existing naive health check)
 
-```text
-Attempt 0: fetch VPS (up to 10s) --> 503 received
-Wait 5 seconds
-Attempt 1: fetch VPS (up to 10s) --> 503 received
-Wait 10 seconds  
-Attempt 2: fetch VPS (up to 10s) --> 503 received
-Wait 15 seconds
-Attempt 3: fetch VPS (up to 10s) --> final attempt
+**Modified file: `src/components/labels/LabelOrderDetail.tsx`** (or wherever the order detail/runs UI lives)
 
-WORST CASE TOTAL: 4 x 10s fetch + 5s + 10s + 15s = 70 SECONDS
-```
+- Add a "Test VPS Connection" button
+- Display results in a dialog showing all 3 probe results with timing
 
-But the CLIENT has a 30-second timeout wrapping the entire `supabase.functions.invoke()` call.
+### What This Tells You
 
-**What happens:**
+| Result | Meaning |
+|--------|---------|
+| All 3 probes succeed, fast (<500ms) | VPS Docker is healthy; failures are in the Supabase edge function layer |
+| Probes timeout or get connection refused | Docker container is down or networking issue |
+| Probe 3 returns 503 | VPS is up but busy (other Docker container hogging resources) |
+| Probe 1 works but probe 3 returns 503 | The imposition endpoint specifically is overloaded |
 
-1. Edge function starts, fires VPS, gets 503, starts retrying
-2. At 30 seconds, the CLIENT timeout fires
-3. Client catches the timeout error: `"Edge function invocation for run #X timed out after 30s"`
-4. Client runs `persistRunError()` which sets the run back to `status: 'planned'` with the error in `ai_reasoning`
-5. Client shows the error toast
-6. Client moves to the next run
-7. **Meanwhile, the edge function is STILL RUNNING** -- it may eventually succeed and set the status to `'approved'`
-8. This creates a **race condition**: the client already recorded it as failed, but the VPS may have actually processed it
+### Files
 
-This also explains why the edge function logs show SUCCESS for runs that the client reports as FAILED -- the edge function finishes after the client has already given up and moved on.
-
-### Additional Risk: Supabase Wall-Clock Limit
-
-Supabase Edge Functions have a default execution limit (typically 60 seconds). If the retry loop runs long, Supabase may kill the function mid-execution, leaving the run stuck in "imposing" status with no callback.
-
-### The Fix
-
-The edge function should NOT retry 503s with long waits. Since the architecture is already async (VPS uploads PDFs directly and calls back), the edge function should:
-
-1. Try the VPS **once** (with the 10s abort as today)
-2. If 503, return immediately to the client with `status: "vps_busy"` 
-3. The **client** (useBatchImpose) handles the retry -- it already has a 3s delay between runs, so it can simply re-queue the same run after a short wait
-
-This keeps the edge function fast (always returns in under 15 seconds) and puts the retry intelligence in the client where it belongs.
-
-### Changes
-
-#### 1. Simplify Edge Function -- Remove 503 Retry Loop (`supabase/functions/label-impose/index.ts`)
-
-- Remove the retry loop (lines 194-249)
-- Single VPS fetch with 10s abort timeout
-- If 503: return `{ success: false, status: "vps_busy" }` immediately
-- If ok: update run and return
-- If abort (>10s): return `{ success: true, status: "processing" }` (VPS will callback)
-
-#### 2. Add Client-Side Retry for VPS Busy (`src/hooks/labels/useBatchImpose.ts`)
-
-- Remove the 30s invocation timeout (no longer needed since edge function is fast)
-- When `createImposition` returns `status: "vps_busy"`, wait 5s and retry the same run (up to 3 times)
-- Log each retry attempt clearly
-- Only count as a real failure after all retries are exhausted
-
-#### 3. Increase Delay Between Runs (`src/hooks/labels/useBatchImpose.ts`)
-
-- Increase the inter-run delay from 3s to 5s to further reduce 503 frequency
-
-### Technical Summary
-
-| File | Change |
+| File | Action |
 |------|--------|
-| `supabase/functions/label-impose/index.ts` | Remove 503 retry loop; single attempt + immediate return |
-| `src/hooks/labels/useBatchImpose.ts` | Remove 30s timeout; add client-side retry for "vps_busy"; increase inter-run delay to 5s |
-
-### Why This Fixes It
-
-- Edge function always returns in under 15 seconds -- no more client timeouts
-- Client has full visibility into retries -- no more "it failed but actually it worked"
-- No race conditions between client error persistence and edge function success callbacks
-- VPS still processes asynchronously via callback for runs that take >10s
+| `supabase/functions/label-vps-health/index.ts` | New -- VPS diagnostic edge function |
+| `src/services/labels/vpsApiService.ts` | Update `checkVpsHealth` to use new edge function |
+| `src/components/labels/LabelRunsCard.tsx` (or equivalent) | Add "Test VPS" button with result display |
 
