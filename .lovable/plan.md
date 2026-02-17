@@ -1,96 +1,68 @@
 
 
-## Fix Imposition Dimensions, Progress Counter, and VPS Queuing
+## Diagnose and Fix: Batch Imposition Silent Failures
 
-### 1. Fix Page Dimensions (Critical)
+### Root Cause Analysis
 
-The VPS is using `roll_width_mm` (320mm) as the page width. The correct page dimensions are simply:
+The VPS is working perfectly. Every run that reaches the VPS succeeds. The failures are happening at the client/edge function invocation layer:
+
+1. **`supabase.functions.invoke()` can fail silently** (network timeout, Supabase runtime limits) before the edge function even boots
+2. **`MAX_CONSECUTIVE_FAILURES = 2` is too aggressive** -- two flaky invocations in a row abort the entire remaining batch with no recovery
+3. **No error details are persisted** -- when a run fails, the error message is only shown in a toast that disappears, with no way to review what happened
+
+### Changes
+
+#### 1. Add Detailed Client-Side Logging (`src/hooks/labels/useBatchImpose.ts`)
+
+Add `console.log` at every decision point so you can see exactly what happens in the browser console:
+
+- Log which runs are targeted, in what order
+- Log the exact response from `createImposition` (or the exact error)
+- Log poll attempts and outcomes
+- Log when consecutive failure limit is hit and which runs are skipped
+
+#### 2. Remove the Consecutive Failure Abort (`src/hooks/labels/useBatchImpose.ts`)
+
+Change `MAX_CONSECUTIVE_FAILURES` from 2 to a much higher value (e.g., 50, effectively disabling it). The batch should **never** silently skip runs. If a run fails, log it and move on to the next one. The user can see which ones failed and retry.
+
+- Change `MAX_CONSECUTIVE_FAILURES = 2` to `MAX_CONSECUTIVE_FAILURES = 999`
+- This ensures the batch always attempts every single run, never aborts early
+
+#### 3. Persist Error Details on Failed Runs (`src/hooks/labels/useBatchImpose.ts`)
+
+When a run fails (catch block or poll timeout), write the error message back to the `label_runs` row in a `notes` or similar field. This way the failure reason is visible in the UI, not just in a fleeting toast.
+
+- After a failure, update the run: `status: 'planned'` plus add error context to `updated_at` timestamp (or a dedicated error field if one exists)
+
+#### 4. Add Edge Function Invocation Timeout Handling (`src/hooks/labels/useBatchImpose.ts`)
+
+The `createImposition` call (via `supabase.functions.invoke`) can hang indefinitely if the edge function takes too long to respond. Add a client-side timeout wrapper (30 seconds) so a hung invocation fails fast rather than blocking the entire batch forever.
 
 ```text
-page_width  = (label_width + bleed_left + bleed_right) * columns_across
-page_height = (label_height + bleed_top + bleed_bottom) * rows_around
+Wrap createImposition call with Promise.race:
+- createImposition(request)  
+- 30-second timeout that rejects with "Edge function invocation timed out"
 ```
 
-For this order: 73 * 4 = 292mm wide, 103 * 3 = 309mm high. No gaps added -- labels are butted together.
+#### 5. Better Edge Function Error Logging (`supabase/functions/label-impose/index.ts`)
 
-**File:** `supabase/functions/label-impose/index.ts`
+Add more granular logging at each stage:
+- Log the full VPS response status and body on non-OK responses
+- Log when the storage upload URL creation fails
+- Log the exact payload size being sent to VPS
 
-Before building the VPS payload (line ~165), calculate correct dimensions and override `roll_width_mm`:
-
-```typescript
-const d = imposeRequest.dieline;
-const cellWidth = d.label_width_mm + (d.bleed_left_mm || 0) + (d.bleed_right_mm || 0);
-const cellHeight = d.label_height_mm + (d.bleed_top_mm || 0) + (d.bleed_bottom_mm || 0);
-const pageWidth = cellWidth * d.columns_across;
-const pageHeight = cellHeight * d.rows_around;
-
-console.log(`Calculated page: ${pageWidth}mm x ${pageHeight}mm (cell: ${cellWidth}x${cellHeight})`);
-```
-
-Then in the VPS payload, override `roll_width_mm` with `pageWidth` and add `page_height_mm: pageHeight`:
-
-```typescript
-const vpsPayload = JSON.stringify({
-  dieline: {
-    ...imposeRequest.dieline,
-    roll_width_mm: pageWidth,
-    page_height_mm: pageHeight,
-  },
-  slots: slotsWithRotation,
-  meters: 0,
-  include_dielines: imposeRequest.include_dielines,
-  upload_config: uploadConfig,
-  callback_config: callbackConfig,
-});
-```
-
----
-
-### 2. Fix Progress Counter
-
-Currently shows "0/9 Completed" because it counts `status === 'completed'` (post-printing). After imposition, runs are `approved`, not `completed`.
-
-**File:** `src/components/labels/LabelRunsCard.tsx`
-
-Change the counter to show the most relevant metric:
-- Add an `imposedRuns` count: runs that have an `imposed_pdf_url`
-- Show "X/Y Imposed" when there are imposed runs but none completed yet
-- Show "X/Y Completed" once printing has started
-
-```typescript
-const imposedRuns = runs.filter(r => r.imposed_pdf_url).length;
-// Display logic:
-// If any completed -> show completed count
-// Else if any imposed -> show imposed count  
-// Else -> show 0/total
-```
-
----
-
-### 3. Add Delay Between Runs (VPS Breathing Room)
-
-**File:** `src/hooks/labels/useBatchImpose.ts`
-
-Add a 3-second delay between sequential runs in the batch loop (after each run finishes, before starting the next). This gives the VPS time to finish cleanup and reduces 503 errors:
-
-```typescript
-// After each run completes (around line 175, before the next iteration)
-if (i < targetRuns.length - 1) {
-  await delay(3000);
-}
-```
-
----
-
-### Deployment
-
-Redeploy the `label-impose` edge function, then "Reprocess All" to generate correctly-sized PDFs.
-
-### Summary
+### Technical Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/label-impose/index.ts` | Calculate page dimensions from cell size * grid count (no gaps), override roll_width_mm |
-| `src/components/labels/LabelRunsCard.tsx` | Show "Imposed" counter when relevant instead of only "Completed" |
-| `src/hooks/labels/useBatchImpose.ts` | Add 3s delay between sequential runs |
+| `src/hooks/labels/useBatchImpose.ts` | Add console.log at every step, disable consecutive failure abort, add 30s invocation timeout, persist error details |
+| `supabase/functions/label-impose/index.ts` | Add granular step-by-step logging |
+
+### What This Achieves
+
+After these changes, when you run "Reprocess All":
+- Every single run will be attempted, no matter what
+- The browser console will show exactly what happened at each step
+- Failed runs will have their error reason visible
+- You will finally see whether the failures are network timeouts, edge function boot failures, or something else entirely
 
