@@ -11,7 +11,8 @@ import {
   Loader2,
   FileDown,
   Download,
-  RefreshCw
+  RefreshCw,
+  Activity
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,7 @@ import { RunDetailModal } from '@/components/labels/production';
 import { RunLayoutDiagram } from '@/components/labels/optimizer/RunLayoutDiagram';
 import { useBatchImpose } from '@/hooks/labels/useBatchImpose';
 import { useUpdateRunStatus } from '@/hooks/labels/useLabelRuns';
+import { checkVpsHealth, type VpsHealthReport } from '@/services/labels/vpsApiService';
 import type { LabelRun, LabelRunStatus, LabelItem, LabelDieline } from '@/types/labels';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
 import { toast } from 'sonner';
@@ -53,6 +55,9 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [layoutPreviewOpen, setLayoutPreviewOpen] = useState(false);
   const [layoutPreviewRun, setLayoutPreviewRun] = useState<LabelRun | null>(null);
+  const [vpsHealthOpen, setVpsHealthOpen] = useState(false);
+  const [vpsHealthReport, setVpsHealthReport] = useState<VpsHealthReport | null>(null);
+  const [vpsHealthLoading, setVpsHealthLoading] = useState(false);
 
   const { impose, isImposing, progress } = useBatchImpose(
     orderId || '',
@@ -182,6 +187,27 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
   const canSendToPrint = hasPlannedRuns && !!dieline && !!orderId && !isImposing;
   const canReprocessAll = runs.length > 0 && !!dieline && !!orderId && !isImposing;
 
+  const handleTestVps = async () => {
+    setVpsHealthLoading(true);
+    setVpsHealthReport(null);
+    setVpsHealthOpen(true);
+    try {
+      const report = await checkVpsHealth();
+      setVpsHealthReport(report);
+      if (report.overall_status === 'healthy') {
+        toast.success(`VPS healthy — ping ${report.summary.ping_ms}ms`);
+      } else if (report.overall_status === 'busy') {
+        toast.warning('VPS is busy (503) — Docker may be overloaded');
+      } else {
+        toast.error('VPS unreachable — Docker may be down');
+      }
+    } catch (err: any) {
+      toast.error(`VPS test failed: ${err.message}`);
+    } finally {
+      setVpsHealthLoading(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -191,8 +217,12 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
               <Layers className="h-5 w-5" />
               Production Runs
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="flex items-center gap-2">
               {runs.length} runs planned • {totalMeters.toFixed(1)}m total • {totalFrames} frames
+              <Button variant="ghost" size="sm" className="gap-1 h-6 px-2 text-xs" onClick={handleTestVps} disabled={vpsHealthLoading}>
+                {vpsHealthLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
+                Test VPS
+              </Button>
             </CardDescription>
           </div>
           <div className="flex items-center gap-3">
@@ -470,6 +500,60 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
           </DialogContent>
         </Dialog>
       )}
+      {/* VPS Health Diagnostic Dialog */}
+      <Dialog open={vpsHealthOpen} onOpenChange={setVpsHealthOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              VPS Diagnostic Report
+            </DialogTitle>
+            <DialogDescription>
+              Direct probe results from pdf-api.jaimar.dev
+            </DialogDescription>
+          </DialogHeader>
+          {vpsHealthLoading ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Running 3 probes...
+            </div>
+          ) : vpsHealthReport ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Badge variant={vpsHealthReport.overall_status === 'healthy' ? 'default' : 'destructive'}>
+                  {vpsHealthReport.overall_status.toUpperCase()}
+                </Badge>
+                <span className="text-xs text-muted-foreground">{vpsHealthReport.timestamp}</span>
+              </div>
+              <div className="space-y-2">
+                {vpsHealthReport.probes.map((probe) => (
+                  <div key={probe.name} className="rounded-lg border p-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm">{probe.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{probe.response_time_ms}ms</span>
+                        {probe.reachable ? (
+                          <Badge variant="outline" className="text-xs">{probe.status_code}</Badge>
+                        ) : (
+                          <Badge variant="destructive" className="text-xs">FAIL</Badge>
+                        )}
+                      </div>
+                    </div>
+                    {probe.error && (
+                      <p className="text-xs text-destructive">{probe.error}</p>
+                    )}
+                    {probe.response_snippet && (
+                      <pre className="text-xs text-muted-foreground bg-muted p-2 rounded overflow-x-auto max-h-20">
+                        {probe.response_snippet.substring(0, 150)}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

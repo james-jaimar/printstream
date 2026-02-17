@@ -6,7 +6,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { PreflightReport, SlotAssignment } from "@/types/labels";
 
-const SUPABASE_URL = "https://kgizusgqexmlfcqfjopk.supabase.co";
+
 
 // ============================================================================
 // PREFLIGHT SERVICE
@@ -281,23 +281,56 @@ export async function splitPdf(
 // HEALTH CHECK
 // ============================================================================
 
+export interface VpsHealthProbe {
+  name: string;
+  reachable: boolean;
+  status_code: number | null;
+  response_time_ms: number;
+  response_snippet: string;
+  error: string | null;
+}
+
+export interface VpsHealthReport {
+  timestamp: string;
+  vps_url: string;
+  overall_status: "healthy" | "busy" | "unreachable";
+  probes: VpsHealthProbe[];
+  summary: {
+    ping_ok: boolean;
+    ping_ms: number;
+    health_ok: boolean;
+    health_ms: number;
+    endpoint_ok: boolean;
+    endpoint_ms: number;
+    endpoint_status: number | null;
+    is_busy: boolean;
+  };
+}
+
 /**
- * Check if VPS PDF API is available
+ * Run detailed VPS health diagnostics via the label-vps-health edge function
+ */
+export async function checkVpsHealth(): Promise<VpsHealthReport> {
+  const { data, error } = await supabase.functions.invoke("label-vps-health", {
+    body: {},
+  });
+
+  if (error) {
+    console.error("VPS health check error:", error);
+    throw new Error(`VPS health check failed: ${error.message}`);
+  }
+
+  return data as VpsHealthReport;
+}
+
+/**
+ * Simple boolean health check (legacy compat)
  */
 export async function checkVpsApiHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/label-preflight`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}`,
-      },
-      body: JSON.stringify({ pdf_url: "health-check" }),
-    });
-    
-    return response.status !== 502 && response.status !== 503;
-  } catch (error) {
-    console.error("VPS API health check failed:", error);
+    const report = await checkVpsHealth();
+    return report.overall_status !== "unreachable";
+  } catch {
     return false;
   }
 }
