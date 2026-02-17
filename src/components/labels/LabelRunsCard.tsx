@@ -170,6 +170,7 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
   };
 
   const completedRuns = runs.filter(r => r.status === 'completed').length;
+  const imposedRuns = runs.filter(r => r.imposed_pdf_url).length;
   const totalMeters = runs.reduce((sum, r) => sum + (r.meters_to_print || 0), 0);
   const totalFrames = runs.reduce((sum, r) => sum + (r.frames_count || 0), 0);
 
@@ -305,8 +306,12 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
               </>
             )}
             <div className="text-right">
-              <div className="text-2xl font-bold">{completedRuns}/{runs.length}</div>
-              <div className="text-sm text-muted-foreground">Completed</div>
+              <div className="text-2xl font-bold">
+                {completedRuns > 0 ? completedRuns : imposedRuns}/{runs.length}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {completedRuns > 0 ? 'Completed' : imposedRuns > 0 ? 'Imposed' : 'Pending'}
+              </div>
             </div>
           </div>
         </div>
@@ -314,7 +319,7 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
           <Progress value={((progress.current) / progress.total) * 100} className="h-2" />
         )}
         {!isImposing && runs.length > 0 && (
-          <Progress value={(completedRuns / runs.length) * 100} className="h-2" />
+          <Progress value={((completedRuns > 0 ? completedRuns : imposedRuns) / runs.length) * 100} className="h-2" />
         )}
       </CardHeader>
       <CardContent className="space-y-4">
