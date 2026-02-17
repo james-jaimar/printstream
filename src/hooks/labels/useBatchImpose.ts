@@ -199,7 +199,7 @@ export function useBatchImpose(
           dieline: dielineConfig,
           slot_assignments: slotAssignments,
           include_dielines: true,
-          meters_to_print: run.meters_to_print || 1,
+          meters_to_print: 0, // Single frame only — printer handles repetition
         };
 
         const result = await createImposition(request);
