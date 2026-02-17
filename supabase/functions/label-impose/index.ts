@@ -61,9 +61,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Creating imposition for run: ${imposeRequest.run_id}`);
-    console.log(`Dieline: ${imposeRequest.dieline.columns_across}x${imposeRequest.dieline.rows_around}`);
-    console.log(`Slot assignments: ${imposeRequest.slot_assignments.length}`);
+    console.log(`[label-impose] === START run=${imposeRequest.run_id} ===`);
+    console.log(`[label-impose] Dieline: ${imposeRequest.dieline.columns_across}x${imposeRequest.dieline.rows_around}`);
+    console.log(`[label-impose] Slot assignments: ${imposeRequest.slot_assignments.length}`);
 
     const timestamp = Date.now();
     const basePath = `label-runs/${imposeRequest.order_id}/${imposeRequest.run_id}`;
@@ -71,36 +71,40 @@ Deno.serve(async (req) => {
     const proofPath = `${basePath}/proof_${timestamp}.pdf`;
 
     // Generate signed upload URLs so the VPS can upload directly to storage
+    console.log(`[label-impose] Creating production upload URL...`);
     const { data: productionUploadData, error: productionUploadError } = await supabase
       .storage
       .from("label-files")
       .createSignedUploadUrl(productionPath);
 
     if (productionUploadError) {
+      console.error(`[label-impose] FAILED to create production upload URL:`, productionUploadError);
       throw new Error(`Failed to create production upload URL: ${productionUploadError.message}`);
     }
+    console.log(`[label-impose] Production upload URL created OK`);
 
     let proofUploadUrl: string | undefined;
     let proofPublicUrl: string | undefined;
 
     if (imposeRequest.include_dielines) {
+      console.log(`[label-impose] Creating proof upload URL...`);
       const { data: proofUploadData, error: proofUploadError } = await supabase
         .storage
         .from("label-files")
         .createSignedUploadUrl(proofPath);
 
       if (proofUploadError) {
-        console.warn("Failed to create proof upload URL:", proofUploadError);
+        console.error(`[label-impose] FAILED to create proof upload URL:`, proofUploadError);
       } else {
         proofUploadUrl = proofUploadData.signedUrl;
         const { data: proofPubData } = supabase.storage
           .from("label-files")
           .getPublicUrl(proofPath);
         proofPublicUrl = proofPubData.publicUrl;
+        console.log(`[label-impose] Proof upload URL created OK`);
       }
     }
 
-    // Get public URL for production PDF
     const { data: productionPubData } = supabase.storage
       .from("label-files")
       .getPublicUrl(productionPath);
@@ -121,15 +125,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`Expanded ${imposeRequest.slot_assignments.length} column slots to ${expandedSlots.length} grid slots`);
+    console.log(`[label-impose] Expanded ${imposeRequest.slot_assignments.length} column slots to ${expandedSlots.length} grid slots`);
 
-    // Map expanded slots with rotation info
     const slotsWithRotation = expandedSlots.map(slot => ({
       ...slot,
       rotation: slot.needs_rotation ? 90 : 0,
     }));
 
-    // Build upload_config for VPS
     const uploadConfig: Record<string, string> = {
       production_upload_url: productionUploadUrl,
       production_public_url: productionPublicUrl,
@@ -139,7 +141,6 @@ Deno.serve(async (req) => {
       uploadConfig.proof_public_url = proofPublicUrl;
     }
 
-    // Build callback_config so VPS can update label_runs directly
     const callbackConfig = {
       supabase_url: supabaseUrl,
       supabase_service_key: supabaseServiceKey,
@@ -148,7 +149,7 @@ Deno.serve(async (req) => {
       proof_public_url: proofPublicUrl || null,
     };
 
-    // Mark run as "imposing" so frontend knows it's in progress
+    // Mark run as "imposing"
     await supabase
       .from("label_runs")
       .update({
@@ -157,11 +158,6 @@ Deno.serve(async (req) => {
       })
       .eq("id", imposeRequest.run_id);
 
-    console.log("Firing VPS request with 503 retry logic");
-
-    const MAX_RETRIES = 3;
-    const RETRY_BASE_DELAY_MS = 5000; // 5s, 10s, 15s
-
     // Calculate correct page dimensions: cell size * grid count, no gaps
     const d = imposeRequest.dieline;
     const cellWidth = d.label_width_mm + (d.bleed_left_mm || 0) + (d.bleed_right_mm || 0);
@@ -169,7 +165,7 @@ Deno.serve(async (req) => {
     const pageWidth = cellWidth * d.columns_across;
     const pageHeight = cellHeight * d.rows_around;
 
-    console.log(`Calculated page: ${pageWidth}mm x ${pageHeight}mm (cell: ${cellWidth}x${cellHeight})`);
+    console.log(`[label-impose] Calculated page: ${pageWidth}mm x ${pageHeight}mm (cell: ${cellWidth}x${cellHeight})`);
 
     const vpsPayload = JSON.stringify({
       dieline: {
@@ -184,6 +180,13 @@ Deno.serve(async (req) => {
       callback_config: callbackConfig,
     });
 
+    const payloadSizeKB = (new TextEncoder().encode(vpsPayload).length / 1024).toFixed(1);
+    console.log(`[label-impose] VPS payload size: ${payloadSizeKB} KB`);
+    console.log(`[label-impose] Firing VPS request with 503 retry logic`);
+
+    const MAX_RETRIES = 3;
+    const RETRY_BASE_DELAY_MS = 5000;
+
     let response: Response | null = null;
     let lastError = '';
     let aborted = false;
@@ -191,7 +194,7 @@ Deno.serve(async (req) => {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         const waitMs = attempt * RETRY_BASE_DELAY_MS;
-        console.log(`VPS busy (503), retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
+        console.log(`[label-impose] VPS busy (503), retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
         await new Promise(r => setTimeout(r, waitMs));
       }
 
@@ -213,21 +216,26 @@ Deno.serve(async (req) => {
 
         if (response.status === 503 && attempt < MAX_RETRIES) {
           lastError = await response.text();
-          console.warn(`VPS returned 503: ${lastError.substring(0, 100)}`);
+          console.warn(`[label-impose] VPS returned 503: ${lastError.substring(0, 200)}`);
           response = null;
           continue;
         }
-        break; // success or non-retryable error
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error(`[label-impose] VPS non-OK response: status=${response.status} body=${errorBody.substring(0, 500)}`);
+        }
+
+        break;
       } catch (fetchError) {
         clearTimeout(acceptTimeout);
         if (fetchError.name === "AbortError") {
-          console.log("VPS accepted request, processing asynchronously (will callback)");
+          console.log(`[label-impose] VPS accepted request (10s timeout hit — processing asynchronously via callback)`);
           response = null;
           aborted = true;
           break;
         }
-        // Connection error — no retry
-        console.error("VPS connection error:", fetchError);
+        console.error(`[label-impose] VPS connection error:`, fetchError.message);
         await supabase
           .from("label_runs")
           .update({ status: "planned", updated_at: new Date().toISOString() })
@@ -244,7 +252,7 @@ Deno.serve(async (req) => {
     if (response) {
       if (response.ok) {
         const vpsResult = await response.json();
-        console.log(`VPS responded immediately: ${vpsResult.frame_count} frames`);
+        console.log(`[label-impose] VPS responded immediately: ${vpsResult.frame_count} frames`);
 
         await supabase
           .from("label_runs")
@@ -256,8 +264,8 @@ Deno.serve(async (req) => {
           })
           .eq("id", imposeRequest.run_id);
       } else {
-        const errorText = await response.text();
-        console.error(`VPS error: ${response.status} - ${errorText}`);
+        const errorText = await response.text().catch(() => 'Could not read response body');
+        console.error(`[label-impose] VPS error: status=${response.status} body=${errorText.substring(0, 500)}`);
 
         await supabase
           .from("label_runs")
@@ -270,8 +278,7 @@ Deno.serve(async (req) => {
         );
       }
     } else if (!aborted) {
-      // All retries exhausted (503s)
-      console.error(`VPS busy after ${MAX_RETRIES + 1} attempts: ${lastError.substring(0, 100)}`);
+      console.error(`[label-impose] VPS busy after ${MAX_RETRIES + 1} attempts: ${lastError.substring(0, 200)}`);
       await supabase
         .from("label_runs")
         .update({ status: "planned", updated_at: new Date().toISOString() })
@@ -283,7 +290,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Return immediately — VPS will update label_runs via callback when done
+    console.log(`[label-impose] === DONE run=${imposeRequest.run_id} ===`);
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -296,7 +304,7 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("Imposition error:", error);
+    console.error("[label-impose] UNCAUGHT ERROR:", error);
     return new Response(
       JSON.stringify({
         success: false,
