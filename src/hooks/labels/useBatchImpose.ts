@@ -62,12 +62,26 @@ export function useBatchImpose(
   const isImposing = progress.status === 'imposing';
   const abortRef = useRef(false);
 
-  const impose = useCallback(async () => {
+  const impose = useCallback(async (forceAll = false) => {
     if (!dieline || runs.length === 0) return;
 
-    const plannedRuns = runs.filter(r => r.status === 'planned');
-    if (plannedRuns.length === 0) {
-      toast.info('No planned runs to impose');
+    let targetRuns: LabelRun[];
+    if (forceAll) {
+      // Reset all non-planned runs back to planned first
+      const runsToReset = runs.filter(r => r.status !== 'planned');
+      for (const run of runsToReset) {
+        await supabase
+          .from('label_runs')
+          .update({ status: 'planned', imposed_pdf_url: null, imposed_pdf_with_dielines_url: null, updated_at: new Date().toISOString() })
+          .eq('id', run.id);
+      }
+      targetRuns = runs;
+    } else {
+      targetRuns = runs.filter(r => r.status === 'planned');
+    }
+
+    if (targetRuns.length === 0) {
+      toast.info('No runs to impose');
       return;
     }
 
@@ -75,8 +89,8 @@ export function useBatchImpose(
 
     setProgress({
       current: 0,
-      total: plannedRuns.length,
-      currentRunNumber: plannedRuns[0].run_number,
+      total: targetRuns.length,
+      currentRunNumber: targetRuns[0].run_number,
       status: 'imposing',
       errors: [],
       completedRunIds: [],
@@ -86,16 +100,16 @@ export function useBatchImpose(
     const completedRunIds: string[] = [];
     let consecutiveFailures = 0;
 
-    for (let i = 0; i < plannedRuns.length; i++) {
+    for (let i = 0; i < targetRuns.length; i++) {
       if (abortRef.current) break;
 
-      const run = plannedRuns[i];
+      const run = targetRuns[i];
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        const remaining = plannedRuns.length - i;
+        const remaining = targetRuns.length - i;
         toast.error(`Aborting: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
-        for (let j = i; j < plannedRuns.length; j++) {
-          errors.push({ runNumber: plannedRuns[j].run_number, error: 'Skipped — aborted after consecutive failures' });
+        for (let j = i; j < targetRuns.length; j++) {
+          errors.push({ runNumber: targetRuns[j].run_number, error: 'Skipped — aborted after consecutive failures' });
         }
         break;
       }
@@ -108,7 +122,7 @@ export function useBatchImpose(
       }));
 
       try {
-        const slotAssignments: ImpositionSlot[] = (run.slot_assignments || []).map(slot => {
+        const slotAssignments: ImpositionSlot[] = ((run.slot_assignments || []) as any[]).map(slot => {
           const item = items.find(it => it.id === slot.item_id);
           return {
             slot: slot.slot,
@@ -145,7 +159,6 @@ export function useBatchImpose(
 
         const result = await createImposition(request);
 
-        // Wait for VPS to finish (poll until status changes from 'imposing')
         if (result.status === 'processing') {
           toast.info(`Run ${run.run_number} sent to VPS, waiting for completion...`);
           const outcome = await waitForRunCompletion(run.id);
@@ -153,17 +166,16 @@ export function useBatchImpose(
           if (outcome === 'approved') {
             completedRunIds.push(run.id);
             consecutiveFailures = 0;
-            toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${plannedRuns.length})`);
+            toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
           } else {
             errors.push({ runNumber: run.run_number, error: 'VPS processing failed or timed out' });
             consecutiveFailures++;
             toast.error(`Run ${run.run_number} failed`);
           }
         } else {
-          // Completed synchronously
           completedRunIds.push(run.id);
           consecutiveFailures = 0;
-          toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${plannedRuns.length})`);
+          toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
         }
 
       } catch (err: any) {
@@ -184,18 +196,18 @@ export function useBatchImpose(
 
     // Final state
     setProgress({
-      current: plannedRuns.length,
-      total: plannedRuns.length,
-      currentRunNumber: plannedRuns[plannedRuns.length - 1].run_number,
+      current: targetRuns.length,
+      total: targetRuns.length,
+      currentRunNumber: targetRuns[targetRuns.length - 1].run_number,
       status: errors.length > 0 ? 'error' : 'complete',
       errors,
       completedRunIds,
     });
 
     if (errors.length === 0) {
-      toast.success(`All ${plannedRuns.length} runs imposed successfully`);
+      toast.success(`All ${targetRuns.length} runs imposed successfully`);
     } else {
-      toast.error(`${errors.length} of ${plannedRuns.length} runs failed`);
+      toast.error(`${errors.length} of ${targetRuns.length} runs failed`);
     }
   }, [orderId, runs, items, dieline]);
 
