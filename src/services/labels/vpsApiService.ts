@@ -175,7 +175,7 @@ export interface ImpositionRequest {
   dieline: DielineConfig;
   slot_assignments: ImpositionSlot[];
   include_dielines: boolean;
-  meters_to_print: number;
+  meters_to_print: number; // Not used for PDF generation — production metadata only; printer handles repetition
 }
 
 export interface ImpositionResponse {

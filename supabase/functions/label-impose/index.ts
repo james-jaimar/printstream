@@ -155,7 +155,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           dieline: imposeRequest.dieline,
           slots: slotsWithRotation,
-          meters: imposeRequest.meters_to_print,
+          // No meters field — VPS produces a single dieline frame; printer handles repetition
           include_dielines: imposeRequest.include_dielines,
           upload_config: uploadConfig,
           callback_config: callbackConfig,
