@@ -272,7 +272,7 @@ export function LabelsOrderDetail() {
             AI-optimized print runs and production schedule
           </p>
         </div>
-        <LabelRunsCard runs={runs} items={items} />
+        <LabelRunsCard runs={runs} items={items} dieline={order.dieline} orderId={order.id} orderNumber={order.order_number} />
       </div>
 
       {/* Timestamps */}

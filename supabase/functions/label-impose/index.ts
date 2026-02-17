@@ -175,8 +175,6 @@ Deno.serve(async (req) => {
           .update({
             imposed_pdf_url: productionPublicUrl,
             imposed_pdf_with_dielines_url: proofPublicUrl || null,
-            frames_count: vpsResult.frame_count,
-            meters_to_print: vpsResult.total_meters,
             status: "approved",
             updated_at: new Date().toISOString(),
           })

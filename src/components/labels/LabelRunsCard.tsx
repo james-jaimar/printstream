@@ -8,7 +8,9 @@ import {
   ChevronRight,
   LayoutGrid,
   Printer,
-  Loader2
+  Loader2,
+  FileDown,
+  Download
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,12 +24,13 @@ import { useUpdateRunStatus } from '@/hooks/labels/useLabelRuns';
 import type { LabelRun, LabelRunStatus, LabelItem, LabelDieline } from '@/types/labels';
 import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
 import { toast } from 'sonner';
-
+import { supabase } from '@/integrations/supabase/client';
 interface LabelRunsCardProps {
   runs: LabelRun[];
   items: LabelItem[];
   dieline?: LabelDieline | null;
   orderId?: string;
+  orderNumber?: string;
   onViewRun?: (run: LabelRun) => void;
   onImpositionComplete?: () => void;
 }
@@ -44,7 +47,7 @@ const statusConfig: Record<LabelRunStatus, {
   cancelled: { icon: XCircle, label: 'Cancelled', color: 'bg-red-500' },
 };
 
-export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpositionComplete }: LabelRunsCardProps) {
+export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onViewRun, onImpositionComplete }: LabelRunsCardProps) {
   const [selectedRun, setSelectedRun] = useState<LabelRun | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [layoutPreviewOpen, setLayoutPreviewOpen] = useState(false);
@@ -61,6 +64,52 @@ export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpo
   
   const getItemName = (itemId: string) => {
     return items.find(i => i.id === itemId)?.name || 'Unknown';
+  };
+
+  // Print Files helpers
+  const runsWithPdfs = runs
+    .filter(r => r.imposed_pdf_url)
+    .sort((a, b) => a.run_number - b.run_number);
+
+  const extractStoragePath = (publicUrl: string): string | null => {
+    const marker = '/object/public/label-files/';
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return null;
+    return publicUrl.substring(idx + marker.length);
+  };
+
+  const getCopiesForRun = (run: LabelRun): number => {
+    if (!run.slot_assignments || run.slot_assignments.length === 0) return 0;
+    const maxQty = Math.max(...run.slot_assignments.map(s => s.quantity_in_slot));
+    return Math.ceil(maxQty / (dieline?.columns_across || 1));
+  };
+
+  const handleDownloadPdf = async (run: LabelRun) => {
+    if (!run.imposed_pdf_url) return;
+    const path = extractStoragePath(run.imposed_pdf_url);
+    if (!path) {
+      toast.error('Could not determine file path');
+      return;
+    }
+    const { data, error } = await supabase.storage
+      .from('label-files')
+      .createSignedUrl(path, 3600);
+    if (error || !data?.signedUrl) {
+      toast.error('Failed to generate download link');
+      return;
+    }
+    const copies = getCopiesForRun(run);
+    const fileName = `Run-${run.run_number}_${orderNumber || 'order'}_${copies}-copies.pdf`;
+    const link = document.createElement('a');
+    link.href = data.signedUrl;
+    link.download = fileName;
+    link.click();
+  };
+
+  const handleDownloadAll = async () => {
+    for (const run of runsWithPdfs) {
+      await handleDownloadPdf(run);
+    }
   };
 
   const handleRunClick = (run: LabelRun) => {
@@ -197,7 +246,46 @@ export function LabelRunsCard({ runs, items, dieline, orderId, onViewRun, onImpo
           <Progress value={(completedRuns / runs.length) * 100} className="h-2" />
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
+        {/* Print Files Section */}
+        {runsWithPdfs.length > 0 && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/30 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <FileDown className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <span className="font-medium text-sm">Print Files</span>
+                <Badge variant="secondary" className="text-xs">{runsWithPdfs.length} ready</Badge>
+              </div>
+              {runsWithPdfs.length > 1 && (
+                <Button variant="outline" size="sm" className="gap-1" onClick={handleDownloadAll}>
+                  <Download className="h-3.5 w-3.5" />
+                  Download All
+                </Button>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              {runsWithPdfs.map((run) => {
+                const copies = getCopiesForRun(run);
+                return (
+                  <div
+                    key={run.id}
+                    className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-blue-100/50 dark:hover:bg-blue-900/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="font-medium">Run {run.run_number}</span>
+                      {orderNumber && <span className="text-muted-foreground">{orderNumber}</span>}
+                      <Badge variant="outline" className="text-xs">{copies} copies</Badge>
+                    </div>
+                    <Button variant="ghost" size="sm" className="gap-1 h-7" onClick={() => handleDownloadPdf(run)}>
+                      <FileDown className="h-3.5 w-3.5" />
+                      Download
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {runs.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Layers className="h-10 w-10 mx-auto mb-2 opacity-50" />
