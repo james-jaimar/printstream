@@ -47,9 +47,9 @@ export default function LabelsLayout() {
             <div className="px-5 pt-5 pb-4 flex items-center gap-3">
               <img src={impressLogo} alt="Impress" className="h-8 object-contain" />
               <div className="h-6 w-px bg-slate-200" />
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Labels Division</div>
-                <div className="text-[10px] text-slate-500">Admin Console</div>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-900 truncate">Labels Division</div>
+                <div className="text-[10px] text-slate-500 truncate">Admin Console</div>
               </div>
             </div>
 
