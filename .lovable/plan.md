@@ -1,61 +1,145 @@
 
 
-## Fix Label Imposition: Two Root Causes
+# Label Orientation (Rewind Direction) Feature
 
-The imposition is failing due to two separate issues that compound each other.
+## Overview
+Add a "rewind direction" / orientation selector (positions 1-8) to the label order workflow. This is a critical production attribute -- if wrong, the entire print run is wasted. The 8 SVG graphics will be stored as project assets and displayed as a clickable row. It defaults to position 1 ("Outwound, Head to Lead") and must be confirmed by the client in the portal.
 
-### Problem 1: Storage File Size Limit (413 Payload Too Large)
+---
 
-The `label-files` storage bucket has a **50MB file size limit**. A production PDF with 84 frames in a 4x3 grid of 73x103mm labels easily exceeds this. This is what the VPS hits when it tries to PUT the generated PDF to the signed URL.
+## What the 8 orientations represent
 
-**Fix:** Increase the bucket's `file_size_limit` to 500MB (or remove it entirely) via a SQL migration:
+| # | Winding | Direction |
+|---|---------|-----------|
+| 1 | Outwound | Head to Lead |
+| 2 | Outwound | Foot to Lead |
+| 3 | Outwound | Right to Lead |
+| 4 | Outwound | Left to Lead |
+| 5 | Inwound | Head to Lead |
+| 6 | Inwound | Foot to Lead |
+| 7 | Inwound | Right to Lead |
+| 8 | Inwound | Left to Lead |
+
+---
+
+## Implementation Steps
+
+### 1. Database: Add `orientation` column to `label_orders`
+
+Add a new column `orientation` (integer, default 1, not null) to the `label_orders` table and a boolean `orientation_confirmed` (default false) to track client confirmation.
 
 ```sql
-UPDATE storage.buckets 
-SET file_size_limit = 524288000  -- 500MB
-WHERE id = 'label-files';
+ALTER TABLE label_orders
+  ADD COLUMN orientation smallint NOT NULL DEFAULT 1,
+  ADD COLUMN orientation_confirmed boolean NOT NULL DEFAULT false;
 ```
 
-### Problem 2: Edge Function Timeout (504 Gateway Timeout)
+### 2. Copy SVG assets into `src/assets/orientations/`
 
-The edge function calls the VPS and **waits synchronously** for it to finish generating + uploading the PDF. For large runs (84+ frames), this exceeds the ~150s edge function timeout.
+Copy all 8 uploaded SVGs into the project under `src/assets/orientations/` with clean filenames (e.g., `orientation-1.svg` through `orientation-8.svg`).
 
-**Fix:** Make the VPS call fire-and-forget. The edge function should:
-1. Generate signed upload URLs
-2. Send the request to the VPS **without awaiting** the full response (or with a very short timeout just to confirm the VPS accepted the job)
-3. Return immediately to the client with a "processing" status
-4. The VPS uploads directly to storage and updates `label_runs` via a callback or the edge function polls
+### 3. Create shared `OrientationPicker` component
 
-However, a simpler intermediate fix: **have the VPS call back a small edge function** to update the `label_runs` table when done, and change the current edge function to fire-and-forget.
+Build `src/components/labels/OrientationPicker.tsx` -- a reusable component that:
+- Displays all 8 SVGs in a single horizontal row (scrollable on mobile)
+- Each tile shows the SVG, the number, and a short label (e.g., "Outwound / Head to Lead")
+- The selected orientation gets a teal highlight ring + check indicator
+- Accepts `value`, `onChange`, `readOnly`, and `size` ('sm' | 'md') props
+- In `readOnly` mode (for the portal confirmation step), tiles are not clickable but the current selection is highlighted
 
-### Implementation Plan
+### 4. Create `OrientationConfirmBanner` component
 
-**Step 1 — SQL Migration**: Increase `label-files` bucket size limit to 500MB.
+Build `src/components/labels/portal/OrientationConfirmBanner.tsx` for the client portal:
+- Shows prominently at the top of the order detail page (before items)
+- Displays the selected orientation SVG large and centred with descriptive text
+- Has a clear "Confirm Orientation" button with a warning message about the consequence of wrong orientation
+- Once confirmed, shows a green "Confirmed" badge instead of the button
+- If not confirmed, blocks the final approval flow (or shows a warning)
 
-**Step 2 — Edge Function (`label-impose/index.ts`)**: Change the VPS call to not await the full response. Instead:
-- Send the request to VPS with the upload config AND a callback payload (run_id, public URLs)
-- Return immediately with `{ success: true, status: "processing" }`
-- The VPS handles uploading + updating the DB itself
+### 5. Update TypeScript types
 
-**Step 3 — VPS update (`imposition.py`)**: After uploading PDFs to storage, the VPS makes a small PATCH call to Supabase (using the service role key passed in the request) to update `label_runs` with the PDF URLs, frame count, and status.
+In `src/types/labels.ts`:
+- Add `orientation: number` and `orientation_confirmed: boolean` to `LabelOrder` interface
+- Add `orientation?: number` to `CreateLabelOrderInput` interface
 
-**Step 4 — Frontend (`useBatchImpose.ts`)**: After firing the impose request, poll the `label_runs` table for status changes instead of relying on a synchronous response. Show a "processing" state per run.
+Update `src/integrations/supabase/types.ts` (auto-generated, but will need the new columns reflected).
 
-### Technical Details
+### 6. Update `NewLabelOrderDialog` (admin order creation)
 
-**Edge function changes:**
-- Remove the `await` on the VPS fetch call (or use a 5s timeout just to confirm acceptance)
-- Pass `supabase_url`, `supabase_service_key`, and `run_id` in the VPS payload so the VPS can update the DB directly
-- Remove the post-VPS `label_runs` update (VPS will do it)
-- Return immediately with processing status
+Add the `OrientationPicker` to the "Print Specifications" section of the new order form:
+- Add `orientation` field to the zod schema (default: 1)
+- Render the picker below the existing dieline/substrate fields
+- Pass the selected value when creating the order
 
-**VPS changes (user deploys manually):**
-- After uploading PDFs, make a PATCH request to Supabase REST API to update `label_runs`
-- Set status to `approved`, update `imposed_pdf_url`, `frames_count`, `meters_to_print`
+### 7. Update `LabelOrderModal` (admin order detail view)
 
-**Frontend changes:**
-- `useBatchImpose`: After calling impose, start polling `label_runs` for each run's status (e.g., every 3 seconds)
-- Update progress based on DB status changes rather than synchronous responses
-- Show "Generating..." state while waiting
+Show orientation prominently in the order detail:
+- Add orientation display in the "Print Specifications" info card, showing the selected SVG + label
+- Add an editable `OrientationPicker` (compact `size="sm"`) that allows admins to change it while in `quote` status
+- Show a warning badge if `orientation_confirmed` is still false when the order moves past `pending_approval`
 
-This makes the entire flow asynchronous and removes both the file size and timeout bottlenecks.
+### 8. Update `ClientOrderDetail` (client portal)
+
+Add the `OrientationConfirmBanner` at the top of the order detail page (between the workflow stepper and the items section):
+- Shows the currently selected orientation prominently
+- Client must click "Confirm Orientation" which updates `orientation_confirmed = true` on the order
+- If not confirmed, the approval toolbar shows a warning: "Please confirm label orientation before approving"
+- The confirmation is a separate action from item approval (it's order-level, not item-level)
+
+### 9. Update `ClientPortalDashboard`
+
+On the dashboard order cards/rows, show a small orientation indicator (the SVG thumbnail + number) so clients can see at a glance what orientation is set.
+
+### 10. Update hooks
+
+- `useCreateLabelOrder`: pass `orientation` in the insert
+- `useUpdateLabelOrder`: already handles partial updates (no change needed)
+- `useClientPortalOrder`: ensure the `orientation` and `orientation_confirmed` fields are returned
+- Add a new `useConfirmOrientation` mutation (or reuse `useUpdateLabelOrder` via the client portal hook) that sets `orientation_confirmed = true`
+
+---
+
+## Technical Details
+
+### OrientationPicker component API
+
+```typescript
+interface OrientationPickerProps {
+  value: number;            // 1-8
+  onChange?: (value: number) => void;
+  readOnly?: boolean;
+  size?: 'sm' | 'md';      // sm for inline admin, md for portal
+  className?: string;
+}
+```
+
+### Orientation metadata constant
+
+```typescript
+export const LABEL_ORIENTATIONS = [
+  { number: 1, winding: 'Outwound', direction: 'Head to Lead' },
+  { number: 2, winding: 'Outwound', direction: 'Foot to Lead' },
+  { number: 3, winding: 'Outwound', direction: 'Right to Lead' },
+  { number: 4, winding: 'Outwound', direction: 'Left to Lead' },
+  { number: 5, winding: 'Inwound',  direction: 'Head to Lead' },
+  { number: 6, winding: 'Inwound',  direction: 'Foot to Lead' },
+  { number: 7, winding: 'Inwound',  direction: 'Right to Lead' },
+  { number: 8, winding: 'Inwound',  direction: 'Left to Lead' },
+] as const;
+```
+
+### Files to create
+- `src/assets/orientations/orientation-1.svg` through `orientation-8.svg` (8 files)
+- `src/components/labels/OrientationPicker.tsx`
+- `src/components/labels/portal/OrientationConfirmBanner.tsx`
+- Migration SQL file
+
+### Files to modify
+- `src/types/labels.ts` -- add orientation fields
+- `src/integrations/supabase/types.ts` -- will be regenerated
+- `src/components/labels/NewLabelOrderDialog.tsx` -- add picker to form
+- `src/components/labels/order/LabelOrderModal.tsx` -- show orientation in specs card + editable picker
+- `src/pages/labels/portal/ClientOrderDetail.tsx` -- add confirm banner
+- `src/pages/labels/portal/ClientPortalDashboard.tsx` -- show orientation indicator on orders
+- `src/hooks/labels/useLabelOrders.ts` -- pass orientation on create
+
