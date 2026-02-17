@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { createImposition, type ImpositionRequest, type DielineConfig, type ImpositionSlot } from '@/services/labels/vpsApiService';
 import { supabase } from '@/integrations/supabase/client';
 import type { LabelRun, LabelItem, LabelDieline } from '@/types/labels';
@@ -24,18 +24,31 @@ const initialProgress: BatchImposeProgress = {
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_DURATION_MS = 5 * 60 * 1000; // 5 min per run
-const MAX_CONSECUTIVE_FAILURES = 2;
+const MAX_CONSECUTIVE_FAILURES = 999; // Effectively disabled — never abort early
+const INVOCATION_TIMEOUT_MS = 30_000; // 30s client-side timeout for edge function
 
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Wrap a promise with a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+}
+
 /** Poll a single run until it leaves 'imposing' status */
 async function waitForRunCompletion(runId: string): Promise<'approved' | 'failed'> {
   const start = Date.now();
+  let pollCount = 0;
 
   while (Date.now() - start < MAX_POLL_DURATION_MS) {
     await delay(POLL_INTERVAL_MS);
+    pollCount++;
 
     const { data } = await supabase
       .from('label_runs')
@@ -43,13 +56,36 @@ async function waitForRunCompletion(runId: string): Promise<'approved' | 'failed
       .eq('id', runId)
       .single();
 
-    if (!data) continue;
+    if (!data) {
+      console.warn(`[BatchImpose] Poll #${pollCount} for ${runId}: no data returned`);
+      continue;
+    }
+
+    console.log(`[BatchImpose] Poll #${pollCount} for ${runId}: status=${data.status}`);
 
     if (data.status === 'approved') return 'approved';
     if (data.status === 'planned') return 'failed'; // VPS reset it
   }
 
+  console.error(`[BatchImpose] Poll timeout for ${runId} after ${pollCount} polls`);
   return 'failed'; // timeout
+}
+
+/** Persist error details on a failed run so they're visible in the UI */
+async function persistRunError(runId: string, errorMessage: string) {
+  try {
+    await supabase
+      .from('label_runs')
+      .update({
+        status: 'planned',
+        ai_reasoning: `[IMPO ERROR] ${errorMessage}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', runId);
+    console.log(`[BatchImpose] Persisted error for run ${runId}: ${errorMessage}`);
+  } catch (e) {
+    console.error(`[BatchImpose] Failed to persist error for run ${runId}:`, e);
+  }
 }
 
 export function useBatchImpose(
@@ -67,7 +103,6 @@ export function useBatchImpose(
 
     let targetRuns: LabelRun[];
     if (forceAll) {
-      // Reset all non-planned runs back to planned first
       const runsToReset = runs.filter(r => r.status !== 'planned');
       for (const run of runsToReset) {
         await supabase
@@ -85,6 +120,9 @@ export function useBatchImpose(
       return;
     }
 
+    console.log(`[BatchImpose] Starting batch: ${targetRuns.length} runs targeted`);
+    console.log(`[BatchImpose] Run IDs:`, targetRuns.map(r => `#${r.run_number} (${r.id})`));
+
     abortRef.current = false;
 
     setProgress({
@@ -101,12 +139,16 @@ export function useBatchImpose(
     let consecutiveFailures = 0;
 
     for (let i = 0; i < targetRuns.length; i++) {
-      if (abortRef.current) break;
+      if (abortRef.current) {
+        console.log(`[BatchImpose] Aborted by user at run ${i + 1}/${targetRuns.length}`);
+        break;
+      }
 
       const run = targetRuns[i];
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         const remaining = targetRuns.length - i;
+        console.error(`[BatchImpose] ABORT: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
         toast.error(`Aborting: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
         for (let j = i; j < targetRuns.length; j++) {
           errors.push({ runNumber: targetRuns[j].run_number, error: 'Skipped — aborted after consecutive failures' });
@@ -114,7 +156,8 @@ export function useBatchImpose(
         break;
       }
 
-      // Update progress: starting this run
+      console.log(`[BatchImpose] === Run ${i + 1}/${targetRuns.length}: #${run.run_number} (${run.id}) ===`);
+
       setProgress(prev => ({
         ...prev,
         current: i,
@@ -154,38 +197,49 @@ export function useBatchImpose(
           dieline: dielineConfig,
           slot_assignments: slotAssignments,
           include_dielines: true,
-          meters_to_print: 0, // Single frame only — printer handles repetition
+          meters_to_print: 0,
         };
 
-        const result = await createImposition(request);
+        console.log(`[BatchImpose] Invoking createImposition for run #${run.run_number}...`);
+        const result = await withTimeout(
+          createImposition(request),
+          INVOCATION_TIMEOUT_MS,
+          `Edge function invocation for run #${run.run_number}`
+        );
+        console.log(`[BatchImpose] createImposition response for run #${run.run_number}:`, JSON.stringify(result));
 
         if (result.status === 'processing') {
-          toast.info(`Run ${run.run_number} sent to VPS, waiting for completion...`);
+          console.log(`[BatchImpose] Run #${run.run_number} sent to VPS, polling for completion...`);
           const outcome = await waitForRunCompletion(run.id);
+          console.log(`[BatchImpose] Poll outcome for run #${run.run_number}: ${outcome}`);
 
           if (outcome === 'approved') {
             completedRunIds.push(run.id);
             consecutiveFailures = 0;
             toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
           } else {
-            errors.push({ runNumber: run.run_number, error: 'VPS processing failed or timed out' });
+            const errMsg = 'VPS processing failed or timed out during polling';
+            errors.push({ runNumber: run.run_number, error: errMsg });
             consecutiveFailures++;
-            toast.error(`Run ${run.run_number} failed`);
+            await persistRunError(run.id, errMsg);
+            toast.error(`Run ${run.run_number} failed: ${errMsg}`);
           }
         } else {
           completedRunIds.push(run.id);
           consecutiveFailures = 0;
+          console.log(`[BatchImpose] Run #${run.run_number} completed immediately`);
           toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
         }
 
       } catch (err: any) {
-        console.error(`Imposition failed for run ${run.run_number}:`, err);
-        errors.push({ runNumber: run.run_number, error: err.message || 'Unknown error' });
+        const errMsg = err.message || 'Unknown error';
+        console.error(`[BatchImpose] FAILED run #${run.run_number}:`, errMsg, err);
+        errors.push({ runNumber: run.run_number, error: errMsg });
         consecutiveFailures++;
-        toast.error(`Run ${run.run_number} failed: ${err.message}`);
+        await persistRunError(run.id, errMsg);
+        toast.error(`Run ${run.run_number} failed: ${errMsg}`);
       }
 
-      // Update progress after each run
       setProgress(prev => ({
         ...prev,
         current: i + 1,
@@ -195,6 +249,7 @@ export function useBatchImpose(
 
       // Give VPS breathing room between runs
       if (i < targetRuns.length - 1) {
+        console.log(`[BatchImpose] Waiting 3s before next run...`);
         await delay(3000);
       }
     }
@@ -208,6 +263,11 @@ export function useBatchImpose(
       errors,
       completedRunIds,
     });
+
+    console.log(`[BatchImpose] Batch complete: ${completedRunIds.length} succeeded, ${errors.length} failed`);
+    if (errors.length > 0) {
+      console.log(`[BatchImpose] Failed runs:`, errors);
+    }
 
     if (errors.length === 0) {
       toast.success(`All ${targetRuns.length} runs imposed successfully`);
