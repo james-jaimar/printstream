@@ -27,6 +27,8 @@ import {
   Eye,
   Package,
   FileUp,
+  User,
+  LogOut,
 } from 'lucide-react';
 import {
   useClientPortalOrder,
@@ -69,23 +71,21 @@ function WorkflowStepper({ status }: { status: string }) {
               <div
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
                   isComplete
-                    ? 'text-primary-foreground'
+                    ? 'bg-[#00B8D4] text-white'
                     : isCurrent
-                      ? 'text-primary border-2 border-primary bg-primary/10'
-                      : 'bg-muted text-muted-foreground'
+                      ? 'text-[#00B8D4] border-2 border-[#00B8D4]/30 bg-white shadow-sm'
+                      : 'bg-slate-100 text-slate-400'
                 }`}
-                style={isComplete ? { background: '#00B8D4' } : undefined}
               >
                 {isComplete ? <CheckCircle className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
               </div>
-              <span className={`text-xs font-medium ${isComplete || isCurrent ? 'text-foreground' : 'text-muted-foreground'}`}>
+              <span className={`text-xs font-medium ${isComplete || isCurrent ? 'text-slate-900' : 'text-slate-400'}`}>
                 {step.label}
               </span>
             </div>
             {i < workflowSteps.length - 1 && (
               <div
-                className={`flex-1 h-0.5 mx-2 mb-6 rounded-full ${isComplete ? '' : 'bg-border'}`}
-                style={isComplete ? { background: '#00B8D4' } : undefined}
+                className={`flex-1 h-[2px] mx-2 mb-6 rounded-full ${isComplete ? 'bg-[#00B8D4]' : 'bg-gradient-to-r from-slate-200 to-slate-100'}`}
               />
             )}
           </div>
@@ -134,7 +134,7 @@ export default function ClientOrderDetail() {
     [visibleItems]
   );
 
-  // All handler functions: handleToggleSelect, handleSelectAll, handleApprove, handleConfirmApproval, handleReject, handleConfirmReject, handleUploadArtwork, handleOrderUpload
+  // All handler functions
   const handleToggleSelect = (id: string) => {
     setSelectedItemIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -217,19 +217,19 @@ export default function ClientOrderDetail() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen flex items-center justify-center bg-[radial-gradient(1100px_520px_at_50%_-140px,rgba(0,184,212,0.18),transparent_60%),linear-gradient(to_bottom,rgba(248,250,252,1),rgba(241,245,249,1))]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#00B8D4]" />
       </div>
     );
   }
 
   if (!order) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card>
+      <div className="min-h-screen flex items-center justify-center bg-[radial-gradient(1100px_520px_at_50%_-140px,rgba(0,184,212,0.18),transparent_60%),linear-gradient(to_bottom,rgba(248,250,252,1),rgba(241,245,249,1))]">
+        <Card className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground">Order not found</p>
-            <Button variant="link" onClick={() => navigate('/labels/portal')}>
+            <Button variant="link" className="text-[#00B8D4]" onClick={() => navigate('/labels/portal')}>
               Back to Dashboard
             </Button>
           </CardContent>
@@ -244,28 +244,28 @@ export default function ClientOrderDetail() {
     order.status === 'completed';
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[radial-gradient(1100px_520px_at_50%_-140px,rgba(0,184,212,0.18),transparent_60%),linear-gradient(to_bottom,rgba(248,250,252,1),rgba(241,245,249,1))]">
       {/* Branded Header */}
-      <header className="border-b bg-card sticky top-0 z-10">
-        <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, #00B8D4, #0097A7)' }} />
+      <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/75 backdrop-blur">
+        <div className="h-[3px] w-full bg-gradient-to-r from-[#00B8D4] to-[#0097A7]" />
         <div className="container mx-auto px-4 py-3 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/labels/portal')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <img src={impressLogo} alt="Impress" className="h-7 object-contain hidden sm:block" />
-          <div className="hidden sm:block h-6 w-px bg-border" />
+          <img src={impressLogo} alt="Impress" className="h-9 object-contain hidden sm:block" />
+          <div className="hidden sm:block h-7 w-px bg-slate-200" />
           <div className="flex-1 min-w-0">
-            <h1 className="font-bold truncate">{order.order_number}</h1>
-            <p className="text-xs text-muted-foreground">{order.customer_name}</p>
+            <h1 className="font-semibold text-sm leading-tight text-slate-900 truncate">{order.order_number}</h1>
+            <p className="text-[11px] text-slate-500 leading-tight">{order.customer_name}</p>
           </div>
           {order.status === 'pending_approval' && (
-            <Button variant="outline" size="sm" onClick={() => setUploadDialogOpen(true)}>
+            <Button size="sm" className="bg-[#00B8D4] hover:bg-[#0097A7] text-white" onClick={() => setUploadDialogOpen(true)}>
               <Upload className="h-3.5 w-3.5 mr-1" />
               Upload Artwork
             </Button>
           )}
           {isApproved && (
-            <Badge variant="default" className="gap-1">
+            <Badge className="gap-1 bg-emerald-100 text-emerald-800 border-emerald-200">
               <CheckCircle className="h-3 w-3" />
               Approved
             </Badge>
@@ -275,7 +275,7 @@ export default function ClientOrderDetail() {
 
       <main className="container mx-auto px-4 py-6 max-w-5xl">
         {/* Workflow Stepper */}
-        <Card className="mb-6">
+        <Card className="mb-6 rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
           <CardContent className="p-2">
             <WorkflowStepper status={order.status} />
           </CardContent>
@@ -286,8 +286,8 @@ export default function ClientOrderDetail() {
           <div className="lg:col-span-2 space-y-5">
             {/* All approved banner */}
             {allItemsApproved && (
-              <div className="flex items-center gap-3 rounded-lg p-4 border" style={{ background: 'hsl(187 100% 42% / 0.08)', borderColor: 'hsl(187 100% 42% / 0.2)' }}>
-                <CheckCircle className="h-5 w-5 flex-shrink-0" style={{ color: '#00B8D4' }} />
+              <div className="flex items-center gap-3 rounded-2xl p-4 border border-emerald-200/70 bg-emerald-50/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
+                <CheckCircle className="h-5 w-5 flex-shrink-0 text-emerald-500" />
                 <div>
                   <p className="font-medium text-sm">All items approved</p>
                   <p className="text-xs text-muted-foreground">
@@ -298,7 +298,7 @@ export default function ClientOrderDetail() {
             )}
 
             {/* Item cards */}
-            <Card>
+            <Card className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Label Items</CardTitle>
                 <CardDescription>
@@ -308,7 +308,7 @@ export default function ClientOrderDetail() {
               <CardContent>
                 {/* Select All checkbox */}
                 {awaitingItems.length > 0 && (
-                  <div className="flex items-center gap-2 mb-4 p-3 bg-muted/50 rounded-lg border">
+                  <div className="flex items-center gap-2 mb-4 p-3 bg-slate-50/70 rounded-xl border border-slate-200/50">
                     <Checkbox
                       checked={selectedItemIds.length === awaitingItems.length && awaitingItems.length > 0}
                       onCheckedChange={handleSelectAll}
@@ -339,7 +339,7 @@ export default function ClientOrderDetail() {
           {/* Sidebar */}
           <div className="space-y-5">
             {/* Order Summary */}
-            <Card>
+            <Card className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Order Summary</CardTitle>
               </CardHeader>
@@ -382,7 +382,7 @@ export default function ClientOrderDetail() {
 
             {/* Approval History */}
             {approvals && approvals.length > 0 && (
-              <Card>
+              <Card className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Approval History</CardTitle>
                 </CardHeader>
@@ -392,7 +392,7 @@ export default function ClientOrderDetail() {
                       {approvals.map((approval: any) => (
                         <div key={approval.id} className="flex gap-3 text-sm">
                           {approval.action === 'approved' ? (
-                            <CheckCircle className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                            <CheckCircle className="h-4 w-4 text-[#00B8D4] mt-0.5 flex-shrink-0" />
                           ) : (
                             <XCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
                           )}
@@ -420,7 +420,7 @@ export default function ClientOrderDetail() {
 
       {/* Sticky Approval Toolbar */}
       {awaitingItems.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 border-t shadow-lg z-20" style={{ background: 'hsl(var(--card) / 0.95)', backdropFilter: 'blur(8px)' }}>
+        <div className="fixed bottom-0 left-0 right-0 border-t border-slate-200/70 shadow-[0_-4px_20px_rgba(15,23,42,0.08)] z-20 bg-white/90 backdrop-blur-lg">
           <div className="container mx-auto px-4 py-3 max-w-5xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm" onClick={handleSelectAll}>
@@ -440,7 +440,7 @@ export default function ClientOrderDetail() {
                   <XCircle className="h-3.5 w-3.5 mr-1" />
                   Request Changes
                 </Button>
-                <Button size="sm" onClick={() => handleApprove(selectedItemIds)}>
+                <Button size="sm" className="bg-[#00B8D4] hover:bg-[#0097A7] text-white" onClick={() => handleApprove(selectedItemIds)}>
                   <CheckCheck className="h-3.5 w-3.5 mr-1" />
                   Approve ({selectedItemIds.length})
                 </Button>
@@ -461,7 +461,7 @@ export default function ClientOrderDetail() {
 
       {/* Reject Dialog */}
       <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
-        <DialogContent>
+        <DialogContent className="rounded-2xl">
           <DialogHeader>
             <DialogTitle>Request Changes</DialogTitle>
             <DialogDescription>
@@ -510,7 +510,7 @@ export default function ClientOrderDetail() {
           if (uploadInputRef.current) uploadInputRef.current.value = '';
         }
       }}>
-        <DialogContent>
+        <DialogContent className="rounded-2xl">
           <DialogHeader>
             <DialogTitle>Upload New Artwork</DialogTitle>
             <DialogDescription>
@@ -522,7 +522,7 @@ export default function ClientOrderDetail() {
               <Label htmlFor="upload-item">Select Item</Label>
               <select
                 id="upload-item"
-                className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-[#00B8D4]/30 focus:border-[#00B8D4]"
                 value={uploadTargetItemId}
                 onChange={(e) => setUploadTargetItemId(e.target.value)}
               >
@@ -541,7 +541,7 @@ export default function ClientOrderDetail() {
                 id="upload-file"
                 type="file"
                 accept=".pdf"
-                className="mt-2 w-full text-sm"
+                className="mt-2 w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-medium file:bg-[#00B8D4]/10 file:text-[#00B8D4] hover:file:bg-[#00B8D4]/20"
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
               />
             </div>
@@ -556,6 +556,7 @@ export default function ClientOrderDetail() {
               Cancel
             </Button>
             <Button
+              className="bg-[#00B8D4] hover:bg-[#0097A7] text-white"
               onClick={handleOrderUpload}
               disabled={!uploadTargetItemId || !uploadFile || uploadMutation.isPending}
             >
