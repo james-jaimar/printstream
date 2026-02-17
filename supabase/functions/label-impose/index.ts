@@ -103,8 +103,24 @@ Deno.serve(async (req) => {
     const productionPublicUrl = productionPubData.publicUrl;
     const productionUploadUrl = productionUploadData.signedUrl;
 
-    // Map slot assignments with rotation info
-    const slotsWithRotation = imposeRequest.slot_assignments.map(slot => ({
+    // Expand column-based slots to fill all grid positions (columns x rows)
+    const columnsAcross = imposeRequest.dieline.columns_across;
+    const rowsAround = imposeRequest.dieline.rows_around;
+    const expandedSlots: SlotAssignment[] = [];
+
+    for (const slot of imposeRequest.slot_assignments) {
+      for (let row = 0; row < rowsAround; row++) {
+        expandedSlots.push({
+          ...slot,
+          slot: (row * columnsAcross) + slot.slot,
+        });
+      }
+    }
+
+    console.log(`Expanded ${imposeRequest.slot_assignments.length} column slots to ${expandedSlots.length} grid slots`);
+
+    // Map expanded slots with rotation info
+    const slotsWithRotation = expandedSlots.map(slot => ({
       ...slot,
       rotation: slot.needs_rotation ? 90 : 0,
     }));
