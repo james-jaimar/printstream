@@ -10,7 +10,8 @@ import {
   Printer,
   Loader2,
   FileDown,
-  Download
+  Download,
+  RefreshCw
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -93,17 +94,31 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
     }
     const { data, error } = await supabase.storage
       .from('label-files')
-      .createSignedUrl(path, 3600);
+      .createSignedUrl(path, 3600, { download: true });
     if (error || !data?.signedUrl) {
       toast.error('Failed to generate download link');
       return;
     }
     const copies = getCopiesForRun(run);
     const fileName = `Run-${run.run_number}_${orderNumber || 'order'}_${copies}-copies.pdf`;
-    const link = document.createElement('a');
-    link.href = data.signedUrl;
-    link.download = fileName;
-    link.click();
+
+    // Fetch as blob to force download instead of opening in browser
+    try {
+      const res = await fetch(data.signedUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Fallback to direct link
+      const link = document.createElement('a');
+      link.href = data.signedUrl;
+      link.download = fileName;
+      link.click();
+    }
   };
 
   const handleDownloadAll = async () => {
@@ -125,7 +140,12 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
   };
 
   const handleSendToPrint = async () => {
-    await impose();
+    await impose(false);
+    onImpositionComplete?.();
+  };
+
+  const handleReprocessAll = async () => {
+    await impose(true);
     onImpositionComplete?.();
   };
 
@@ -159,6 +179,7 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
   const allPrinting = runs.length > 0 && runs.every(r => r.status === 'printing');
   const allCompleted = runs.length > 0 && runs.every(r => r.status === 'completed');
   const canSendToPrint = hasPlannedRuns && !!dieline && !!orderId && !isImposing;
+  const canReprocessAll = runs.length > 0 && !!dieline && !!orderId && !isImposing;
 
   return (
     <Card>
@@ -183,10 +204,22 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
                     <span>Imposing Run {progress.currentRunNumber} ({progress.current + 1}/{progress.total})...</span>
                   </div>
                 ) : allCompleted ? (
-                  <Badge variant="default" className="gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    All Completed
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReprocessAll}
+                      disabled={!canReprocessAll}
+                      className="gap-1"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Reprocess All
+                    </Button>
+                    <Badge variant="default" className="gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      All Completed
+                    </Badge>
+                  </div>
                 ) : allPrinting ? (
                   <Button
                     size="sm"
@@ -202,34 +235,72 @@ export function LabelRunsCard({ runs, items, dieline, orderId, orderNumber, onVi
                     Complete All Runs
                   </Button>
                 ) : allApproved ? (
-                  <Button
-                    size="sm"
-                    onClick={handleStartAllPrinting}
-                    disabled={updateStatus.isPending}
-                    className="gap-1"
-                  >
-                    {updateStatus.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="h-4 w-4" />
-                    )}
-                    Start Printing
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReprocessAll}
+                      disabled={!canReprocessAll}
+                      className="gap-1"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Reprocess All
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleStartAllPrinting}
+                      disabled={updateStatus.isPending}
+                      className="gap-1"
+                    >
+                      {updateStatus.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                      Start Printing
+                    </Button>
+                  </div>
                 ) : allApprovedOrBeyond ? (
-                  <Badge variant="default" className="gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    All Imposed
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReprocessAll}
+                      disabled={!canReprocessAll}
+                      className="gap-1"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Reprocess All
+                    </Button>
+                    <Badge variant="default" className="gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      All Imposed
+                    </Badge>
+                  </div>
                 ) : (
-                  <Button
-                    size="sm"
-                    disabled={!canSendToPrint}
-                    onClick={handleSendToPrint}
-                    className="gap-1"
-                  >
-                    <Printer className="h-4 w-4" />
-                    Send to Print
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {runs.some(r => r.status !== 'planned') && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleReprocessAll}
+                        disabled={!canReprocessAll}
+                        className="gap-1"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        Reprocess All
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      disabled={!canSendToPrint}
+                      onClick={handleSendToPrint}
+                      className="gap-1"
+                    >
+                      <Printer className="h-4 w-4" />
+                      Send to Print
+                    </Button>
+                  </div>
                 )}
               </>
             )}
