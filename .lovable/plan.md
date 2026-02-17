@@ -1,77 +1,96 @@
 
 
-## Fix: Add VPS 503 Retry Logic in Edge Function
+## Fix Imposition Dimensions, Progress Counter, and VPS Queuing
 
-### The Problem
-The VPS imposition server returns `503 - Server is busy` when it's already processing a job. The `label-impose` edge function treats this as a hard failure and returns an error immediately, which causes the batch to fail after 2 consecutive 503s.
+### 1. Fix Page Dimensions (Critical)
 
-### The Fix
-Add retry-with-backoff logic in `supabase/functions/label-impose/index.ts` specifically for 503 responses. Before giving up, the edge function should wait and retry a few times.
-
-### Changes
-
-#### Edge Function: `supabase/functions/label-impose/index.ts`
-
-Add a retry loop around the VPS fetch call:
+The VPS is using `roll_width_mm` (320mm) as the page width. The correct page dimensions are simply:
 
 ```text
-Retry strategy:
-- Max retries: 3
-- Delay between retries: 5s, 10s, 15s (linear backoff)
-- Only retry on 503 status
-- All other errors fail immediately as before
+page_width  = (label_width + bleed_left + bleed_right) * columns_across
+page_height = (label_height + bleed_top + bleed_bottom) * rows_around
 ```
 
-The retry loop wraps the existing `fetch()` call to the VPS endpoint. On a 503 response, instead of returning an error, the function waits and tries again. If all retries are exhausted, it falls back to the existing error handling (reset status to "planned" and return error).
+For this order: 73 * 4 = 292mm wide, 103 * 3 = 309mm high. No gaps added -- labels are butted together.
 
-### Technical Detail
+**File:** `supabase/functions/label-impose/index.ts`
 
-In the edge function, replace the single fetch + error handling block with:
+Before building the VPS payload (line ~165), calculate correct dimensions and override `roll_width_mm`:
 
 ```typescript
-const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY_MS = 5000; // 5s, 10s, 15s
+const d = imposeRequest.dieline;
+const cellWidth = d.label_width_mm + (d.bleed_left_mm || 0) + (d.bleed_right_mm || 0);
+const cellHeight = d.label_height_mm + (d.bleed_top_mm || 0) + (d.bleed_bottom_mm || 0);
+const pageWidth = cellWidth * d.columns_across;
+const pageHeight = cellHeight * d.rows_around;
 
-let response: Response | null = null;
-let lastError: string = '';
+console.log(`Calculated page: ${pageWidth}mm x ${pageHeight}mm (cell: ${cellWidth}x${cellHeight})`);
+```
 
-for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-  if (attempt > 0) {
-    const waitMs = attempt * RETRY_BASE_DELAY_MS;
-    console.log(`VPS busy, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
-    await new Promise(r => setTimeout(r, waitMs));
-  }
+Then in the VPS payload, override `roll_width_mm` with `pageWidth` and add `page_height_mm: pageHeight`:
 
-  const controller = new AbortController();
-  const acceptTimeout = setTimeout(() => controller.abort(), 10000);
+```typescript
+const vpsPayload = JSON.stringify({
+  dieline: {
+    ...imposeRequest.dieline,
+    roll_width_mm: pageWidth,
+    page_height_mm: pageHeight,
+  },
+  slots: slotsWithRotation,
+  meters: 0,
+  include_dielines: imposeRequest.include_dielines,
+  upload_config: uploadConfig,
+  callback_config: callbackConfig,
+});
+```
 
-  try {
-    response = await fetch(VPS_URL, { ...options, signal: controller.signal });
-    clearTimeout(acceptTimeout);
+---
 
-    if (response.status === 503 && attempt < MAX_RETRIES) {
-      lastError = await response.text();
-      response = null; // retry
-      continue;
-    }
-    break; // success or non-503 error
-  } catch (fetchError) {
-    clearTimeout(acceptTimeout);
-    if (fetchError.name === "AbortError") {
-      // VPS accepted, processing async
-      response = null;
-      break;
-    }
-    // Connection error -- no retry
-    throw fetchError;
-  }
+### 2. Fix Progress Counter
+
+Currently shows "0/9 Completed" because it counts `status === 'completed'` (post-printing). After imposition, runs are `approved`, not `completed`.
+
+**File:** `src/components/labels/LabelRunsCard.tsx`
+
+Change the counter to show the most relevant metric:
+- Add an `imposedRuns` count: runs that have an `imposed_pdf_url`
+- Show "X/Y Imposed" when there are imposed runs but none completed yet
+- Show "X/Y Completed" once printing has started
+
+```typescript
+const imposedRuns = runs.filter(r => r.imposed_pdf_url).length;
+// Display logic:
+// If any completed -> show completed count
+// Else if any imposed -> show imposed count  
+// Else -> show 0/total
+```
+
+---
+
+### 3. Add Delay Between Runs (VPS Breathing Room)
+
+**File:** `src/hooks/labels/useBatchImpose.ts`
+
+Add a 3-second delay between sequential runs in the batch loop (after each run finishes, before starting the next). This gives the VPS time to finish cleanup and reduces 503 errors:
+
+```typescript
+// After each run completes (around line 175, before the next iteration)
+if (i < targetRuns.length - 1) {
+  await delay(3000);
 }
 ```
 
-The rest of the existing response handling (success path, error path, AbortError path) remains unchanged.
+---
 
-### No Other Changes Needed
-- The `useBatchImpose` hook already has sequential execution and consecutive failure tracking
-- The polling logic is unaffected
-- The client-side code doesn't need changes
+### Deployment
+
+Redeploy the `label-impose` edge function, then "Reprocess All" to generate correctly-sized PDFs.
+
+### Summary
+
+| File | Change |
+|------|--------|
+| `supabase/functions/label-impose/index.ts` | Calculate page dimensions from cell size * grid count (no gaps), override roll_width_mm |
+| `src/components/labels/LabelRunsCard.tsx` | Show "Imposed" counter when relevant instead of only "Completed" |
+| `src/hooks/labels/useBatchImpose.ts` | Add 3s delay between sequential runs |
 
