@@ -158,6 +158,7 @@ export function useBatchImpose(
     const errors: { runNumber: number; error: string }[] = [];
     const completedRunIds: string[] = [];
 
+    try {
     for (let i = 0; i < targetRuns.length; i++) {
       if (abortRef.current) {
         console.log(`[BatchImpose] Aborted by user at run ${i + 1}/${targetRuns.length}`);
@@ -166,7 +167,8 @@ export function useBatchImpose(
 
       const run = targetRuns[i];
 
-      console.log(`[BatchImpose] === Run ${i + 1}/${targetRuns.length}: #${run.run_number} (${run.id}) ===`);
+      // Log BEFORE try block so we see which run the loop was on if it dies
+      console.log(`[BatchImpose] === ENTERING Run ${i + 1}/${targetRuns.length}: #${run.run_number} (${run.id}) ===`);
 
       setProgress(prev => ({
         ...prev,
@@ -185,6 +187,17 @@ export function useBatchImpose(
             pdf_url: item?.print_pdf_url || '',
           };
         });
+
+        // Guard: skip run if any slot has empty pdf_url
+        const emptySlots = slotAssignments.filter(s => !s.pdf_url);
+        if (emptySlots.length > 0) {
+          const errMsg = `${emptySlots.length} slot(s) have empty pdf_url (item_ids: ${emptySlots.map(s => s.item_id).join(', ')}). Skipping run to avoid broken VPS request.`;
+          console.error(`[BatchImpose] Run #${run.run_number}: ${errMsg}`);
+          errors.push({ runNumber: run.run_number, error: errMsg });
+          await persistRunError(run.id, errMsg);
+          toast.error(`Run ${run.run_number}: missing PDF URLs, skipped`);
+          // fall through to post-try logging
+        } else {
 
         const dielineConfig: DielineConfig = {
           roll_width_mm: dieline.roll_width_mm,
@@ -248,6 +261,8 @@ export function useBatchImpose(
           toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${targetRuns.length})`);
         }
 
+        } // end else (pdf_url guard)
+
       } catch (err: any) {
         const errMsg = err.message || 'Unknown error';
         console.error(`[BatchImpose] FAILED run #${run.run_number}:`, errMsg, err);
@@ -255,6 +270,8 @@ export function useBatchImpose(
         await persistRunError(run.id, errMsg);
         toast.error(`Run ${run.run_number} failed: ${errMsg}`);
       }
+
+      console.log(`[BatchImpose] === FINISHED Run ${i + 1}/${targetRuns.length}: #${run.run_number} | errors so far: ${errors.length} ===`);
 
       setProgress(prev => ({
         ...prev,
@@ -269,8 +286,12 @@ export function useBatchImpose(
         await delay(INTER_RUN_DELAY_MS);
       }
     }
+    } catch (outerError: any) {
+      console.error(`[BatchImpose] BATCH LOOP CRASHED:`, outerError);
+      toast.error(`Batch loop crashed: ${outerError.message || 'Unknown error'}`);
+    }
 
-    // Final state
+    // Final state (always reached now, even if loop crashes)
     setProgress({
       current: targetRuns.length,
       total: targetRuns.length,
