@@ -162,8 +162,21 @@ Deno.serve(async (req) => {
     const MAX_RETRIES = 3;
     const RETRY_BASE_DELAY_MS = 5000; // 5s, 10s, 15s
 
+    // Calculate correct page dimensions: cell size * grid count, no gaps
+    const d = imposeRequest.dieline;
+    const cellWidth = d.label_width_mm + (d.bleed_left_mm || 0) + (d.bleed_right_mm || 0);
+    const cellHeight = d.label_height_mm + (d.bleed_top_mm || 0) + (d.bleed_bottom_mm || 0);
+    const pageWidth = cellWidth * d.columns_across;
+    const pageHeight = cellHeight * d.rows_around;
+
+    console.log(`Calculated page: ${pageWidth}mm x ${pageHeight}mm (cell: ${cellWidth}x${cellHeight})`);
+
     const vpsPayload = JSON.stringify({
-      dieline: imposeRequest.dieline,
+      dieline: {
+        ...imposeRequest.dieline,
+        roll_width_mm: pageWidth,
+        page_height_mm: pageHeight,
+      },
       slots: slotsWithRotation,
       meters: 0,
       include_dielines: imposeRequest.include_dielines,

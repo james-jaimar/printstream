@@ -192,6 +192,11 @@ export function useBatchImpose(
         errors: [...errors],
         completedRunIds: [...completedRunIds],
       }));
+
+      // Give VPS breathing room between runs
+      if (i < targetRuns.length - 1) {
+        await delay(3000);
+      }
     }
 
     // Final state
