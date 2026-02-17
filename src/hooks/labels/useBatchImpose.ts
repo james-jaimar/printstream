@@ -10,8 +10,7 @@ export interface BatchImposeProgress {
   currentRunNumber: number;
   status: 'idle' | 'imposing' | 'complete' | 'error';
   errors: { runNumber: number; error: string }[];
-  /** Run IDs currently being processed async by VPS */
-  pendingRunIds: string[];
+  completedRunIds: string[];
 }
 
 const initialProgress: BatchImposeProgress = {
@@ -20,16 +19,37 @@ const initialProgress: BatchImposeProgress = {
   currentRunNumber: 0,
   status: 'idle',
   errors: [],
-  pendingRunIds: [],
+  completedRunIds: [],
 };
 
-const DELAY_BETWEEN_RUNS_MS = 2000;
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_DURATION_MS = 5 * 60 * 1000; // 5 min per run
 const MAX_CONSECUTIVE_FAILURES = 2;
-const POLL_INTERVAL_MS = 3000;
-const MAX_POLL_DURATION_MS = 10 * 60 * 1000; // 10 minutes max wait
 
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Poll a single run until it leaves 'imposing' status */
+async function waitForRunCompletion(runId: string): Promise<'approved' | 'failed'> {
+  const start = Date.now();
+
+  while (Date.now() - start < MAX_POLL_DURATION_MS) {
+    await delay(POLL_INTERVAL_MS);
+
+    const { data } = await supabase
+      .from('label_runs')
+      .select('status')
+      .eq('id', runId)
+      .single();
+
+    if (!data) continue;
+
+    if (data.status === 'approved') return 'approved';
+    if (data.status === 'planned') return 'failed'; // VPS reset it
+  }
+
+  return 'failed'; // timeout
 }
 
 export function useBatchImpose(
@@ -40,95 +60,7 @@ export function useBatchImpose(
 ) {
   const [progress, setProgress] = useState<BatchImposeProgress>(initialProgress);
   const isImposing = progress.status === 'imposing';
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollStartRef = useRef<number>(0);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  const startPolling = useCallback((pendingRunIds: string[], plannedRuns: LabelRun[], errors: { runNumber: number; error: string }[]) => {
-    pollStartRef.current = Date.now();
-
-    pollRef.current = setInterval(async () => {
-      // Timeout check
-      if (Date.now() - pollStartRef.current > MAX_POLL_DURATION_MS) {
-        stopPolling();
-        setProgress(prev => ({
-          ...prev,
-          status: 'error',
-          errors: [...prev.errors, ...prev.pendingRunIds.map(id => {
-            const run = plannedRuns.find(r => r.id === id);
-            return { runNumber: run?.run_number || 0, error: 'Timed out waiting for VPS' };
-          })],
-          pendingRunIds: [],
-        }));
-        toast.error('Some runs timed out waiting for VPS processing');
-        return;
-      }
-
-      // Check status of pending runs
-      const { data: runStatuses } = await supabase
-        .from('label_runs')
-        .select('id, status, run_number, frames_count, meters_to_print')
-        .in('id', pendingRunIds);
-
-      if (!runStatuses) return;
-
-      const stillPending: string[] = [];
-      const newErrors: { runNumber: number; error: string }[] = [];
-      let completedCount = 0;
-
-      for (const run of runStatuses) {
-        if (run.status === 'approved') {
-          completedCount++;
-        } else if (run.status === 'imposing') {
-          stillPending.push(run.id);
-        } else if (run.status === 'planned') {
-          // VPS failed and edge function reset status
-          newErrors.push({ runNumber: run.run_number, error: 'VPS processing failed' });
-        }
-      }
-
-      const allErrors = [...errors, ...newErrors];
-
-      if (stillPending.length === 0) {
-        // All done
-        stopPolling();
-        const totalCompleted = plannedRuns.length - allErrors.length;
-        setProgress({
-          current: plannedRuns.length,
-          total: plannedRuns.length,
-          currentRunNumber: plannedRuns[plannedRuns.length - 1].run_number,
-          status: allErrors.length > 0 ? 'error' : 'complete',
-          errors: allErrors,
-          pendingRunIds: [],
-        });
-
-        if (allErrors.length === 0) {
-          toast.success(`All ${plannedRuns.length} runs imposed successfully`);
-        } else {
-          toast.error(`${allErrors.length} of ${plannedRuns.length} runs failed imposition`);
-        }
-      } else {
-        setProgress(prev => ({
-          ...prev,
-          pendingRunIds: stillPending,
-          errors: allErrors,
-        }));
-      }
-    }, POLL_INTERVAL_MS);
-  }, [stopPolling]);
+  const abortRef = useRef(false);
 
   const impose = useCallback(async () => {
     if (!dieline || runs.length === 0) return;
@@ -139,31 +71,36 @@ export function useBatchImpose(
       return;
     }
 
+    abortRef.current = false;
+
     setProgress({
       current: 0,
       total: plannedRuns.length,
       currentRunNumber: plannedRuns[0].run_number,
       status: 'imposing',
       errors: [],
-      pendingRunIds: [],
+      completedRunIds: [],
     });
 
     const errors: { runNumber: number; error: string }[] = [];
-    const pendingRunIds: string[] = [];
+    const completedRunIds: string[] = [];
     let consecutiveFailures = 0;
 
     for (let i = 0; i < plannedRuns.length; i++) {
+      if (abortRef.current) break;
+
       const run = plannedRuns[i];
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         const remaining = plannedRuns.length - i;
-        toast.error(`Aborting: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures. VPS may be down.`);
+        toast.error(`Aborting: ${remaining} runs skipped after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
         for (let j = i; j < plannedRuns.length; j++) {
           errors.push({ runNumber: plannedRuns[j].run_number, error: 'Skipped — aborted after consecutive failures' });
         }
         break;
       }
 
+      // Update progress: starting this run
       setProgress(prev => ({
         ...prev,
         current: i,
@@ -204,60 +141,64 @@ export function useBatchImpose(
 
         const result = await createImposition(request);
 
-        // If response indicates async processing, track it
+        // Wait for VPS to finish (poll until status changes from 'imposing')
         if (result.status === 'processing') {
-          pendingRunIds.push(run.id);
-        }
-        // If it completed synchronously (small job), it's already updated in DB
+          toast.info(`Run ${run.run_number} sent to VPS, waiting for completion...`);
+          const outcome = await waitForRunCompletion(run.id);
 
-        consecutiveFailures = 0;
+          if (outcome === 'approved') {
+            completedRunIds.push(run.id);
+            consecutiveFailures = 0;
+            toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${plannedRuns.length})`);
+          } else {
+            errors.push({ runNumber: run.run_number, error: 'VPS processing failed or timed out' });
+            consecutiveFailures++;
+            toast.error(`Run ${run.run_number} failed`);
+          }
+        } else {
+          // Completed synchronously
+          completedRunIds.push(run.id);
+          consecutiveFailures = 0;
+          toast.success(`Run ${run.run_number} imposed ✓ (${i + 1}/${plannedRuns.length})`);
+        }
 
       } catch (err: any) {
         console.error(`Imposition failed for run ${run.run_number}:`, err);
-        const errorMsg = err.message || 'Unknown error';
-        errors.push({ runNumber: run.run_number, error: errorMsg });
+        errors.push({ runNumber: run.run_number, error: err.message || 'Unknown error' });
         consecutiveFailures++;
+        toast.error(`Run ${run.run_number} failed: ${err.message}`);
       }
 
-      // Delay between runs to let VPS clear memory
-      if (i < plannedRuns.length - 1) {
-        await delay(DELAY_BETWEEN_RUNS_MS);
-      }
-    }
-
-    // If there are pending async runs, start polling
-    if (pendingRunIds.length > 0) {
+      // Update progress after each run
       setProgress(prev => ({
         ...prev,
-        current: plannedRuns.length,
-        currentRunNumber: plannedRuns[plannedRuns.length - 1].run_number,
-        pendingRunIds,
-        errors,
+        current: i + 1,
+        errors: [...errors],
+        completedRunIds: [...completedRunIds],
       }));
-      startPolling(pendingRunIds, plannedRuns, errors);
-    } else {
-      // All completed synchronously or failed
-      setProgress({
-        current: plannedRuns.length,
-        total: plannedRuns.length,
-        currentRunNumber: plannedRuns[plannedRuns.length - 1].run_number,
-        status: errors.length > 0 ? 'error' : 'complete',
-        errors,
-        pendingRunIds: [],
-      });
-
-      if (errors.length === 0) {
-        toast.success(`All ${plannedRuns.length} runs imposed successfully`);
-      } else {
-        toast.error(`${errors.length} of ${plannedRuns.length} runs failed imposition`);
-      }
     }
-  }, [orderId, runs, items, dieline, startPolling]);
+
+    // Final state
+    setProgress({
+      current: plannedRuns.length,
+      total: plannedRuns.length,
+      currentRunNumber: plannedRuns[plannedRuns.length - 1].run_number,
+      status: errors.length > 0 ? 'error' : 'complete',
+      errors,
+      completedRunIds,
+    });
+
+    if (errors.length === 0) {
+      toast.success(`All ${plannedRuns.length} runs imposed successfully`);
+    } else {
+      toast.error(`${errors.length} of ${plannedRuns.length} runs failed`);
+    }
+  }, [orderId, runs, items, dieline]);
 
   const reset = useCallback(() => {
-    stopPolling();
+    abortRef.current = true;
     setProgress(initialProgress);
-  }, [stopPolling]);
+  }, []);
 
   return { impose, isImposing, progress, reset };
 }
