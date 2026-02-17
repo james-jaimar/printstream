@@ -113,19 +113,19 @@ function TrackingStepper({ status }: { status: string }) {
                   isComplete
                     ? 'bg-[#00B8D4] text-white'
                     : isCurrent
-                      ? 'border-2 border-[#00B8D4] text-[#00B8D4] bg-[#00B8D4]/10'
-                      : 'bg-gray-100 text-gray-400'
+                      ? 'bg-white text-[#00B8D4] ring-1 ring-inset ring-[#00B8D4]/30 shadow-sm'
+                      : 'bg-slate-100 text-slate-400'
                 }`}
               >
                 {isComplete ? <CheckCircle className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
               </div>
-              <span className={`text-[10px] font-medium whitespace-nowrap ${isComplete || isCurrent ? 'text-foreground' : 'text-muted-foreground'}`}>
+              <span className={`text-[10px] font-medium whitespace-nowrap ${isComplete || isCurrent ? 'text-slate-900' : 'text-slate-400'}`}>
                 {step.label}
               </span>
             </div>
             {i < workflowSteps.length - 1 && (
               <div
-                className={`flex-1 h-0.5 mx-1 mb-5 rounded-full ${isComplete ? 'bg-[#00B8D4]' : 'bg-gray-200'}`}
+                className={`flex-1 h-[2px] mx-2 mb-5 rounded-full ${isComplete ? 'bg-[#00B8D4]' : 'bg-gradient-to-r from-slate-200 to-slate-100'}`}
               />
             )}
           </div>
@@ -170,8 +170,8 @@ function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: (
             }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
               active
-                ? 'bg-[#00B8D4]/10 text-[#00B8D4]'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
             }`}
           >
             <Icon className="h-4.5 w-4.5 flex-shrink-0" />
@@ -215,24 +215,24 @@ export default function ClientPortalDashboard() {
   }, [orders]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[radial-gradient(1100px_520px_at_50%_-140px,rgba(0,184,212,0.18),transparent_60%),linear-gradient(to_bottom,rgba(248,250,252,1),rgba(241,245,249,1))]">
       {/* ─── Top Header Bar ─── */}
-      <header className="bg-white border-b sticky top-0 z-30 shadow-sm">
-        <div className="h-1 w-full bg-gradient-to-r from-[#00B8D4] to-[#0097A7]" />
+      <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/75 backdrop-blur">
+        <div className="h-[3px] w-full bg-gradient-to-r from-[#00B8D4] to-[#0097A7]" />
         <div className="px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
             {/* Mobile hamburger */}
             <button
-              className="lg:hidden p-1.5 rounded-md hover:bg-gray-100"
+              className="lg:hidden p-1.5 rounded-md hover:bg-slate-100"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
             <img src={impressLogo} alt="Impress" className="h-9 object-contain" />
-            <div className="hidden sm:block h-7 w-px bg-gray-200" />
+            <div className="hidden sm:block h-7 w-px bg-slate-200" />
             <div className="hidden sm:block">
-              <h1 className="font-semibold text-sm leading-tight text-foreground">Client Portal</h1>
-              <p className="text-[11px] text-muted-foreground leading-tight">
+              <h1 className="font-semibold text-sm leading-tight text-slate-900">Client Portal</h1>
+              <p className="text-[11px] text-slate-500 leading-tight">
                 {contact?.company_name || 'Welcome'}
               </p>
             </div>
@@ -265,19 +265,24 @@ export default function ClientPortalDashboard() {
 
       <div className="flex min-h-[calc(100vh-57px)]">
         {/* ─── Desktop Sidebar ─── */}
-        <aside className="hidden lg:flex flex-col w-[220px] bg-white border-r flex-shrink-0">
-          <div className="p-5 space-y-1">
-            <Sidebar />
-          </div>
-          {/* Sidebar footer */}
-          <div className="mt-auto p-4 border-t">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-[#00B8D4]/10 flex items-center justify-center">
-                <User className="h-4 w-4 text-[#00B8D4]" />
+        <aside className="hidden lg:block w-[260px] flex-shrink-0">
+          <div className="sticky top-[76px] p-4">
+            <div className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur p-3">
+              <div className="px-2 pb-3">
+                <div className="text-sm font-semibold text-slate-900">Client Portal</div>
+                <div className="text-xs text-slate-500">{contact?.company_name || 'Welcome'}</div>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs font-medium truncate">{contact?.name || 'Client'}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{contact?.email || ''}</p>
+              <Sidebar />
+              <div className="mt-4 border-t border-slate-200/60 pt-4 px-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-[#00B8D4]/10 flex items-center justify-center">
+                    <User className="h-4 w-4 text-[#00B8D4]" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate">{contact?.name || 'Client'}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{contact?.email || ''}</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -285,13 +290,13 @@ export default function ClientPortalDashboard() {
 
         {/* ─── Main Content ─── */}
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+          <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8 py-8 space-y-8">
             {/* ─── Welcome ─── */}
-            <section>
-              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            <section className="pt-2">
+              <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight text-slate-900">
                 Welcome back{contact?.name ? `, ${contact.name.split(' ')[0]}` : ''}
               </h2>
-              <p className="text-muted-foreground mt-1 text-sm">
+              <p className="mt-2 text-sm text-slate-500">
                 Manage your label orders and track your prints.
               </p>
             </section>
@@ -319,7 +324,7 @@ export default function ClientPortalDashboard() {
                     : null;
 
                   return (
-                    <Card key={s.label} className="bg-white border shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                    <Card key={s.label} className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur overflow-hidden transition-shadow hover:shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_55px_rgba(15,23,42,0.10)]">
                       <CardContent className="p-5">
                         <div className="flex items-start justify-between mb-3">
                           <div>
@@ -434,7 +439,7 @@ export default function ClientPortalDashboard() {
                                     )}
                                   </div>
                                 </div>
-                                <Button size="sm" className="w-full gap-2 bg-[#00B8D4] hover:bg-[#0097A7] text-white">
+                                <Button size="sm" className="w-full gap-2 bg-[#00B8D4] hover:bg-[#0097A7] text-white shadow-sm hover:shadow-md transition-shadow">
                                   <Eye className="h-3.5 w-3.5" />
                                   Review & Approve
                                   <ArrowRight className="h-3.5 w-3.5 ml-auto" />
@@ -458,42 +463,44 @@ export default function ClientPortalDashboard() {
                       </div>
                       <h3 className="text-lg font-bold">Recent Orders</h3>
                     </div>
-                    <Card className="bg-white shadow-sm">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-gray-50/50">
-                            <TableHead className="text-xs">Order #</TableHead>
-                            <TableHead className="text-xs hidden sm:table-cell">Customer</TableHead>
-                            <TableHead className="text-xs text-center">Items</TableHead>
-                            <TableHead className="text-xs">Status</TableHead>
-                            <TableHead className="text-xs hidden sm:table-cell">Due Date</TableHead>
-                            <TableHead className="text-right text-xs" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {orders?.slice(0, 8).map((order) => {
-                            const items = getVisibleItems(order);
-                            return (
-                              <TableRow
-                                key={order.id}
-                                className="cursor-pointer hover:bg-gray-50"
-                                onClick={() => navigate(`/labels/portal/order/${order.id}`)}
-                              >
-                                <TableCell className="font-medium text-sm">{order.order_number}</TableCell>
-                                <TableCell className="text-muted-foreground text-sm hidden sm:table-cell">{order.customer_name}</TableCell>
-                                <TableCell className="text-center text-sm">{items.length}</TableCell>
-                                <TableCell><StatusBadge status={order.status} /></TableCell>
-                                <TableCell className="text-muted-foreground text-sm hidden sm:table-cell">
-                                  {order.due_date ? format(new Date(order.due_date), 'dd MMM yyyy') : '—'}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <ArrowRight className="h-4 w-4 text-muted-foreground inline-block" />
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
+                    <Card className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur overflow-hidden p-0">
+                      <div className="overflow-hidden rounded-xl border border-slate-200/70 bg-white m-0">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-slate-50/70">
+                              <TableHead className="text-xs">Order #</TableHead>
+                              <TableHead className="text-xs hidden sm:table-cell">Customer</TableHead>
+                              <TableHead className="text-xs text-center">Items</TableHead>
+                              <TableHead className="text-xs">Status</TableHead>
+                              <TableHead className="text-xs hidden sm:table-cell">Due Date</TableHead>
+                              <TableHead className="text-right text-xs" />
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {orders?.slice(0, 8).map((order) => {
+                              const items = getVisibleItems(order);
+                              return (
+                                <TableRow
+                                  key={order.id}
+                                  className="cursor-pointer hover:bg-slate-50"
+                                  onClick={() => navigate(`/labels/portal/order/${order.id}`)}
+                                >
+                                  <TableCell className="font-medium text-sm">{order.order_number}</TableCell>
+                                  <TableCell className="text-slate-500 text-sm hidden sm:table-cell">{order.customer_name}</TableCell>
+                                  <TableCell className="text-center text-sm">{items.length}</TableCell>
+                                  <TableCell><StatusBadge status={order.status} /></TableCell>
+                                  <TableCell className="text-slate-500 text-sm hidden sm:table-cell">
+                                    {order.due_date ? format(new Date(order.due_date), 'dd MMM yyyy') : '—'}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <ArrowRight className="h-4 w-4 text-slate-400 inline-block" />
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </Card>
                   </div>
 
@@ -505,7 +512,7 @@ export default function ClientPortalDashboard() {
                       </div>
                       <h3 className="text-lg font-bold">Track Your Order</h3>
                     </div>
-                    <Card className="bg-white shadow-sm">
+                    <Card className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
                       <CardContent className="p-5">
                         {trackingOrder ? (
                           <div className="space-y-4">
@@ -525,7 +532,7 @@ export default function ClientPortalDashboard() {
                             </div>
                             <Button
                               size="sm"
-                              className="w-full gap-2 bg-[#00B8D4] hover:bg-[#0097A7] text-white"
+                              className="w-full gap-2 bg-[#00B8D4] hover:bg-[#0097A7] text-white shadow-sm hover:shadow-md transition-shadow"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 navigate(`/labels/portal/order/${trackingOrder.id}`);
@@ -578,7 +585,7 @@ export default function ClientPortalDashboard() {
                     accent: '#F59E0B',
                   },
                 ].map((r) => (
-                  <Card key={r.title} className="bg-white hover:shadow-md transition-shadow">
+                  <Card key={r.title} className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur transition-all hover:-translate-y-0.5 hover:shadow-[0_1px_0_rgba(15,23,42,0.04),0_22px_70px_rgba(15,23,42,0.10)]">
                     <CardContent className="p-6 text-center space-y-3">
                       <div className="rounded-xl p-3 w-fit mx-auto" style={{ backgroundColor: `${r.accent}10` }}>
                         <r.icon className="h-6 w-6" style={{ color: r.accent }} />
@@ -594,7 +601,7 @@ export default function ClientPortalDashboard() {
 
           {/* ─── Footer ─── */}
           <footer className="border-t mt-12 bg-white">
-            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
+            <div className="max-w-[1240px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
               <div className="flex items-center gap-3">
                 <img src={impressLogo} alt="Impress" className="h-5 object-contain opacity-60" />
                 <p>© {new Date().getFullYear()} Impress Digital · Litho · Web · Packaging · Signage</p>
