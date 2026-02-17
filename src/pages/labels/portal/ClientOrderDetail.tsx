@@ -291,9 +291,9 @@ export default function ClientOrderDetail() {
             <OrientationConfirmBanner
               orientation={order.orientation ?? 1}
               confirmed={(order as any).orientation_confirmed ?? false}
-              onConfirm={async () => {
+              onConfirm={async (selectedOrientation: number) => {
                 if (!orderId) return;
-                await confirmOrientationMutation.mutateAsync(orderId);
+                await confirmOrientationMutation.mutateAsync({ orderId, orientation: selectedOrientation });
               }}
               isPending={confirmOrientationMutation.isPending}
             />

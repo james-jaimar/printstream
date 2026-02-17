@@ -519,10 +519,15 @@ Deno.serve(async (req) => {
     // POST /confirm-orientation — client confirms label orientation
     if (req.method === "POST" && path === "/confirm-orientation") {
       const body = await req.json();
-      const { order_id } = body;
+      const { order_id, orientation } = body;
 
       if (!order_id) {
         return jsonResponse({ error: "order_id required" }, 400);
+      }
+
+      // Validate orientation if provided
+      if (orientation !== undefined && (typeof orientation !== "number" || orientation < 1 || orientation > 8)) {
+        return jsonResponse({ error: "orientation must be a number between 1 and 8" }, 400);
       }
 
       // Verify order belongs to customer
@@ -535,9 +540,14 @@ Deno.serve(async (req) => {
 
       if (!order) return jsonResponse({ error: "Order not found" }, 404);
 
+      const updateData: Record<string, unknown> = { orientation_confirmed: true };
+      if (orientation !== undefined) {
+        updateData.orientation = orientation;
+      }
+
       const { error: updateErr } = await supabase
         .from("label_orders")
-        .update({ orientation_confirmed: true })
+        .update(updateData)
         .eq("id", order_id);
 
       if (updateErr) throw updateErr;
