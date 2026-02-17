@@ -44,12 +44,12 @@ export default function LabelsLayout() {
             <div className="h-[3px] w-full bg-gradient-to-r from-[#00B8D4] to-[#0097A7]" />
             
             {/* Brand */}
-            <div className="px-5 pt-5 pb-4 flex items-center gap-3">
-              <img src={impressLogo} alt="Impress" className="h-8 object-contain" />
-              <div className="h-6 w-px bg-slate-200" />
+            <div className="px-4 pt-5 pb-4 flex items-center gap-2">
+              <img src={impressLogo} alt="Impress" className="h-7 w-auto shrink-0 object-contain" />
+              <div className="h-6 w-px bg-slate-200 shrink-0" />
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 truncate">Labels Division</div>
-                <div className="text-[10px] text-slate-500 truncate">Admin Console</div>
+                <div className="text-xs font-semibold text-slate-900 leading-tight">Labels Division</div>
+                <div className="text-[10px] text-slate-500 leading-tight">Admin Console</div>
               </div>
             </div>
 
