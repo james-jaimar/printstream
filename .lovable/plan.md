@@ -1,80 +1,46 @@
 
 
-## VPS Diagnostic Tool: Direct Health Check and Test Imposition
+## Fix: Bulletproof the Batch Loop + Add Real-Time Diagnostics
 
-### Problem
+### What the Database Shows
 
-Runs are failing on LBL-2026-0003 but all 9 succeeded on LBL-2026-0001. The edge function logs are empty in analytics (likely a retention/indexing lag). You need to determine whether failures are caused by:
+The VPS is healthy (your diagnostic proves it). Looking at LBL-2026-0003's 9 runs:
 
-- (a) The VPS Docker container being unavailable/overloaded
-- (b) The edge function invocation failing before reaching the VPS
-- (c) Network issues between Supabase edge functions and your VPS
+- **Runs 6, 7**: Successfully imposed (VPS worked perfectly)
+- **Run 6**: Has `[IMPO ERROR]` in notes BUT `status: approved` with a valid PDF -- this is the race condition where the client gave up but the VPS actually succeeded (now fixed by the 503 retry changes)
+- **Runs 1-5, 8-9**: Still `planned`, last touched at 15:10-15:22 -- the latest batch at 18:05 only attempted runs 3, 6, 7 then **stopped**
 
-### Solution: Two-Part Diagnostic
+### Root Cause: The Loop is Dying Silently
 
-#### 1. New Edge Function: `label-vps-health`
+The batch loop processes runs sequentially. When a run fails, the `try/catch` inside the loop handles it and moves on. **But** if an error occurs between runs (e.g., during the delay, or in state updates), there's no outer catch -- the entire `impose()` async function rejects silently, and the remaining runs are never attempted.
 
-A lightweight edge function that hits the VPS directly and reports back detailed diagnostics:
+### Changes
 
-- **Ping test**: `GET /` or `/health` on `pdf-api.jaimar.dev` -- measures response time
-- **Endpoint probe**: `POST /imposition/labels` with a minimal invalid payload to confirm the endpoint is alive and authenticating (expects a 400/422, NOT a 503)
-- **DNS + TLS timing**: Records how long the connection takes
-- Returns a structured report:
-  - VPS reachable: yes/no
-  - Response time (ms)
-  - HTTP status received
-  - Response body snippet
-  - Timestamp
+#### 1. Wrap the Entire Batch Loop in a Top-Level Try/Catch (`src/hooks/labels/useBatchImpose.ts`)
 
-#### 2. Client-Side "Test VPS" Button
+Add an outer try/catch around the entire `for` loop so that if the loop itself crashes (not just an individual run), the error is logged and the final progress state is set correctly. Currently if the loop dies mid-way, `setProgress` for the final state is never called and `isImposing` stays true forever.
 
-Add a "Test VPS" button to the Labels page (near the order detail or in a diagnostics section) that:
+#### 2. Log the Exact Error that Kills the Batch
 
-- Calls the `label-vps-health` edge function
-- Displays the result in a toast or dialog
-- Shows: reachable/unreachable, response time, any error details
+Add `console.error("[BatchImpose] BATCH LOOP CRASHED:", e)` in the outer catch block. This is the missing diagnostic -- right now if the loop crashes, there is zero visibility.
 
-#### 3. Enhanced Batch Error Capture
+#### 3. Add Per-Run Logging BEFORE the Try Block
 
-Right now, `supabase.functions.invoke()` can fail silently when the edge function itself fails to boot (cold start timeout, memory limit). The `createImposition` function in `vpsApiService.ts` throws on `error` but does not capture HTTP-level failures from the invoke response.
+Move the `console.log` for "=== Run X ===" to BEFORE the try block, and add a log AFTER the try/catch. This way you can see exactly which run the loop was on when it died, even if the error happens outside the try.
 
-Add a check: if `supabase.functions.invoke` returns a non-2xx response in `data`, log the full response before throwing.
+#### 4. Guard Against Stale `items` Array
 
-### Technical Details
+When building `slotAssignments`, if `items.find(it => it.id === slot.item_id)` returns undefined, `pdf_url` becomes empty string `''`. The VPS may handle this gracefully or may crash. Add a guard: if any slot has an empty `pdf_url`, skip that run with a clear error message rather than sending a broken request to the VPS.
 
-**New file: `supabase/functions/label-vps-health/index.ts`**
+### Technical Summary
 
-```typescript
-// Hits VPS with 3 probes:
-// 1. GET / (basic connectivity)
-// 2. GET /health (if endpoint exists)  
-// 3. POST /imposition/labels with empty body (confirm auth + endpoint alive)
-// Returns timing and status for each probe
-```
-
-**Modified file: `src/services/labels/vpsApiService.ts`**
-
-- Add `checkVpsHealth()` function that calls the new edge function (replace the existing naive health check)
-
-**Modified file: `src/components/labels/LabelOrderDetail.tsx`** (or wherever the order detail/runs UI lives)
-
-- Add a "Test VPS Connection" button
-- Display results in a dialog showing all 3 probe results with timing
-
-### What This Tells You
-
-| Result | Meaning |
-|--------|---------|
-| All 3 probes succeed, fast (<500ms) | VPS Docker is healthy; failures are in the Supabase edge function layer |
-| Probes timeout or get connection refused | Docker container is down or networking issue |
-| Probe 3 returns 503 | VPS is up but busy (other Docker container hogging resources) |
-| Probe 1 works but probe 3 returns 503 | The imposition endpoint specifically is overloaded |
-
-### Files
-
-| File | Action |
+| File | Change |
 |------|--------|
-| `supabase/functions/label-vps-health/index.ts` | New -- VPS diagnostic edge function |
-| `src/services/labels/vpsApiService.ts` | Update `checkVpsHealth` to use new edge function |
-| `src/components/labels/LabelRunsCard.tsx` (or equivalent) | Add "Test VPS" button with result display |
+| `src/hooks/labels/useBatchImpose.ts` | Outer try/catch around entire loop; guard against empty pdf_url in slots; enhanced logging around each run |
 
+### What You Need To Do After This
+
+1. Click "Reprocess All" on LBL-2026-0003
+2. Open browser DevTools console (F12)
+3. Watch for `[BatchImpose]` logs -- you will see EXACTLY which run it stops at and why
+4. Share those console logs so we can see the precise failure point
