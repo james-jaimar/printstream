@@ -162,6 +162,10 @@ export interface DielineConfig {
   horizontal_gap_mm: number;
   vertical_gap_mm: number;
   corner_radius_mm?: number;
+  bleed_left_mm?: number;
+  bleed_right_mm?: number;
+  bleed_top_mm?: number;
+  bleed_bottom_mm?: number;
 }
 
 export interface ImpositionSlot extends SlotAssignment {
