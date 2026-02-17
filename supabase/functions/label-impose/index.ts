@@ -157,39 +157,82 @@ Deno.serve(async (req) => {
       })
       .eq("id", imposeRequest.run_id);
 
-    console.log("Firing VPS request (fire-and-forget with callback)");
+    console.log("Firing VPS request with 503 retry logic");
 
-    // Fire-and-forget: send to VPS but don't await the full response
-    // Use a short timeout just to confirm the VPS accepted the request
-    const controller = new AbortController();
-    const acceptTimeout = setTimeout(() => controller.abort(), 10000); // 10s to accept
+    const MAX_RETRIES = 3;
+    const RETRY_BASE_DELAY_MS = 5000; // 5s, 10s, 15s
 
-    try {
-      const response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          dieline: imposeRequest.dieline,
-          slots: slotsWithRotation,
-          meters: 0, // Single frame only — VPS defaults to max(1, ...) so 0 yields exactly 1 page
-          include_dielines: imposeRequest.include_dielines,
-          upload_config: uploadConfig,
-          callback_config: callbackConfig,
-        }),
-      });
+    const vpsPayload = JSON.stringify({
+      dieline: imposeRequest.dieline,
+      slots: slotsWithRotation,
+      meters: 0,
+      include_dielines: imposeRequest.include_dielines,
+      upload_config: uploadConfig,
+      callback_config: callbackConfig,
+    });
 
-      clearTimeout(acceptTimeout);
+    let response: Response | null = null;
+    let lastError = '';
+    let aborted = false;
 
-      // If we get a quick response (small jobs), handle it normally
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const waitMs = attempt * RETRY_BASE_DELAY_MS;
+        console.log(`VPS busy (503), retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+
+      const controller = new AbortController();
+      const acceptTimeout = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+          },
+          signal: controller.signal,
+          body: vpsPayload,
+        });
+
+        clearTimeout(acceptTimeout);
+
+        if (response.status === 503 && attempt < MAX_RETRIES) {
+          lastError = await response.text();
+          console.warn(`VPS returned 503: ${lastError.substring(0, 100)}`);
+          response = null;
+          continue;
+        }
+        break; // success or non-retryable error
+      } catch (fetchError) {
+        clearTimeout(acceptTimeout);
+        if (fetchError.name === "AbortError") {
+          console.log("VPS accepted request, processing asynchronously (will callback)");
+          response = null;
+          aborted = true;
+          break;
+        }
+        // Connection error — no retry
+        console.error("VPS connection error:", fetchError);
+        await supabase
+          .from("label_runs")
+          .update({ status: "planned", updated_at: new Date().toISOString() })
+          .eq("id", imposeRequest.run_id);
+
+        return new Response(
+          JSON.stringify({ success: false, error: `VPS connection failed: ${fetchError.message}` }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // Handle VPS response
+    if (response) {
       if (response.ok) {
         const vpsResult = await response.json();
         console.log(`VPS responded immediately: ${vpsResult.frame_count} frames`);
 
-        // Update label_runs with the result
         await supabase
           .from("label_runs")
           .update({
@@ -202,14 +245,10 @@ Deno.serve(async (req) => {
       } else {
         const errorText = await response.text();
         console.error(`VPS error: ${response.status} - ${errorText}`);
-        
-        // Mark run as failed
+
         await supabase
           .from("label_runs")
-          .update({
-            status: "planned",
-            updated_at: new Date().toISOString(),
-          })
+          .update({ status: "planned", updated_at: new Date().toISOString() })
           .eq("id", imposeRequest.run_id);
 
         return new Response(
@@ -217,30 +256,18 @@ Deno.serve(async (req) => {
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-    } catch (fetchError) {
-      clearTimeout(acceptTimeout);
+    } else if (!aborted) {
+      // All retries exhausted (503s)
+      console.error(`VPS busy after ${MAX_RETRIES + 1} attempts: ${lastError.substring(0, 100)}`);
+      await supabase
+        .from("label_runs")
+        .update({ status: "planned", updated_at: new Date().toISOString() })
+        .eq("id", imposeRequest.run_id);
 
-      // AbortError means the VPS accepted but is still processing (large job)
-      // The VPS will use callback_config to update label_runs when done
-      if (fetchError.name === "AbortError") {
-        console.log("VPS accepted request, processing asynchronously (will callback)");
-      } else {
-        console.error("VPS connection error:", fetchError);
-        
-        // Mark run back to planned on connection failure
-        await supabase
-          .from("label_runs")
-          .update({
-            status: "planned",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", imposeRequest.run_id);
-
-        return new Response(
-          JSON.stringify({ success: false, error: `VPS connection failed: ${fetchError.message}` }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      return new Response(
+        JSON.stringify({ success: false, error: `VPS busy after ${MAX_RETRIES + 1} attempts` }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Return immediately — VPS will update label_runs via callback when done
