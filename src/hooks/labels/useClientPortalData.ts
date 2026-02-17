@@ -179,15 +179,15 @@ export function useClientPortalConfirmOrientation() {
   const clientFetch = useClientFetch();
 
   return useMutation({
-    mutationFn: async (orderId: string) => {
+    mutationFn: async (input: { orderId: string; orientation?: number }) => {
       await clientFetch('/confirm-orientation', {
         method: 'POST',
-        body: { order_id: orderId },
+        body: { order_id: input.orderId, orientation: input.orientation },
       });
     },
-    onSuccess: (_, orderId) => {
+    onSuccess: (_, input) => {
       queryClient.invalidateQueries({ queryKey: CLIENT_ORDERS_KEY });
-      queryClient.invalidateQueries({ queryKey: [...CLIENT_ORDERS_KEY, orderId] });
+      queryClient.invalidateQueries({ queryKey: [...CLIENT_ORDERS_KEY, input.orderId] });
       toast.success('Orientation confirmed successfully');
     },
     onError: (error) => {
