@@ -35,9 +35,11 @@ import {
   useClientPortalApprovals,
   useClientPortalApproveItems,
   useClientPortalUploadArtwork,
+  useClientPortalConfirmOrientation,
 } from '@/hooks/labels/useClientPortalData';
 import ClientItemCard from '@/components/labels/portal/ClientItemCard';
 import ApprovalDisclaimer from '@/components/labels/portal/ApprovalDisclaimer';
+import { OrientationConfirmBanner } from '@/components/labels/portal/OrientationConfirmBanner';
 import impressLogo from '@/assets/impress-logo-colour.png';
 
 const workflowSteps = [
@@ -115,6 +117,7 @@ export default function ClientOrderDetail() {
   const { data: approvals } = useClientPortalApprovals(orderId);
   const approveItemsMutation = useClientPortalApproveItems();
   const uploadMutation = useClientPortalUploadArtwork();
+  const confirmOrientationMutation = useClientPortalConfirmOrientation();
 
   // Filter out parent/original PDF items (multi-page parents that were split)
   const visibleItems = useMemo(
@@ -284,6 +287,17 @@ export default function ClientOrderDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Items */}
           <div className="lg:col-span-2 space-y-5">
+            {/* Orientation Confirmation Banner */}
+            <OrientationConfirmBanner
+              orientation={order.orientation ?? 1}
+              confirmed={(order as any).orientation_confirmed ?? false}
+              onConfirm={async () => {
+                if (!orderId) return;
+                await confirmOrientationMutation.mutateAsync(orderId);
+              }}
+              isPending={confirmOrientationMutation.isPending}
+            />
+
             {/* All approved banner */}
             {allItemsApproved && (
               <div className="flex items-center gap-3 rounded-2xl p-4 border border-emerald-200/70 bg-emerald-50/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">

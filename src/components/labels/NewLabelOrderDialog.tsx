@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { format } from 'date-fns';
 import { CalendarIcon, Plus, User } from 'lucide-react';
 import { DielineCombobox } from '@/components/labels/DielineCombobox';
+import { OrientationPicker } from '@/components/labels/OrientationPicker';
 import {
   Dialog,
   DialogContent,
@@ -59,6 +60,7 @@ const formSchema = z.object({
   substrate_id: z.string().optional(),
   due_date: z.date().optional(),
   notes: z.string().optional(),
+  orientation: z.number().min(1).max(8).default(1),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -83,6 +85,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
       contact_email: '',
       quickeasy_wo_no: '',
       notes: '',
+      orientation: 1,
     },
   });
 
@@ -153,6 +156,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
         substrate_id: data.substrate_id || undefined,
         due_date: data.due_date?.toISOString().split('T')[0],
         notes: data.notes || undefined,
+        orientation: data.orientation ?? 1,
       });
       
       setOpen(false);
@@ -412,6 +416,17 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                     <FormMessage />
                   </FormItem>
                 )}
+              />
+            </div>
+
+            {/* Label Orientation */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Label Orientation (Rewind Direction)</h3>
+              <p className="text-xs text-muted-foreground">Select how the labels will be wound on the roll. Default is #1 — Outwound / Head to Lead.</p>
+              <OrientationPicker
+                value={form.watch('orientation') ?? 1}
+                onChange={(v) => form.setValue('orientation', v)}
+                size="sm"
               />
             </div>
 

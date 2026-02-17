@@ -96,6 +96,7 @@ export function useCreateLabelOrder() {
           due_date: input.due_date,
           notes: input.notes,
           quickeasy_wo_no: input.quickeasy_wo_no,
+          orientation: input.orientation ?? 1,
           created_by: user.user?.id,
           status: 'quote',
         })

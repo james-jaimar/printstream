@@ -172,3 +172,27 @@ export function useClientPortalUploadArtwork() {
     },
   });
 }
+
+// Confirm orientation
+export function useClientPortalConfirmOrientation() {
+  const queryClient = useQueryClient();
+  const clientFetch = useClientFetch();
+
+  return useMutation({
+    mutationFn: async (orderId: string) => {
+      await clientFetch('/confirm-orientation', {
+        method: 'POST',
+        body: { order_id: orderId },
+      });
+    },
+    onSuccess: (_, orderId) => {
+      queryClient.invalidateQueries({ queryKey: CLIENT_ORDERS_KEY });
+      queryClient.invalidateQueries({ queryKey: [...CLIENT_ORDERS_KEY, orderId] });
+      toast.success('Orientation confirmed successfully');
+    },
+    onError: (error) => {
+      console.error('Orientation confirm error:', error);
+      toast.error('Failed to confirm orientation');
+    },
+  });
+}

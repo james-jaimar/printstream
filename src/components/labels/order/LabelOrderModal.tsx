@@ -38,6 +38,7 @@ import { LayoutOptimizer } from '../LayoutOptimizer';
 import { SendProofingDialog } from '../proofing/SendProofingDialog';
 import { RequestArtworkDialog } from '../proofing/RequestArtworkDialog';
 import { runPreflight, getPageBoxes, splitPdf } from '@/services/labels/vpsApiService';
+import { OrientationPicker, getOrientationLabel, getOrientationSvg } from '@/components/labels/OrientationPicker';
 import { supabase } from '@/integrations/supabase/client';
 import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
 import type { LabelOrderStatus, PreflightReport, PdfBoxes } from '@/types/labels';
@@ -620,6 +621,35 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       <p className="text-muted-foreground">No dieline selected</p>
                     )}
                     {order.substrate && <p className="text-xs">{order.substrate.name}</p>}
+                    
+                    {/* Orientation Display */}
+                    <Separator className="my-2" />
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <img src={getOrientationSvg(order.orientation ?? 1)} alt="" className="h-8 w-8 object-contain" />
+                        <div>
+                          <p className="text-xs font-medium">{getOrientationLabel(order.orientation ?? 1)}</p>
+                          {!(order as any).orientation_confirmed && order.status !== 'quote' && (
+                            <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-200 mt-0.5">
+                              Not confirmed by client
+                            </Badge>
+                          )}
+                          {(order as any).orientation_confirmed && (
+                            <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-200 mt-0.5">
+                              Client confirmed
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      {order.status === 'quote' && (
+                        <OrientationPicker
+                          value={order.orientation ?? 1}
+                          onChange={(v) => updateOrder.mutate({ id: order.id, updates: { orientation: v } as any })}
+                          size="sm"
+                          className="mt-2"
+                        />
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
 

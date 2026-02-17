@@ -41,6 +41,7 @@ import {
 import { useClientAuth } from '@/hooks/labels/useClientAuth';
 import { useClientPortalOrders } from '@/hooks/labels/useClientPortalData';
 import impressLogo from '@/assets/impress-logo-colour.png';
+import { getOrientationSvg } from '@/components/labels/OrientationPicker';
 import type { LabelOrder } from '@/types/labels';
 
 /* ─── Helpers ─── */
@@ -438,6 +439,11 @@ export default function ClientPortalDashboard() {
                                       </>
                                     )}
                                   </div>
+                                  {/* Orientation indicator */}
+                                  <div className="flex items-center gap-1.5 mt-2">
+                                    <img src={getOrientationSvg(order.orientation ?? 1)} alt="" className="h-5 w-5 object-contain" />
+                                    <span className="text-[10px] text-slate-500">Orientation #{order.orientation ?? 1}</span>
+                                  </div>
                                 </div>
                                 <Button size="sm" className="w-full gap-2 bg-[#00B8D4] hover:bg-[#0097A7] text-white shadow-sm hover:shadow-md transition-shadow">
                                   <Eye className="h-3.5 w-3.5" />
@@ -485,7 +491,12 @@ export default function ClientPortalDashboard() {
                                   className="cursor-pointer hover:bg-slate-50"
                                   onClick={() => navigate(`/labels/portal/order/${order.id}`)}
                                 >
-                                  <TableCell className="font-medium text-sm">{order.order_number}</TableCell>
+                                  <TableCell className="font-medium text-sm">
+                                    <div className="flex items-center gap-1.5">
+                                      <img src={getOrientationSvg(order.orientation ?? 1)} alt="" className="h-4 w-4 object-contain flex-shrink-0" />
+                                      {order.order_number}
+                                    </div>
+                                  </TableCell>
                                   <TableCell className="text-slate-500 text-sm hidden sm:table-cell">{order.customer_name}</TableCell>
                                   <TableCell className="text-center text-sm">{items.length}</TableCell>
                                   <TableCell><StatusBadge status={order.status} /></TableCell>
