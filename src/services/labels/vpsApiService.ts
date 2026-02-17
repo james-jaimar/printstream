@@ -180,12 +180,13 @@ export interface ImpositionRequest {
 
 export interface ImpositionResponse {
   success: boolean;
-  run_id: string;
-  imposed_pdf_url: string;
+  run_id?: string;
+  status?: 'processing' | 'complete';
+  imposed_pdf_url?: string;
   imposed_pdf_with_dielines_url?: string;
-  frame_count: number;
-  total_meters: number;
-  processing_time_ms: number;
+  frame_count?: number;
+  total_meters?: number;
+  processing_time_ms?: number;
   error?: string;
 }
 
