@@ -89,25 +89,25 @@ export default function ClientItemCard({
 
   return (
     <>
-      <Card className={`transition-all overflow-hidden ${selected ? 'ring-2 ring-primary' : ''} ${
+      <Card className={`rounded-xl transition-all overflow-hidden border ${selected ? 'ring-2 ring-[#00B8D4]' : 'border-slate-200/70'} ${
         isApproved
-          ? 'border-primary/30 bg-primary/5'
+          ? 'border-emerald-200/70 bg-emerald-50/50'
           : canReview
-            ? 'border-destructive/30 bg-destructive/5'
+            ? 'border-amber-200/70 bg-amber-50/30'
             : needsUpload
-              ? 'border-destructive/30'
-              : ''
+              ? 'border-red-200/70 bg-red-50/30'
+              : 'bg-white/70'
       }`}>
         <CardContent className="p-0">
           <div className="flex">
             {/* Checkbox */}
             {canReview && (
-              <div className="flex items-center px-3 border-r bg-muted/30">
+              <div className="flex items-center px-3 border-r border-slate-200/50 bg-slate-50/50">
                 <input
                   type="checkbox"
                   checked={selected}
                   onChange={() => onToggleSelect(item.id)}
-                  className="h-4 w-4 rounded border-input accent-primary"
+                  className="h-4 w-4 rounded border-slate-300 accent-[#00B8D4]"
                 />
               </div>
             )}
@@ -116,7 +116,7 @@ export default function ClientItemCard({
             <button
               type="button"
               onClick={() => thumbnailUrl && setLightboxOpen(true)}
-              className="relative w-32 h-32 sm:w-40 sm:h-40 bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden group cursor-pointer"
+              className="relative w-32 h-32 sm:w-40 sm:h-40 bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden group cursor-pointer"
               disabled={!thumbnailUrl}
             >
               {thumbnailUrl ? (
@@ -131,7 +131,7 @@ export default function ClientItemCard({
                   </div>
                 </>
               ) : (
-                <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+                <ImageIcon className="h-10 w-10 text-slate-300" />
               )}
             </button>
 
@@ -156,7 +156,7 @@ export default function ClientItemCard({
               </div>
 
               {item.artwork_issue && (
-                <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">
+                <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-2 py-1">
                   {item.artwork_issue}
                 </p>
               )}
@@ -166,7 +166,7 @@ export default function ClientItemCard({
                   href={pdfUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                  className="inline-flex items-center gap-1 text-xs text-[#00B8D4] hover:underline"
                 >
                   <FileText className="h-3 w-3" />
                   View Proof PDF
@@ -177,7 +177,7 @@ export default function ClientItemCard({
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 {canReview && (
                   <>
-                    <Button size="sm" variant="default" onClick={() => onApprove(item.id)}>
+                    <Button size="sm" className="bg-[#00B8D4] hover:bg-[#0097A7] text-white" onClick={() => onApprove(item.id)}>
                       <CheckCircle className="h-3.5 w-3.5 mr-1" />
                       Approve
                     </Button>
@@ -202,12 +202,12 @@ export default function ClientItemCard({
 
       {/* Lightbox */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-        <DialogContent className="max-w-3xl p-2">
+        <DialogContent className="max-w-3xl p-2 rounded-2xl">
           {thumbnailUrl && (
             <img
               src={thumbnailUrl}
               alt={item.name}
-              className="w-full h-auto max-h-[80vh] object-contain rounded"
+              className="w-full h-auto max-h-[80vh] object-contain rounded-xl"
             />
           )}
         </DialogContent>
