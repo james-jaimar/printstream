@@ -9,7 +9,7 @@ import {
   StockCard, 
   StockDetailModal, 
   StockBarcodeModal, 
-  StockTransactionModal,
+  StockTransactionModal, 
   StockBarcodeScanner 
 } from '@/components/labels/stock';
 import { LowStockAlert } from '@/components/labels/production';
@@ -18,8 +18,6 @@ import type { LabelStock } from '@/types/labels';
 export default function LabelsStock() {
   const [search, setSearch] = useState('');
   const [scannerActive, setScannerActive] = useState(true);
-  
-  // Modal states
   const [selectedStockId, setSelectedStockId] = useState<string | null>(null);
   const [selectedStock, setSelectedStock] = useState<LabelStock | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -56,14 +54,12 @@ export default function LabelsStock() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pt-2">
         <div>
-          <h1 className="text-2xl font-bold">Stock Management</h1>
-          <p className="text-muted-foreground">
-            Roll substrate inventory and tracking
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Stock Management</h1>
+          <p className="text-sm text-slate-500">Roll substrate inventory and tracking</p>
         </div>
         <Button>
           <Plus className="h-4 w-4 mr-2" />
@@ -95,7 +91,6 @@ export default function LabelsStock() {
         </div>
       </div>
 
-      {/* Barcode Scanner Status */}
       {scannerActive && (
         <StockBarcodeScanner 
           isActive={scannerActive} 
@@ -103,7 +98,6 @@ export default function LabelsStock() {
         />
       )}
 
-      {/* Low Stock Alert */}
       <LowStockAlert />
 
       {/* Stock Grid */}
@@ -125,7 +119,6 @@ export default function LabelsStock() {
         </div>
       )}
 
-      {/* Modals */}
       <StockDetailModal
         stockId={selectedStockId}
         open={detailModalOpen}

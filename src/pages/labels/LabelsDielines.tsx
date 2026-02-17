@@ -2,24 +2,15 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Table, TableBody, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search } from 'lucide-react';
 import { SortableTableHead } from '@/components/tracker/jobs/SortableTableHead';
 import { ViewToggle } from '@/components/tracker/common/ViewToggle';
 import { 
-  useLabelDielines, 
-  useCreateLabelDieline, 
-  useUpdateLabelDieline,
-  useDeleteLabelDieline 
+  useLabelDielines, useCreateLabelDieline, useUpdateLabelDieline, useDeleteLabelDieline 
 } from '@/hooks/labels/useLabelDielines';
 import { DielineFormDialog, DielineCard, DielineListRow } from '@/components/labels/dielines';
 import { DielineFinder } from '@/components/labels/dielines/DielineFinder';
@@ -83,10 +74,7 @@ export default function LabelsDielines() {
 
   const handleUpdate = async (data: CreateLabelDielineInput) => {
     if (!editingDieline) return;
-    await updateMutation.mutateAsync({
-      id: editingDieline.id,
-      updates: data,
-    });
+    await updateMutation.mutateAsync({ id: editingDieline.id, updates: data });
     setIsFormOpen(false);
     setEditingDieline(null);
   };
@@ -96,12 +84,7 @@ export default function LabelsDielines() {
     setIsFormOpen(true);
     setTimeout(() => {
       const duplicateData: LabelDieline = {
-        ...dieline,
-        id: '',
-        name: `${dieline.name} (Copy)`,
-        is_custom: true,
-        created_at: '',
-        updated_at: '',
+        ...dieline, id: '', name: `${dieline.name} (Copy)`, is_custom: true, created_at: '', updated_at: '',
       };
       setEditingDieline(duplicateData);
     }, 0);
@@ -115,9 +98,7 @@ export default function LabelsDielines() {
 
   const handleFormClose = (open: boolean) => {
     setIsFormOpen(open);
-    if (!open) {
-      setEditingDieline(null);
-    }
+    if (!open) setEditingDieline(null);
   };
 
   const handleSubmit = async (data: CreateLabelDielineInput) => {
@@ -129,12 +110,12 @@ export default function LabelsDielines() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pt-2">
         <div>
-          <h1 className="text-2xl font-bold">Dieline Library</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dieline Library</h1>
+          <p className="text-sm text-slate-500">
             Standard label layouts and die templates ({activeDielines.length} active)
           </p>
         </div>
@@ -151,12 +132,7 @@ export default function LabelsDielines() {
       <div className="flex items-center gap-3">
         <div className="relative max-w-sm flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search dielines..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
+          <Input placeholder="Search dielines..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
         </div>
         <ViewToggle view={viewMode} onViewChange={setViewMode} />
       </div>
@@ -177,75 +153,47 @@ export default function LabelsDielines() {
           )}
         </div>
       ) : viewMode === 'list' ? (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <SortableTableHead sortKey="die_no" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort} className="w-[100px]">Die No</SortableTableHead>
-              <SortableTableHead sortKey="name" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Name</SortableTableHead>
-              <SortableTableHead sortKey="size" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Size (W×H)</SortableTableHead>
-              <SortableTableHead sortKey="layout" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Across × Around</SortableTableHead>
-              <SortableTableHead sortKey="die_type" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Type</SortableTableHead>
-              <SortableTableHead sortKey="gaps" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Gaps</SortableTableHead>
-              <SortableTableHead sortKey="labels" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Labels</SortableTableHead>
-              <SortableTableHead sortKey="client" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Client</SortableTableHead>
-              <SortableTableHead sortKey="" currentSortField={sortField} currentSortOrder={sortOrder} onSort={() => {}} className="w-[50px]"> </SortableTableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredDielines.map((dieline) => (
-              <DielineListRow
-                key={dieline.id}
-                dieline={dieline}
-                onEdit={handleEdit}
-                onDelete={(id) => setDeleteConfirm(id)}
-                onDuplicate={handleDuplicate}
-                isDeleting={deleteMutation.isPending}
-              />
-            ))}
-          </TableBody>
-        </Table>
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <SortableTableHead sortKey="die_no" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort} className="w-[100px]">Die No</SortableTableHead>
+                <SortableTableHead sortKey="name" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Name</SortableTableHead>
+                <SortableTableHead sortKey="size" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Size (W×H)</SortableTableHead>
+                <SortableTableHead sortKey="layout" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Across × Around</SortableTableHead>
+                <SortableTableHead sortKey="die_type" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Type</SortableTableHead>
+                <SortableTableHead sortKey="gaps" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Gaps</SortableTableHead>
+                <SortableTableHead sortKey="labels" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Labels</SortableTableHead>
+                <SortableTableHead sortKey="client" currentSortField={sortField} currentSortOrder={sortOrder} onSort={handleSort}>Client</SortableTableHead>
+                <SortableTableHead sortKey="" currentSortField={sortField} currentSortOrder={sortOrder} onSort={() => {}} className="w-[50px]"> </SortableTableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredDielines.map((dieline) => (
+                <DielineListRow key={dieline.id} dieline={dieline} onEdit={handleEdit} onDelete={(id) => setDeleteConfirm(id)} onDuplicate={handleDuplicate} isDeleting={deleteMutation.isPending} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredDielines.map((dieline) => (
-            <DielineCard
-              key={dieline.id}
-              dieline={dieline}
-              onEdit={handleEdit}
-              onDelete={(id) => setDeleteConfirm(id)}
-              onDuplicate={handleDuplicate}
-              isDeleting={deleteMutation.isPending}
-            />
+            <DielineCard key={dieline.id} dieline={dieline} onEdit={handleEdit} onDelete={(id) => setDeleteConfirm(id)} onDuplicate={handleDuplicate} isDeleting={deleteMutation.isPending} />
           ))}
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
-      <DielineFormDialog
-        open={isFormOpen}
-        onOpenChange={handleFormClose}
-        dieline={editingDieline}
-        onSubmit={handleSubmit}
-        isPending={createMutation.isPending || updateMutation.isPending}
-      />
+      <DielineFormDialog open={isFormOpen} onOpenChange={handleFormClose} dieline={editingDieline} onSubmit={handleSubmit} isPending={createMutation.isPending || updateMutation.isPending} />
 
-      {/* Delete Confirmation */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Archive this dieline?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This dieline will be archived and hidden from the library. 
-              It can be restored later if needed.
-            </AlertDialogDescription>
+            <AlertDialogDescription>This dieline will be archived and hidden from the library. It can be restored later if needed.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Archive
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Archive</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

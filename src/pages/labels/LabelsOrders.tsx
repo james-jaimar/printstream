@@ -1,34 +1,18 @@
 import { useState } from 'react';
-import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Search, Filter, Eye, Trash2, Upload, Loader2 } from 'lucide-react';
 import { useLabelOrders, useDeleteLabelOrder } from '@/hooks/labels/useLabelOrders';
@@ -36,6 +20,8 @@ import { NewLabelOrderDialog } from '@/components/labels/NewLabelOrderDialog';
 import { LabelOrderModal } from '@/components/labels/order/LabelOrderModal';
 import { format } from 'date-fns';
 import type { LabelOrderStatus } from '@/types/labels';
+
+const glassCard = 'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur';
 
 const statusOptions: { value: LabelOrderStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All Statuses' },
@@ -88,12 +74,12 @@ export default function LabelsOrders() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pt-2">
         <div>
-          <h1 className="text-2xl font-bold">Label Orders</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Label Orders</h1>
+          <p className="text-sm text-slate-500">
             Manage quotes, orders, and production jobs
           </p>
         </div>
@@ -109,7 +95,7 @@ export default function LabelsOrders() {
       </div>
 
       {/* Filters */}
-      <Card>
+      <Card className={glassCard}>
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
@@ -142,9 +128,9 @@ export default function LabelsOrders() {
       </Card>
 
       {/* Orders Table */}
-      <Card>
+      <Card className={glassCard}>
         <CardHeader>
-          <CardTitle>Orders ({filteredOrders?.length || 0})</CardTitle>
+          <CardTitle className="text-slate-900">Orders ({filteredOrders?.length || 0})</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -168,35 +154,26 @@ export default function LabelsOrders() {
                 {filteredOrders?.map((order) => (
                   <TableRow 
                     key={order.id} 
-                    className="cursor-pointer hover:bg-muted/50"
+                    className="cursor-pointer hover:bg-slate-50/60"
                     onClick={() => setSelectedOrderId(order.id)}
                   >
                     <TableCell className="font-medium">
-                      <span className="text-primary hover:underline">
+                      <span className="text-[#00B8D4] hover:underline">
                         {order.order_number}
                       </span>
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p>{order.customer_name}</p>
+                        <p className="text-slate-900">{order.customer_name}</p>
                         {order.contact_name && (
-                          <p className="text-xs text-muted-foreground">
-                            {order.contact_name}
-                          </p>
+                          <p className="text-xs text-slate-500">{order.contact_name}</p>
                         )}
                       </div>
                     </TableCell>
+                    <TableCell>{order.quickeasy_wo_no || '-'}</TableCell>
+                    <TableCell>{order.total_label_count.toLocaleString()}</TableCell>
                     <TableCell>
-                      {order.quickeasy_wo_no || '-'}
-                    </TableCell>
-                    <TableCell>
-                      {order.total_label_count.toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      {order.due_date 
-                        ? format(new Date(order.due_date), 'dd MMM yyyy')
-                        : '-'
-                      }
+                      {order.due_date ? format(new Date(order.due_date), 'dd MMM yyyy') : '-'}
                     </TableCell>
                     <TableCell>
                       <Badge className={statusColors[order.status]}>
@@ -205,39 +182,22 @@ export default function LabelsOrders() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedOrderId(order.id);
-                          }}
-                        >
+                        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedOrderId(order.id); }}>
                           <Eye className="h-4 w-4" />
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {deletingOrderId === order.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
+                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => e.stopPropagation()}>
+                              {deletingOrderId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent onClick={(e) => e.stopPropagation()}>
                             <AlertDialogHeader>
                               <AlertDialogTitle>Delete Order?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                This will permanently delete order <strong>{order.order_number}</strong> 
+                                This will permanently delete order <strong>{order.order_number}</strong>
                                 {order.customer_name && ` for ${order.customer_name}`}.
                                 All associated items, runs, and files will also be deleted.
-                                This action cannot be undone.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -247,9 +207,7 @@ export default function LabelsOrders() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setDeletingOrderId(order.id);
-                                  deleteOrder.mutate(order.id, {
-                                    onSettled: () => setDeletingOrderId(null),
-                                  });
+                                  deleteOrder.mutate(order.id, { onSettled: () => setDeletingOrderId(null) });
                                 }}
                               >
                                 Delete
