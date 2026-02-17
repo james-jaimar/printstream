@@ -516,6 +516,35 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true, path: storagePath });
     }
 
+    // POST /confirm-orientation — client confirms label orientation
+    if (req.method === "POST" && path === "/confirm-orientation") {
+      const body = await req.json();
+      const { order_id } = body;
+
+      if (!order_id) {
+        return jsonResponse({ error: "order_id required" }, 400);
+      }
+
+      // Verify order belongs to customer
+      const { data: order } = await supabase
+        .from("label_orders")
+        .select("id")
+        .eq("id", order_id)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
+      if (!order) return jsonResponse({ error: "Order not found" }, 404);
+
+      const { error: updateErr } = await supabase
+        .from("label_orders")
+        .update({ orientation_confirmed: true })
+        .eq("id", order_id);
+
+      if (updateErr) throw updateErr;
+
+      return jsonResponse({ success: true });
+    }
+
     // GET /signed-url?path=...
     if (req.method === "GET" && path === "/signed-url") {
       const filePath = url.searchParams.get("path");

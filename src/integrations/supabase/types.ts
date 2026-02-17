@@ -1574,6 +1574,8 @@ export type Database = {
           id: string
           notes: string | null
           order_number: string
+          orientation: number
+          orientation_confirmed: boolean
           proof_token: string | null
           proof_version: number
           quickeasy_wo_no: string | null
@@ -1600,6 +1602,8 @@ export type Database = {
           id?: string
           notes?: string | null
           order_number: string
+          orientation?: number
+          orientation_confirmed?: boolean
           proof_token?: string | null
           proof_version?: number
           quickeasy_wo_no?: string | null
@@ -1626,6 +1630,8 @@ export type Database = {
           id?: string
           notes?: string | null
           order_number?: string
+          orientation?: number
+          orientation_confirmed?: boolean
           proof_token?: string | null
           proof_version?: number
           quickeasy_wo_no?: string | null

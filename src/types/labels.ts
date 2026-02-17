@@ -153,6 +153,8 @@ export interface LabelOrder {
   total_label_count: number;
   estimated_meters: number | null;
   estimated_frames: number | null;
+  orientation: number;
+  orientation_confirmed: boolean;
   due_date: string | null;
   client_approved_at: string | null;
   client_approved_by: string | null;
@@ -329,6 +331,7 @@ export interface CreateLabelOrderInput {
   due_date?: string;
   notes?: string;
   quickeasy_wo_no?: string;
+  orientation?: number;
 }
 
 export interface CreateLabelItemInput {
