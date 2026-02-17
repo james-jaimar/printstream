@@ -128,6 +128,10 @@ export function useBatchImpose(
           horizontal_gap_mm: dieline.horizontal_gap_mm,
           vertical_gap_mm: dieline.vertical_gap_mm,
           corner_radius_mm: dieline.corner_radius_mm ?? undefined,
+          bleed_left_mm: dieline.bleed_left_mm ?? 0,
+          bleed_right_mm: dieline.bleed_right_mm ?? 0,
+          bleed_top_mm: dieline.bleed_top_mm ?? 0,
+          bleed_bottom_mm: dieline.bleed_bottom_mm ?? 0,
         };
 
         const request: ImpositionRequest = {

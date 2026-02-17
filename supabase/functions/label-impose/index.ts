@@ -23,6 +23,10 @@ interface ImposeRequest {
     horizontal_gap_mm: number;
     vertical_gap_mm: number;
     corner_radius_mm?: number;
+    bleed_left_mm?: number;
+    bleed_right_mm?: number;
+    bleed_top_mm?: number;
+    bleed_bottom_mm?: number;
   };
   slot_assignments: SlotAssignment[];
   include_dielines: boolean;
