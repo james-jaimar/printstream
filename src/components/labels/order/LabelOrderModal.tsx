@@ -750,7 +750,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     AI-optimized print runs and production schedule
                   </p>
                 </div>
-                <LabelRunsCard runs={order.runs || []} items={order.items || []} dieline={order.dieline} orderId={order.id} onImpositionComplete={() => refetch()} />
+                <LabelRunsCard runs={order.runs || []} items={order.items || []} dieline={order.dieline} orderId={order.id} orderNumber={order.order_number} onImpositionComplete={() => refetch()} />
               </div>
 
               {/* Timestamps */}
