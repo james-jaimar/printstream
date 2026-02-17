@@ -79,3 +79,7 @@ verify_jwt = false
 [functions.label-client-data]
 verify_jwt = false
 
+# LABELS DIVISION: VPS Health Diagnostic
+[functions.label-vps-health]
+verify_jwt = false
+
