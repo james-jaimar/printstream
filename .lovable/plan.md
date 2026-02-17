@@ -1,63 +1,78 @@
 
 
-# Allow Clients to Change Orientation in the Portal
+# Fix: Single-Page Dieline Imposition
 
 ## Problem
-Currently the client portal shows the orientation and lets clients confirm it, but there is no way for them to change it to a different position before confirming. If the admin set the wrong one, the client has no way to correct it.
 
-## Solution
-Add the full `OrientationPicker` component to the `OrientationConfirmBanner` so clients can select a different orientation before clicking "Confirm". The edge function endpoint will be updated to accept an optional `orientation` value alongside the confirmation.
+The system sends `meters_to_print` (e.g., 103m) to the VPS, causing it to generate hundreds of repeated frames. You just need **one page** matching the dieline layout with each slot's PDF placed at the correct position.
 
----
+For a 70x100mm label (4 across, 3 down): one PDF page, 292mm x 309mm, with 12 PDFs placed on it. Done.
 
 ## Changes
 
-### 1. Update Edge Function: `/confirm-orientation`
+### 1. Edge Function: `supabase/functions/label-impose/index.ts`
 
-In `supabase/functions/label-client-data/index.ts`, modify the `/confirm-orientation` handler to accept an optional `orientation` field (1-8) in the request body. When provided, it updates both `orientation` and `orientation_confirmed`; otherwise it just confirms the current value.
+- Remove `meters` from the VPS payload entirely (or send `meters: 0` / `frames: 1` depending on the VPS API contract)
+- The VPS should produce exactly **one page** -- the dieline layout with slots filled
+- Remove the `frames_count` and `meters_to_print` fields from the callback update (these are already stored as production metadata from the optimizer, not from the VPS output)
 
-### 2. Update `useClientPortalConfirmOrientation` hook
-
-In `src/hooks/labels/useClientPortalData.ts`, change the mutation to accept an object `{ orderId: string; orientation?: number }` instead of just a string, so the selected orientation can be passed through.
-
-### 3. Update `OrientationConfirmBanner` component
-
-In `src/components/labels/portal/OrientationConfirmBanner.tsx`:
-- Add the `OrientationPicker` (full-size, interactive) above the confirm button when not yet confirmed
-- Track the client's selected orientation in local state (initialized from the prop)
-- Pass the selected orientation to `onConfirm`
-- Once confirmed, show the picker in `readOnly` mode
-
-### 4. Update `ClientOrderDetail` to pass the new signature
-
-In `src/pages/labels/portal/ClientOrderDetail.tsx`, update the `onConfirm` callback to pass the selected orientation value to the mutation.
-
----
-
-## Technical Details
-
-### Edge function change (confirm-orientation handler)
-```typescript
-// Accept: { order_id, orientation? }
-// If orientation provided and valid (1-8), update both fields
-// Otherwise just set orientation_confirmed = true
+Current payload sent to VPS:
+```
+{
+  dieline: { ... },
+  slots: [ ... ],
+  meters: 103.82,           // <-- THIS IS THE PROBLEM
+  include_dielines: true,
+  upload_config: { ... },
+  callback_config: { ... }
+}
 ```
 
-### Hook signature change
-```typescript
-// Before: mutateAsync(orderId: string)
-// After:  mutateAsync({ orderId: string, orientation?: number })
+After fix:
+```
+{
+  dieline: { ... },
+  slots: [ ... ],
+  include_dielines: true,
+  upload_config: { ... },
+  callback_config: { ... }
+}
 ```
 
-### OrientationConfirmBanner prop change
+No `meters` field. The VPS should interpret this as "produce one frame".
+
+If the VPS requires the field, send `meters: 0` or `frames: 1` -- confirm with your VPS API which parameter controls single-frame output.
+
+### 2. Frontend Hook: `src/hooks/labels/useBatchImpose.ts`
+
+- Remove `meters_to_print` from the `ImpositionRequest` sent to the edge function (line 202)
+- Or set it to a sentinel value like `0` if the type requires it
+
+Change line 202 from:
 ```typescript
-// onConfirm changes from () => Promise<void>
-// to (selectedOrientation: number) => Promise<void>
+meters_to_print: run.meters_to_print || 1,
+```
+to:
+```typescript
+meters_to_print: 0,  // Single frame only — printer handles repetition
 ```
 
-### Files to modify
-- `supabase/functions/label-client-data/index.ts` -- accept orientation in confirm endpoint
-- `src/hooks/labels/useClientPortalData.ts` -- update mutation signature
-- `src/components/labels/portal/OrientationConfirmBanner.tsx` -- add interactive picker
-- `src/pages/labels/portal/ClientOrderDetail.tsx` -- wire up new signature
+### 3. Type cleanup: `src/services/labels/vpsApiService.ts`
+
+- Add a comment on `meters_to_print` in `ImpositionRequest` clarifying it's not used for PDF generation
+- Or make it optional since it's no longer meaningful for the VPS call
+
+## What Does NOT Change
+
+- `meters_to_print` and `frames_count` on `label_runs` table -- these remain as production planning/scheduling metadata from the optimizer
+- All UI displays of meters, frames, duration -- still accurate for scheduling
+- The optimizer logic -- untouched
+- The callback contract -- VPS still PATCHes `label_runs` on completion
+
+## Files Modified
+
+1. `supabase/functions/label-impose/index.ts` -- remove `meters` from VPS payload
+2. `src/hooks/labels/useBatchImpose.ts` -- send `meters_to_print: 0`
+
+Two lines. The VPS should then produce a single-page PDF in under a second.
 
