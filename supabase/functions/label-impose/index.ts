@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
       if (proofUploadError) {
         console.warn("Failed to create proof upload URL:", proofUploadError);
       } else {
-        proofUploadUrl = `${supabaseUrl}/storage/v1/${proofUploadData.fullPath}?token=${proofUploadData.token}`;
+        proofUploadUrl = proofUploadData.signedUrl;
         const { data: proofPubData } = supabase.storage
           .from("label-files")
           .getPublicUrl(proofPath);
@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
     const productionPublicUrl = productionPubData.publicUrl;
 
     // Build production signed upload URL
-    const productionUploadUrl = `${supabaseUrl}/storage/v1/${productionUploadData.fullPath}?token=${productionUploadData.token}`;
+    const productionUploadUrl = productionUploadData.signedUrl;
 
     // Map slot assignments with rotation info
     const slotsWithRotation = imposeRequest.slot_assignments.map(slot => ({
