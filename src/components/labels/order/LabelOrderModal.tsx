@@ -649,6 +649,24 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                           className="mt-2"
                         />
                       )}
+                      {(order as any).orientation_confirmed && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-2 text-xs h-7"
+                          onClick={() => {
+                            updateOrder.mutate({
+                              id: order.id,
+                              updates: { orientation_confirmed: false } as any,
+                            });
+                            toast.info('Orientation reset — client must re-confirm');
+                          }}
+                          disabled={updateOrder.isPending}
+                        >
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Reset Confirmation
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
