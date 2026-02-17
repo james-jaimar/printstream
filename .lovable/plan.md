@@ -1,68 +1,77 @@
 
-## Fix: Expand Column Slots to Full Grid for VPS Imposition
+
+## Fix: Send Bleed Dimensions to VPS Imposition Engine
 
 ### The Problem
-The AI layout optimizer assigns slots by **column** (0, 1, 2, 3 for a 4-across dieline). But the VPS imposition engine expects a slot assignment for **every grid position** (4 across x 3 around = 12 slots). Since we only send 4 slots, the VPS only places 4 labels instead of the full 12.
+The VPS imposition engine receives `label_width_mm: 70` and `label_height_mm: 100` but has no bleed information. The dieline has 1.5mm bleed on each side (3mm total), so the actual cell size on the imposed sheet should be:
+- Width: 70 + 1.5 + 1.5 = **73mm** per label
+- Height: 100 + 1.5 + 1.5 = **103mm** per label
+
+Expected page dimensions: 73 x 4 = **292mm wide**, 103 x 3 = **309mm high** (plus gaps)
+
+Current wrong output: 320 x 306mm with 11 labels instead of 12.
 
 ### The Fix
-Expand column-based slots into full grid slots in the **Edge Function** before sending to VPS. This is the right place because:
-- The dieline config (columns_across, rows_around) is already available
-- It keeps the optimizer's clean column-based model intact
-- The DB continues storing the simpler 4-slot format
-
-### Slot Expansion Logic
-
-```text
-Column slots (stored in DB):  [0, 1, 2, 3]
-                                     |
-              Expand for rows_around = 3
-                                     |
-Grid slots (sent to VPS):     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-
-Mapping:
-  Column 0 -> Grid slots 0, 4, 8   (row 0, 1, 2)
-  Column 1 -> Grid slots 1, 5, 9
-  Column 2 -> Grid slots 2, 6, 10
-  Column 3 -> Grid slots 3, 7, 11
-
-Formula: grid_slot = (row * columns_across) + column
-```
+Add bleed fields to the dieline config sent to the VPS at every layer of the pipeline.
 
 ### Changes
 
-#### 1. Edge Function: `supabase/functions/label-impose/index.ts`
-
-Before building `slotsWithRotation`, expand the slot assignments:
+#### 1. Client Service Types (`src/services/labels/vpsApiService.ts`)
+Add bleed fields to `DielineConfig`:
 
 ```typescript
-// Expand column-based slots to fill all grid positions (columns x rows)
-const columnsAcross = imposeRequest.dieline.columns_across;
-const rowsAround = imposeRequest.dieline.rows_around;
-const expandedSlots: SlotAssignment[] = [];
-
-for (const slot of imposeRequest.slot_assignments) {
-  // slot.slot is the column index (0..columns_across-1)
-  for (let row = 0; row < rowsAround; row++) {
-    expandedSlots.push({
-      ...slot,
-      slot: (row * columnsAcross) + slot.slot, // grid position
-    });
-  }
+export interface DielineConfig {
+  roll_width_mm: number;
+  label_width_mm: number;
+  label_height_mm: number;
+  columns_across: number;
+  rows_around: number;
+  horizontal_gap_mm: number;
+  vertical_gap_mm: number;
+  corner_radius_mm?: number;
+  bleed_left_mm?: number;
+  bleed_right_mm?: number;
+  bleed_top_mm?: number;
+  bleed_bottom_mm?: number;
 }
 ```
 
-Then use `expandedSlots` instead of `imposeRequest.slot_assignments` when building the VPS payload.
+#### 2. Hook (`src/hooks/labels/useBatchImpose.ts`)
+Pass bleed values when building `dielineConfig`:
 
-This means:
-- Run 1 (4 across x 3 around): sends 12 slots to VPS instead of 4
-- Each label appears in every row of its column
-- The full page is always filled, matching the dieline template
+```typescript
+const dielineConfig: DielineConfig = {
+  // ...existing fields...
+  bleed_left_mm: dieline.bleed_left_mm ?? 0,
+  bleed_right_mm: dieline.bleed_right_mm ?? 0,
+  bleed_top_mm: dieline.bleed_top_mm ?? 0,
+  bleed_bottom_mm: dieline.bleed_bottom_mm ?? 0,
+};
+```
 
-#### 2. No Other Changes Needed
-- The DB slot_assignments stay as column-based (0-3) -- this is cleaner for the optimizer
-- The `useBatchImpose` hook stays the same
-- The copies calculation in the Print Files section remains correct (it uses `quantity_in_slot / columns_across` which already accounts for column-based slots)
-- The `RunLayoutDiagram` already visualizes the full grid correctly
+#### 3. Edge Function (`supabase/functions/label-impose/index.ts`)
+Add bleed fields to the `ImposeRequest` interface and pass them through to the VPS payload:
 
-### After Deploying
-The existing runs will need to be re-imposed to get corrected PDFs. The edge function change only affects future impositions.
+```typescript
+interface ImposeRequest {
+  // ...existing fields...
+  dieline: {
+    // ...existing fields...
+    bleed_left_mm?: number;
+    bleed_right_mm?: number;
+    bleed_top_mm?: number;
+    bleed_bottom_mm?: number;
+  };
+}
+```
+
+No other changes needed in the edge function -- the `dieline` object is already passed directly to the VPS in the payload body (`dieline: imposeRequest.dieline`), so the new fields will flow through automatically.
+
+#### 4. Redeploy Edge Function
+Deploy the updated `label-impose` function, then re-impose runs to get corrected PDFs.
+
+### What This Achieves
+- VPS receives bleed dimensions and can calculate correct cell sizes (73mm x 103mm)
+- Page will be the correct 292mm x 309mm (plus gaps)
+- All 12 grid positions will be filled correctly
+
