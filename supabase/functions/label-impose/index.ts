@@ -61,7 +61,6 @@ Deno.serve(async (req) => {
     console.log(`Dieline: ${imposeRequest.dieline.columns_across}x${imposeRequest.dieline.rows_around}`);
     console.log(`Slot assignments: ${imposeRequest.slot_assignments.length}`);
 
-    const startTime = Date.now();
     const timestamp = Date.now();
     const basePath = `label-runs/${imposeRequest.order_id}/${imposeRequest.run_id}`;
     const productionPath = `${basePath}/production_${timestamp}.pdf`;
@@ -102,8 +101,6 @@ Deno.serve(async (req) => {
       .from("label-files")
       .getPublicUrl(productionPath);
     const productionPublicUrl = productionPubData.publicUrl;
-
-    // Build production signed upload URL
     const productionUploadUrl = productionUploadData.signedUrl;
 
     // Map slot assignments with rotation info
@@ -122,61 +119,120 @@ Deno.serve(async (req) => {
       uploadConfig.proof_public_url = proofPublicUrl;
     }
 
-    console.log("Calling VPS with upload_config (VPS will upload directly to storage)");
+    // Build callback_config so VPS can update label_runs directly
+    const callbackConfig = {
+      supabase_url: supabaseUrl,
+      supabase_service_key: supabaseServiceKey,
+      run_id: imposeRequest.run_id,
+      production_public_url: productionPublicUrl,
+      proof_public_url: proofPublicUrl || null,
+    };
 
-    // Call VPS — no more return_base64
-    const response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": apiKey,
-      },
-      body: JSON.stringify({
-        dieline: imposeRequest.dieline,
-        slots: slotsWithRotation,
-        meters: imposeRequest.meters_to_print,
-        include_dielines: imposeRequest.include_dielines,
-        upload_config: uploadConfig,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`VPS API error: ${response.status} - ${errorText}`);
-      throw new Error(`VPS error ${response.status}: ${errorText.substring(0, 200)}`);
-    }
-
-    const vpsResult = await response.json();
-    const processingTime = Date.now() - startTime;
-
-    // VPS returns frame_count and total_meters — PDFs are already in storage
-    const { error: updateError } = await supabase
+    // Mark run as "imposing" so frontend knows it's in progress
+    await supabase
       .from("label_runs")
       .update({
-        imposed_pdf_url: productionPublicUrl,
-        imposed_pdf_with_dielines_url: proofPublicUrl || null,
-        frames_count: vpsResult.frame_count,
-        meters_to_print: vpsResult.total_meters,
+        status: "imposing",
         updated_at: new Date().toISOString(),
       })
       .eq("id", imposeRequest.run_id);
 
-    if (updateError) {
-      console.warn("Failed to update label_runs:", updateError);
+    console.log("Firing VPS request (fire-and-forget with callback)");
+
+    // Fire-and-forget: send to VPS but don't await the full response
+    // Use a short timeout just to confirm the VPS accepted the request
+    const controller = new AbortController();
+    const acceptTimeout = setTimeout(() => controller.abort(), 10000); // 10s to accept
+
+    try {
+      const response = await fetch(`${VPS_PDF_API_URL}/imposition/labels`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          dieline: imposeRequest.dieline,
+          slots: slotsWithRotation,
+          meters: imposeRequest.meters_to_print,
+          include_dielines: imposeRequest.include_dielines,
+          upload_config: uploadConfig,
+          callback_config: callbackConfig,
+        }),
+      });
+
+      clearTimeout(acceptTimeout);
+
+      // If we get a quick response (small jobs), handle it normally
+      if (response.ok) {
+        const vpsResult = await response.json();
+        console.log(`VPS responded immediately: ${vpsResult.frame_count} frames`);
+
+        // Update label_runs with the result
+        await supabase
+          .from("label_runs")
+          .update({
+            imposed_pdf_url: productionPublicUrl,
+            imposed_pdf_with_dielines_url: proofPublicUrl || null,
+            frames_count: vpsResult.frame_count,
+            meters_to_print: vpsResult.total_meters,
+            status: "approved",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", imposeRequest.run_id);
+      } else {
+        const errorText = await response.text();
+        console.error(`VPS error: ${response.status} - ${errorText}`);
+        
+        // Mark run as failed
+        await supabase
+          .from("label_runs")
+          .update({
+            status: "planned",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", imposeRequest.run_id);
+
+        return new Response(
+          JSON.stringify({ success: false, error: `VPS error: ${errorText.substring(0, 200)}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } catch (fetchError) {
+      clearTimeout(acceptTimeout);
+
+      // AbortError means the VPS accepted but is still processing (large job)
+      // The VPS will use callback_config to update label_runs when done
+      if (fetchError.name === "AbortError") {
+        console.log("VPS accepted request, processing asynchronously (will callback)");
+      } else {
+        console.error("VPS connection error:", fetchError);
+        
+        // Mark run back to planned on connection failure
+        await supabase
+          .from("label_runs")
+          .update({
+            status: "planned",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", imposeRequest.run_id);
+
+        return new Response(
+          JSON.stringify({ success: false, error: `VPS connection failed: ${fetchError.message}` }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
-    console.log(`Imposition completed in ${processingTime}ms`);
-    console.log(`Frames: ${vpsResult.frame_count}, Meters: ${vpsResult.total_meters}`);
-
+    // Return immediately — VPS will update label_runs via callback when done
     return new Response(
       JSON.stringify({
         success: true,
+        status: "processing",
         run_id: imposeRequest.run_id,
         imposed_pdf_url: productionPublicUrl,
         imposed_pdf_with_dielines_url: proofPublicUrl,
-        frame_count: vpsResult.frame_count,
-        total_meters: vpsResult.total_meters,
-        processing_time_ms: processingTime,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
