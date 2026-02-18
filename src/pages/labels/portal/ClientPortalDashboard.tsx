@@ -140,7 +140,7 @@ function TrackingStepper({ status }: { status: string }) {
 
 const sidebarNav = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/labels/portal' },
-  { key: 'orders', label: 'My Orders', icon: ShoppingBag, path: '/labels/portal?view=orders' },
+  { key: 'orders', label: 'My Orders', icon: ShoppingBag, path: '/labels/portal/orders' },
   { key: 'account', label: 'Account Settings', icon: Settings, path: '/labels/portal/account' },
   { key: 'help', label: 'Help Center', icon: HelpCircle, path: null },
 ];
