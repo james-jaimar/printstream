@@ -26,6 +26,8 @@ export interface UserRoleResponse {
   isDtpOperator: boolean;
   /** Whether the user is specifically a Packaging & Shipping operator */
   isPackagingOperator: boolean;
+  /** Whether the user belongs to the Labels group */
+  isLabelsUser: boolean;
   /** List of stages the user has access to - based on actual group memberships, not admin overrides */
   accessibleStages: Array<{
     stage_id: string;
@@ -271,6 +273,22 @@ export const useUserRole = (): UserRoleResponse => {
   const isOperator = userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator';
   const isDtpOperator = userRole === 'dtp_operator';
   const isPackagingOperator = userRole === 'packaging_operator';
+  const [isLabelsUser, setIsLabelsUser] = useState(false);
+
+  // Detect Labels group membership from group data
+  useEffect(() => {
+    if (isLoading || authLoading) return;
+    const checkLabelsGroup = async () => {
+      if (!user?.id) { setIsLabelsUser(false); return; }
+      const { data } = await supabase
+        .from('user_group_memberships')
+        .select('user_groups!inner(name)')
+        .eq('user_id', user.id);
+      const groupNames = data?.map((m: any) => m.user_groups?.name?.toLowerCase() || '') || [];
+      setIsLabelsUser(groupNames.some(name => name === 'labels'));
+    };
+    checkLabelsGroup();
+  }, [user?.id, isLoading, authLoading]);
 
   return {
     userRole,
@@ -280,6 +298,7 @@ export const useUserRole = (): UserRoleResponse => {
     isOperator,
     isDtpOperator,
     isPackagingOperator,
+    isLabelsUser,
     accessibleStages
   };
 };

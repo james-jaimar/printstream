@@ -7,7 +7,7 @@ import AppSelector from './AppSelector';
 
 const Index = () => {
   const { user, loading: authLoading } = useAuth();
-  const { userRole, isLoading: roleLoading } = useUserRole();
+  const { userRole, isLoading: roleLoading, isLabelsUser, isAdmin, isManager } = useUserRole();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -36,8 +36,13 @@ const Index = () => {
         navigate('/tracker/factory-floor');
         return;
       }
+      // Redirect Labels group users to Labels dashboard
+      if (isLabelsUser && !isAdmin && !isManager) {
+        navigate('/labels');
+        return;
+      }
     }
-  }, [user, authLoading, userRole, roleLoading, navigate]);
+  }, [user, authLoading, userRole, roleLoading, isLabelsUser, isAdmin, isManager, navigate]);
 
   // Show loading while checking auth and role
   if (authLoading || roleLoading) {
@@ -53,7 +58,7 @@ const Index = () => {
   }
 
   // Don't render anything if redirecting
-  if (!user || userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator') {
+  if (!user || userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator' || (isLabelsUser && !isAdmin && !isManager)) {
     return null;
   }
 
