@@ -170,10 +170,13 @@ Deno.serve(async (req) => {
     const vpsPayload = JSON.stringify({
       dieline: {
         ...imposeRequest.dieline,
-        roll_width_mm: pageWidth,
-        page_height_mm: pageHeight,
-        horizontal_gap_mm: 0,  // Labels are butted together on roll
-        vertical_gap_mm: 0,    // Page dimensions already account for exact fit
+        // Override label dims with cell size so VPS calculates correct page
+        label_width_mm: cellWidth,    // e.g. 70 + 3 = 73
+        label_height_mm: cellHeight,  // e.g. 100 + 3 = 103
+        roll_width_mm: pageWidth,     // e.g. 73 * 4 = 292
+        page_height_mm: pageHeight,   // e.g. 103 * 3 = 309
+        horizontal_gap_mm: 0,
+        vertical_gap_mm: 0,
       },
       slots: slotsWithRotation,
       meters: 0,
