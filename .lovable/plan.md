@@ -1,37 +1,33 @@
 
 
-## Fix: 11 Labels Instead of 12 — VPS Uses 1-Based Slot Numbering
+## Fix: Dashboard Order Links Opening Legacy Full-Page View
+
+### Problem
+
+When clicking an order from the **Dashboard** "Recent Orders" section, you're taken to `/labels/orders/{orderId}` which renders the old full-page `LabelsOrderDetail` component. The correct behavior is to navigate to `/labels/orders?selected={orderId}`, which opens the unified modal on the Orders page.
+
+On your second click (after going back to Orders and clicking the order there), it works because the Orders page uses the modal approach.
 
 ### Root Cause
 
-The edge function sends 12 slots numbered **0 through 11** to the VPS. The VPS uses **1-based** slot numbering (slots 1-12), so:
-- Slot 0 is ignored (invalid/out-of-range for the VPS)
-- Slots 1-11 render fine (11 labels)
-- The 12th label is never placed
+Two places in `LabelsHome.tsx` still link to the legacy route:
 
-This is why the bottom-right corner is always empty -- that would be slot 12 in VPS terms, but we never send it.
+1. **Line 49**: The "New Order" dialog success callback navigates to `/labels/orders/${orderId}`
+2. **Line 97**: Each "Recent Orders" link points to `/labels/orders/${order.id}`
 
-### Fix
+### Changes
 
-**File: `supabase/functions/label-impose/index.ts` (line 123)**
+**File: `src/pages/labels/LabelsHome.tsx`**
 
-Add `+1` to convert from 0-based to 1-based slot numbering when expanding:
+1. Change the `NewLabelOrderDialog` success callback from:
+   - `window.location.href = '/labels/orders/${orderId}'`
+   - to: `navigate('/labels/orders?selected=${orderId}')`
 
-```typescript
-// Before (0-based):
-slot: (row * columnsAcross) + slot.slot,
+2. Change the Recent Orders links from:
+   - `to={'/labels/orders/${order.id}'}`
+   - to: `to={'/labels/orders?selected=${order.id}'}`
 
-// After (1-based for VPS):
-slot: (row * columnsAcross) + slot.slot + 1,
-```
+### Optional Cleanup
 
-This produces slots 1-12 instead of 0-11. All 12 labels will now render.
+Consider also removing the legacy route from `App.tsx` (line 253: `orders/:orderId` pointing to `LabelsOrderDetail`) to prevent anyone from accidentally landing on the old full-page view again. This can be done separately if you want to keep it as a fallback for now.
 
-### Verification
-
-For 4 columns, 3 rows:
-- Row 0: slots 1, 2, 3, 4
-- Row 1: slots 5, 6, 7, 8
-- Row 2: slots 9, 10, 11, 12
-
-12 slots, all valid in 1-based VPS addressing.
