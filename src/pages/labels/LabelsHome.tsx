@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +19,7 @@ import { NewLabelOrderDialog } from '@/components/labels/NewLabelOrderDialog';
 const glassCard = 'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur';
 
 export default function LabelsHome() {
+  const navigate = useNavigate();
   const { data: orders, isLoading: ordersLoading } = useLabelOrders();
   const { data: stock } = useLabelStock();
   const { data: lowStock } = useLowStockAlerts();
@@ -46,7 +47,7 @@ export default function LabelsHome() {
           </p>
         </div>
         <NewLabelOrderDialog 
-          onSuccess={(orderId) => window.location.href = `/labels/orders/${orderId}`} 
+          onSuccess={(orderId) => navigate(`/labels/orders?selected=${orderId}`)} 
         />
       </div>
 
@@ -94,7 +95,7 @@ export default function LabelsHome() {
                 {orders?.slice(0, 5).map((order) => (
                   <Link
                     key={order.id}
-                    to={`/labels/orders/${order.id}`}
+                    to={`/labels/orders?selected=${order.id}`}
                     className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 transition-colors"
                   >
                     <div>
