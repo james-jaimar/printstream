@@ -1572,6 +1572,7 @@ export type Database = {
           estimated_frames: number | null
           estimated_meters: number | null
           id: string
+          ink_config: string
           notes: string | null
           order_number: string
           orientation: number
@@ -1600,6 +1601,7 @@ export type Database = {
           estimated_frames?: number | null
           estimated_meters?: number | null
           id?: string
+          ink_config?: string
           notes?: string | null
           order_number: string
           orientation?: number
@@ -1628,6 +1630,7 @@ export type Database = {
           estimated_frames?: number | null
           estimated_meters?: number | null
           id?: string
+          ink_config?: string
           notes?: string | null
           order_number?: string
           orientation?: number

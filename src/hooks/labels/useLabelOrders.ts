@@ -97,6 +97,7 @@ export function useCreateLabelOrder() {
           notes: input.notes,
           quickeasy_wo_no: input.quickeasy_wo_no,
           orientation: input.orientation ?? 1,
+          ink_config: input.ink_config ?? 'CMYK',
           created_by: user.user?.id,
           status: 'quote',
         })
