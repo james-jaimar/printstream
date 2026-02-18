@@ -1,46 +1,41 @@
 
 
-## Fix: Bulletproof the Batch Loop + Add Real-Time Diagnostics
+## Fix: Eliminate the Async Polling Path by Increasing VPS Timeout
 
-### What the Database Shows
+### Root Cause (definitively proven)
 
-The VPS is healthy (your diagnostic proves it). Looking at LBL-2026-0003's 9 runs:
+Every "failed" run is actually `approved` with valid PDFs in the database. The VPS never fails. The problem is:
 
-- **Runs 6, 7**: Successfully imposed (VPS worked perfectly)
-- **Run 6**: Has `[IMPO ERROR]` in notes BUT `status: approved` with a valid PDF -- this is the race condition where the client gave up but the VPS actually succeeded (now fixed by the 503 retry changes)
-- **Runs 1-5, 8-9**: Still `planned`, last touched at 15:10-15:22 -- the latest batch at 18:05 only attempted runs 3, 6, 7 then **stopped**
+1. Edge function aborts the VPS fetch after **10 seconds** (line 188)
+2. VPS sometimes takes 11-15 seconds to respond
+3. Edge function returns `status: "processing"` to the client
+4. Client enters `waitForRunCompletion` polling loop
+5. Polling fails to detect the VPS callback's status update (race condition between poll reads and VPS callback writes)
+6. Client reports failure, calls `persistRunError`, writes "[IMPO ERROR]" to the database
+7. VPS callback arrives later and overwrites status to "approved" -- but the damage is done, the toast already showed an error
 
-### Root Cause: The Loop is Dying Silently
+Runs where VPS responds in <10s go through the `status: "complete"` path and work perfectly every time.
 
-The batch loop processes runs sequentially. When a run fails, the `try/catch` inside the loop handles it and moves on. **But** if an error occurs between runs (e.g., during the delay, or in state updates), there's no outer catch -- the entire `impose()` async function rejects silently, and the remaining runs are never attempted.
+### The Fix
+
+Increase the VPS fetch timeout from 10s to **60s**. The edge function has a 150-second wall-clock limit from Supabase. The VPS responds in 2-15 seconds. This means virtually every run will be handled synchronously -- the edge function waits for the response, updates the DB itself, and returns `status: "complete"`. The problematic async polling path is never triggered.
 
 ### Changes
 
-#### 1. Wrap the Entire Batch Loop in a Top-Level Try/Catch (`src/hooks/labels/useBatchImpose.ts`)
+**File: `supabase/functions/label-impose/index.ts`**
+- Line 188: Change `setTimeout(() => controller.abort(), 10000)` to `setTimeout(() => controller.abort(), 60000)`
 
-Add an outer try/catch around the entire `for` loop so that if the loop itself crashes (not just an individual run), the error is logged and the final progress state is set correctly. Currently if the loop dies mid-way, `setProgress` for the final state is never called and `isImposing` stays true forever.
+**File: `src/hooks/labels/useBatchImpose.ts`**
+- No changes needed. The "processing" + polling path remains as a fallback, but it should almost never be reached now.
 
-#### 2. Log the Exact Error that Kills the Batch
+### Why This Works
 
-Add `console.error("[BatchImpose] BATCH LOOP CRASHED:", e)` in the outer catch block. This is the missing diagnostic -- right now if the loop crashes, there is zero visibility.
+| VPS response time | Before (10s timeout) | After (60s timeout) |
+|---|---|---|
+| 2-9 seconds | Synchronous, works | Synchronous, works |
+| 10-15 seconds | Abort fires, enters broken polling path, reports phantom failure | Synchronous, works |
+| 15-60 seconds | Same broken polling path | Synchronous, works |
+| >60 seconds | N/A (never happens) | Falls back to polling (rare) |
 
-#### 3. Add Per-Run Logging BEFORE the Try Block
+This is a one-line fix that eliminates the entire class of failures.
 
-Move the `console.log` for "=== Run X ===" to BEFORE the try block, and add a log AFTER the try/catch. This way you can see exactly which run the loop was on when it died, even if the error happens outside the try.
-
-#### 4. Guard Against Stale `items` Array
-
-When building `slotAssignments`, if `items.find(it => it.id === slot.item_id)` returns undefined, `pdf_url` becomes empty string `''`. The VPS may handle this gracefully or may crash. Add a guard: if any slot has an empty `pdf_url`, skip that run with a clear error message rather than sending a broken request to the VPS.
-
-### Technical Summary
-
-| File | Change |
-|------|--------|
-| `src/hooks/labels/useBatchImpose.ts` | Outer try/catch around entire loop; guard against empty pdf_url in slots; enhanced logging around each run |
-
-### What You Need To Do After This
-
-1. Click "Reprocess All" on LBL-2026-0003
-2. Open browser DevTools console (F12)
-3. Watch for `[BatchImpose]` logs -- you will see EXACTLY which run it stops at and why
-4. Share those console logs so we can see the precise failure point
