@@ -1,62 +1,37 @@
 
 
-## Fix: VPS Ignoring page_height_mm — Override Label Dimensions Instead
+## Fix: 11 Labels Instead of 12 — VPS Uses 1-Based Slot Numbering
 
 ### Root Cause
 
-The edge function correctly calculates 292x309mm and passes `page_height_mm: 309` to the VPS. But the VPS **ignores** `page_height_mm` and recalculates the page size from the label dimensions it receives:
+The edge function sends 12 slots numbered **0 through 11** to the VPS. The VPS uses **1-based** slot numbering (slots 1-12), so:
+- Slot 0 is ignored (invalid/out-of-range for the VPS)
+- Slots 1-11 render fine (11 labels)
+- The 12th label is never placed
 
-- `label_height_mm: 100` (from the spread `...imposeRequest.dieline`)
-- `rows_around: 3`
-- Result: `100 * 3 = 300mm` (wrong -- missing the 3mm bleed per label)
+This is why the bottom-right corner is always empty -- that would be slot 12 in VPS terms, but we never send it.
 
-The VPS does its own math. We cannot force it to use our `page_height_mm`. Instead, we need to **feed it the cell size as the label size**, so when it multiplies, it gets the right answer.
+### Fix
 
-### The Fix
+**File: `supabase/functions/label-impose/index.ts` (line 123)**
 
-Override `label_width_mm` and `label_height_mm` in the VPS payload to equal the cell size (label + gap). Then zero out the gaps so the VPS doesn't add anything extra:
-
-```
-label_width_mm = 70 + 3 = 73   (cell width)
-label_height_mm = 100 + 3 = 103 (cell height)
-horizontal_gap_mm = 0
-vertical_gap_mm = 0
-```
-
-VPS calculation: `73 * 4 = 292mm`, `103 * 3 = 309mm`, 12 labels. Correct.
-
-### Change
-
-**File: `supabase/functions/label-impose/index.ts` (lines 170-177)**
-
-Replace the dieline override in the VPS payload:
+Add `+1` to convert from 0-based to 1-based slot numbering when expanding:
 
 ```typescript
-const vpsPayload = JSON.stringify({
-  dieline: {
-    ...imposeRequest.dieline,
-    // Feed VPS the cell size (label + bleed) as the label dimensions
-    // so its own calculation produces the correct page size
-    label_width_mm: cellWidth,    // 70 + 3 = 73
-    label_height_mm: cellHeight,  // 100 + 3 = 103
-    roll_width_mm: pageWidth,     // 73 * 4 = 292
-    page_height_mm: pageHeight,   // 103 * 3 = 309
-    horizontal_gap_mm: 0,
-    vertical_gap_mm: 0,
-  },
-  slots: slotsWithRotation,
-  meters: 0,
-  include_dielines: imposeRequest.include_dielines,
-  upload_config: uploadConfig,
-  callback_config: callbackConfig,
-});
+// Before (0-based):
+slot: (row * columnsAcross) + slot.slot,
+
+// After (1-based for VPS):
+slot: (row * columnsAcross) + slot.slot + 1,
 ```
 
-This way, no matter how the VPS internally calculates its page size, it will arrive at 292x309mm with all 12 labels.
+This produces slots 1-12 instead of 0-11. All 12 labels will now render.
 
-### Summary
+### Verification
 
-| File | Change |
-|------|--------|
-| `supabase/functions/label-impose/index.ts` | Add `label_width_mm: cellWidth` and `label_height_mm: cellHeight` overrides to VPS payload |
+For 4 columns, 3 rows:
+- Row 0: slots 1, 2, 3, 4
+- Row 1: slots 5, 6, 7, 8
+- Row 2: slots 9, 10, 11, 12
 
+12 slots, all valid in 1-based VPS addressing.
