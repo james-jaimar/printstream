@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Building2, Search, ChevronRight, Users, AlertCircle } from 'lucide-react';
+import { Plus, Building2, Search, ChevronRight, Users, AlertCircle, Upload } from 'lucide-react';
 import { useLabelCustomers, useCreateLabelCustomer, useUpdateLabelCustomer, useArchiveLabelCustomer, useDeleteLabelCustomer } from '@/hooks/labels/useClientPortal';
 import { useCustomerContacts } from '@/hooks/labels/useCustomerContacts';
 import { CustomerFormDialog } from '@/components/labels/customers/CustomerFormDialog';
 import { CustomerDetailPanel } from '@/components/labels/customers/CustomerDetailPanel';
+import { CustomerImportDialog } from '@/components/labels/customers/CustomerImportDialog';
 
 const glassCard = 'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur';
 
@@ -57,6 +58,7 @@ export default function LabelsCustomers() {
   const [showArchived, setShowArchived] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<LabelCustomer | null>(null);
 
@@ -97,10 +99,16 @@ export default function LabelsCustomers() {
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Customers</h1>
           <p className="text-sm text-slate-500">Manage customer accounts and their contacts</p>
         </div>
-        <Button onClick={() => setCreateDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Customer
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Import
+          </Button>
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Customer
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -158,6 +166,7 @@ export default function LabelsCustomers() {
 
       <CustomerFormDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} onSubmit={handleCreateSubmit} isSubmitting={createCustomerMutation.isPending} />
       <CustomerFormDialog open={editDialogOpen} onOpenChange={(open) => { setEditDialogOpen(open); if (!open) setEditingCustomer(null); }} onSubmit={handleEditSubmit} isSubmitting={updateCustomerMutation.isPending} customer={editingCustomer} />
+      <CustomerImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} />
     </div>
   );
 }
