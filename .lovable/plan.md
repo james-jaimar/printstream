@@ -1,58 +1,62 @@
 
 
-## Fix: Page Dimensions and Dieline Preview Width
+## Fix: VPS Ignoring page_height_mm — Override Label Dimensions Instead
 
-### Two Issues
+### Root Cause
 
-**Issue 1: Edge function calculates wrong page height (300mm instead of 309mm)**
+The edge function correctly calculates 292x309mm and passes `page_height_mm: 309` to the VPS. But the VPS **ignores** `page_height_mm` and recalculates the page size from the label dimensions it receives:
 
-The edge function derives cell size from `bleed_left_mm`, `bleed_right_mm`, `bleed_top_mm`, `bleed_bottom_mm` fields, which can be null or zero depending on how the dieline was created. The correct approach (as you described) is to derive bleed from the gap values:
+- `label_height_mm: 100` (from the spread `...imposeRequest.dieline`)
+- `rows_around: 3`
+- Result: `100 * 3 = 300mm` (wrong -- missing the 3mm bleed per label)
 
-- `horizontal_gap_mm` (3mm) / 2 = 1.5mm bleed left + 1.5mm bleed right
-- `vertical_gap_mm` (3mm) / 2 = 1.5mm bleed top + 1.5mm bleed bottom
+The VPS does its own math. We cannot force it to use our `page_height_mm`. Instead, we need to **feed it the cell size as the label size**, so when it multiplies, it gets the right answer.
 
-This way, the cell size is always `label_width + gap` and `label_height + gap`, regardless of whether separate bleed fields are populated.
+### The Fix
 
-**Issue 2: Dieline form shows "Total width: 289mm" instead of 292mm**
+Override `label_width_mm` and `label_height_mm` in the VPS payload to equal the cell size (label + gap). Then zero out the gaps so the VPS doesn't add anything extra:
 
-The formula is `columns * label_width + (columns - 1) * gap`, which treats gaps as *between* labels only. The correct formula is `(label_width + gap) * columns`, because each label carries its own bleed (half the gap) on each side, so every label cell is `label + gap` wide, and cells butt together.
-
-### Changes
-
-**File: `supabase/functions/label-impose/index.ts` (lines 161-168)**
-
-Replace the bleed-based calculation with gap-based:
-
-```typescript
-// Calculate page dimensions: cell = label + gap (gap = bleed left + bleed right)
-const d = imposeRequest.dieline;
-const cellWidth = d.label_width_mm + d.horizontal_gap_mm;
-const cellHeight = d.label_height_mm + d.vertical_gap_mm;
-const pageWidth = cellWidth * d.columns_across;
-const pageHeight = cellHeight * d.rows_around;
+```
+label_width_mm = 70 + 3 = 73   (cell width)
+label_height_mm = 100 + 3 = 103 (cell height)
+horizontal_gap_mm = 0
+vertical_gap_mm = 0
 ```
 
-For the 70x100mm / 4-across / 3-around / 3mm gaps example:
-- cellWidth = 70 + 3 = 73mm, pageWidth = 73 x 4 = **292mm**
-- cellHeight = 100 + 3 = 103mm, pageHeight = 103 x 3 = **309mm**
-- 12 labels on the page
+VPS calculation: `73 * 4 = 292mm`, `103 * 3 = 309mm`, 12 labels. Correct.
 
-**File: `src/components/labels/dielines/DielineFormDialog.tsx` (line 107-108)**
+### Change
 
-Change the totalWidth formula:
+**File: `supabase/functions/label-impose/index.ts` (lines 170-177)**
+
+Replace the dieline override in the VPS payload:
 
 ```typescript
-const totalWidth = (formData.label_width_mm + (formData.horizontal_gap_mm ?? 3)) * formData.columns_across;
+const vpsPayload = JSON.stringify({
+  dieline: {
+    ...imposeRequest.dieline,
+    // Feed VPS the cell size (label + bleed) as the label dimensions
+    // so its own calculation produces the correct page size
+    label_width_mm: cellWidth,    // 70 + 3 = 73
+    label_height_mm: cellHeight,  // 100 + 3 = 103
+    roll_width_mm: pageWidth,     // 73 * 4 = 292
+    page_height_mm: pageHeight,   // 103 * 3 = 309
+    horizontal_gap_mm: 0,
+    vertical_gap_mm: 0,
+  },
+  slots: slotsWithRotation,
+  meters: 0,
+  include_dielines: imposeRequest.include_dielines,
+  upload_config: uploadConfig,
+  callback_config: callbackConfig,
+});
 ```
 
-For the same dieline: `(70 + 3) * 4 = 292mm` (correct).
-
-Also add a totalHeight preview so operators can see both dimensions at a glance.
+This way, no matter how the VPS internally calculates its page size, it will arrive at 292x309mm with all 12 labels.
 
 ### Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/label-impose/index.ts` | Use `label + gap` for cell size instead of `label + bleed fields` |
-| `src/components/labels/dielines/DielineFormDialog.tsx` | Fix totalWidth formula, add totalHeight display |
+| `supabase/functions/label-impose/index.ts` | Add `label_width_mm: cellWidth` and `label_height_mm: cellHeight` overrides to VPS payload |
 
