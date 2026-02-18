@@ -41,7 +41,9 @@ import { runPreflight, getPageBoxes, splitPdf } from '@/services/labels/vpsApiSe
 import { OrientationPicker, getOrientationLabel, getOrientationSvg } from '@/components/labels/OrientationPicker';
 import { supabase } from '@/integrations/supabase/client';
 import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
-import type { LabelOrderStatus, PreflightReport, PdfBoxes } from '@/types/labels';
+import type { LabelOrderStatus, PreflightReport, PdfBoxes, LabelInkConfig } from '@/types/labels';
+import { INK_CONFIG_LABELS, INK_CONFIG_SPEEDS } from '@/types/labels';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 
 const statusConfig: Record<LabelOrderStatus, { 
@@ -621,6 +623,35 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       <p className="text-muted-foreground">No dieline selected</p>
                     )}
                     {order.substrate && <p className="text-xs">{order.substrate.name}</p>}
+
+                    {/* Ink Configuration */}
+                    <Separator className="my-2" />
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground font-medium">Ink Configuration</p>
+                      <Select
+                        value={order.ink_config || 'CMYK'}
+                        onValueChange={(val) => {
+                          updateOrder.mutate({
+                            id: order.id,
+                            updates: { ink_config: val } as any,
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(INK_CONFIG_LABELS) as LabelInkConfig[]).map((key) => (
+                            <SelectItem key={key} value={key}>
+                              <span className="flex items-center gap-2">
+                                {INK_CONFIG_LABELS[key]}
+                                <span className="text-muted-foreground">— {INK_CONFIG_SPEEDS[key]} m/min</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     
                     {/* Orientation Display */}
                     <Separator className="my-2" />
