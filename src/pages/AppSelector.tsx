@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ClipboardList, Package, ArrowRight } from "lucide-react";
+import { ClipboardList, Package, ArrowRight, Tag } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
@@ -47,7 +47,7 @@ const AppSelector = () => {
           {user?.email && <p className="text-sm text-gray-500">Logged in as {user.email}</p>}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8">
+        <div className="grid md:grid-cols-3 gap-8">
           {/* Tracker App */}
           <Card className="hover:shadow-xl transition-all duration-300 group cursor-pointer">
             <CardHeader className="text-center pb-4">
@@ -96,6 +96,33 @@ const AppSelector = () => {
               <Button asChild size="lg" className="w-full bg-blue-600 hover:bg-blue-700">
                 <Link to="/printstream" className="flex items-center justify-center gap-2">
                   Open Printstream
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Labels App */}
+          <Card className="hover:shadow-xl transition-all duration-300 group cursor-pointer">
+            <CardHeader className="text-center pb-4">
+              <div className="mx-auto mb-4 p-4 bg-teal-100 rounded-full w-20 h-20 flex items-center justify-center group-hover:bg-teal-200 transition-colors">
+                <Tag className="h-10 w-10 text-teal-600" />
+              </div>
+              <CardTitle className="text-2xl text-gray-900">Labels</CardTitle>
+              <CardDescription className="text-gray-600">
+                Label orders, proofing, and production management
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-center">
+              <ul className="text-sm text-gray-600 mb-6 space-y-2">
+                <li>• Manage label orders and customers</li>
+                <li>• Dieline library and stock management</li>
+                <li>• Proofing and client approval workflows</li>
+                <li>• Production scheduling</li>
+              </ul>
+              <Button asChild size="lg" className="w-full bg-teal-600 hover:bg-teal-700">
+                <Link to="/labels" className="flex items-center justify-center gap-2">
+                  Open Labels
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
