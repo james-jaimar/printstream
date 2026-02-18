@@ -1,78 +1,101 @@
 
 
-## Labels Division Users — Group-Based Access and Auto-Routing
+## Add Ink Configuration (Color Mode) to Label Orders
 
 ### Overview
 
-Create a "Labels" user group in the existing `user_groups` system. Users assigned to this group will:
-- Be redirected straight to `/labels` on login (bypassing the app selector)
-- Have the Labels Division as their home base
-- Be able to view Tracker/Printstream in read-only mode (no changes needed to those routes for now — just the routing logic)
+Add an `ink_config` field to label orders that determines the press speed for production calculations and scheduling. The four options are:
 
-No new database tables or roles are needed. We leverage the existing `user_groups` + `user_group_memberships` infrastructure.
+| Ink Config | Description | Press Speed |
+|---|---|---|
+| CMY | 3-colour process | 26 m/min |
+| CMYK | 4-colour process | 22 m/min |
+| CMYKW | 4-colour + White | 20 m/min |
+| CMYKO | 4-colour + Orange | 20 m/min |
 
-### Step 1: Create the "Labels" User Group
+This replaces the current fixed 25 m/min constant with a dynamic speed based on the order's ink configuration.
 
-Insert a new group via the Supabase insert tool:
+### Step 1: Database Migration
+
+Add `ink_config` column to `label_orders` table:
 
 ```sql
-INSERT INTO user_groups (name, description, permissions)
-VALUES ('Labels', 'Labels Division staff — orders, proofing, production', '{"labels_access": true}'::jsonb);
+ALTER TABLE label_orders 
+ADD COLUMN ink_config text NOT NULL DEFAULT 'CMYK';
+
+ALTER TABLE label_orders 
+ADD CONSTRAINT label_orders_ink_config_check 
+CHECK (ink_config IN ('CMY', 'CMYK', 'CMYKW', 'CMYKO'));
 ```
 
-Admins can then assign users to this group through the existing user management UI.
+### Step 2: Update Types
 
-### Step 2: Detect Labels Group Membership
+**File: `src/types/labels.ts`**
 
-**File: `src/hooks/tracker/useUserRole.tsx`**
-
-Add a new derived property `isLabelsUser` that checks if the user belongs to the "Labels" group. The hook already fetches `groupMemberships` with group names, so we just need to add:
+- Add `LabelInkConfig` type: `'CMY' | 'CMYK' | 'CMYKW' | 'CMYKO'`
+- Add `INK_CONFIG_SPEEDS` constant mapping each config to its m/min speed
+- Update `LABEL_PRINT_CONSTANTS` to keep the old `PRESS_SPEED_M_PER_MIN` as a fallback but add the new speed map
+- Add `ink_config` to `LabelOrder` interface
+- Add `ink_config` to `CreateLabelOrderInput` interface
 
 ```typescript
-const isInLabelsGroup = groupNames.some(name => name.toLowerCase() === 'labels');
+export type LabelInkConfig = 'CMY' | 'CMYK' | 'CMYKW' | 'CMYKO';
+
+export const INK_CONFIG_SPEEDS: Record<LabelInkConfig, number> = {
+  CMY: 26,
+  CMYK: 22,
+  CMYKW: 20,
+  CMYKO: 20,
+};
+
+export const INK_CONFIG_LABELS: Record<LabelInkConfig, string> = {
+  CMY: 'CMY (3-colour)',
+  CMYK: 'CMYK (4-colour)',
+  CMYKW: 'CMYK + White',
+  CMYKO: 'CMYK + Orange',
+};
 ```
 
-And expose `isLabelsUser` in the return object.
+### Step 3: Update Layout Optimizer
 
-### Step 3: Auto-Redirect Labels Users on Login
+**File: `src/utils/labels/layoutOptimizer.ts`**
 
-**File: `src/pages/Index.tsx`**
+- Update `LayoutInput` interface to accept optional `inkConfig`
+- Update `calculateProductionTime` and `calculateRunPrintTime` to accept an ink config parameter and use the corresponding speed instead of the fixed constant
+- Fallback to `CMYK` (22 m/min) if no ink config provided
 
-After existing operator redirects, add a check for Labels group membership. If the user is a Labels user (and not an admin/manager), redirect to `/labels`:
+### Step 4: Update New Order Dialog
 
-```typescript
-if (isLabelsUser && !isAdmin && !isManager) {
-  navigate('/labels');
-  return;
-}
-```
+**File: `src/components/labels/NewLabelOrderDialog.tsx`**
 
-This requires the `useUserRole` hook to expose `isLabelsUser`, which we add in Step 2.
+- Add `ink_config` to the Zod form schema with default `'CMYK'`
+- Add a select field in the "Print Specifications" section showing all four options with their speeds displayed (e.g. "CMYK (4-colour) -- 22 m/min")
+- Pass `ink_config` through to the create mutation
 
-### Step 4: Update AppSelector for Labels-Only Users
+### Step 5: Update Order Hooks
 
-**File: `src/pages/AppSelector.tsx`**
+**File: `src/hooks/labels/useLabelOrders.ts`**
 
-Since Labels-only users go straight to `/labels`, they won't normally see the AppSelector. But if they navigate back to `/`, the existing redirect in Index.tsx will send them to `/labels` again. No changes needed here.
+- Include `ink_config` in the `useCreateLabelOrder` insert call
 
-### Step 5: Update RoleAwareLayout for Labels Users
+### Step 6: Update Order Display
 
-**File: `src/components/tracker/RoleAwareLayout.tsx`**
+Wherever the order details are shown (e.g. `LabelOrderModal`, schedule board), display the ink configuration badge so operators know the colour setup.
 
-If a Labels user navigates to `/tracker`, they should still be able to view it (read-only per your preference). The existing `RoleAwareLayout` will default them to the dashboard view, which is fine. No blocking needed.
+### Step 7: Update Import Service
 
-### Summary of File Changes
+**File: `src/utils/labels/importService.ts`**
+
+- Default imported orders to `'CMYK'` ink config (can be amended by admin later)
+
+### Summary of Changes
 
 | File | Change |
 |---|---|
-| `src/hooks/tracker/useUserRole.tsx` | Add `isLabelsUser` boolean based on "Labels" group membership; expose in return |
-| `src/pages/Index.tsx` | Add Labels user redirect to `/labels` after operator checks |
-| Database | Insert "Labels" user group |
-
-### What This Enables
-
-- Assign any existing staff user to the "Labels" group via admin user management
-- They auto-land on the Labels dashboard on login
-- They can still browse Tracker/Printstream if needed (read-only intent, no enforcement yet)
-- Admins/managers with Labels group membership still see the full app selector (they're not restricted)
+| Database migration | Add `ink_config` column with CHECK constraint |
+| `src/types/labels.ts` | Add `LabelInkConfig` type, speed map, labels map; update `LabelOrder` and `CreateLabelOrderInput` |
+| `src/utils/labels/layoutOptimizer.ts` | Use dynamic speed from ink config instead of fixed 25 m/min |
+| `src/components/labels/NewLabelOrderDialog.tsx` | Add ink config selector in Print Specifications section |
+| `src/hooks/labels/useLabelOrders.ts` | Pass `ink_config` in create mutation |
+| `src/utils/labels/importService.ts` | Default to `'CMYK'` for imported orders |
 
