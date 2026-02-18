@@ -158,10 +158,10 @@ Deno.serve(async (req) => {
       })
       .eq("id", imposeRequest.run_id);
 
-    // Calculate correct page dimensions: cell size * grid count, no gaps
+    // Calculate page dimensions: cell = label + gap (gap/2 = bleed per side, cells butt together)
     const d = imposeRequest.dieline;
-    const cellWidth = d.label_width_mm + (d.bleed_left_mm || 0) + (d.bleed_right_mm || 0);
-    const cellHeight = d.label_height_mm + (d.bleed_top_mm || 0) + (d.bleed_bottom_mm || 0);
+    const cellWidth = d.label_width_mm + d.horizontal_gap_mm;
+    const cellHeight = d.label_height_mm + d.vertical_gap_mm;
     const pageWidth = cellWidth * d.columns_across;
     const pageHeight = cellHeight * d.rows_around;
 

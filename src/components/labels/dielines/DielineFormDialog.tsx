@@ -104,8 +104,8 @@ export function DielineFormDialog({
     }
   };
 
-  const totalWidth = formData.columns_across * formData.label_width_mm + 
-    (formData.columns_across - 1) * (formData.horizontal_gap_mm ?? 3);
+  const totalWidth = (formData.label_width_mm + (formData.horizontal_gap_mm ?? 3)) * formData.columns_across;
+  const totalHeight = (formData.label_height_mm + (formData.vertical_gap_mm ?? 2.5)) * formData.rows_around;
   const labelsPerFrame = formData.columns_across * formData.rows_around;
 
   return (
@@ -295,6 +295,8 @@ export function DielineFormDialog({
               <span>Labels per frame: <strong>{labelsPerFrame}</strong></span>
               <span>|</span>
               <span>Total width: <strong>{totalWidth}mm</strong></span>
+              <span>|</span>
+              <span>Total height: <strong>{totalHeight}mm</strong></span>
               {totalWidth > formData.roll_width_mm && (
                 <>
                   <span>|</span>
