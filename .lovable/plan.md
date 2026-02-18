@@ -1,41 +1,54 @@
 
 
-## Fix: Eliminate the Async Polling Path by Increasing VPS Timeout
+## Fix: VPS Page Size and Missing Label (11 of 12)
 
-### Root Cause (definitively proven)
+### Root Cause
 
-Every "failed" run is actually `approved` with valid PDFs in the database. The VPS never fails. The problem is:
+The edge function sends the dieline's `horizontal_gap_mm: 3` and `vertical_gap_mm: 3` to the VPS, but also calculates page dimensions **without** gaps (cell size x grid count). The VPS then applies the gap values on top of the already-tight page dimensions, which:
 
-1. Edge function aborts the VPS fetch after **10 seconds** (line 188)
-2. VPS sometimes takes 11-15 seconds to respond
-3. Edge function returns `status: "processing"` to the client
-4. Client enters `waitForRunCompletion` polling loop
-5. Polling fails to detect the VPS callback's status update (race condition between poll reads and VPS callback writes)
-6. Client reports failure, calls `persistRunError`, writes "[IMPO ERROR]" to the database
-7. VPS callback arrives later and overwrites status to "approved" -- but the damage is done, the toast already showed an error
+1. **Reduces the page height**: The VPS subtracts gap space from the available area, resulting in 306mm instead of 309mm (lost 3mm = one vertical gap).
+2. **Drops one label**: With reduced space, the VPS can only fit 11 labels instead of 12 (4 columns x 3 rows).
 
-Runs where VPS responds in <10s go through the `status: "complete"` path and work perfectly every time.
+The dieline for this order is `70x100mm` with `1.5mm` bleed on all sides:
+- Cell size: 73mm x 103mm
+- Expected page: 73 x 4 = **292mm** wide, 103 x 3 = **309mm** tall
+- Actual output: 292 x **306mm** (3mm short = one `vertical_gap_mm`)
 
 ### The Fix
 
-Increase the VPS fetch timeout from 10s to **60s**. The edge function has a 150-second wall-clock limit from Supabase. The VPS responds in 2-15 seconds. This means virtually every run will be handled synchronously -- the edge function waits for the response, updates the DB itself, and returns `status: "complete"`. The problematic async polling path is never triggered.
+Since labels are butted together on the roll (no gaps in production), the edge function should **zero out the gap values** in the payload sent to the VPS. The page dimensions are already calculated correctly without gaps.
 
 ### Changes
 
 **File: `supabase/functions/label-impose/index.ts`**
-- Line 188: Change `setTimeout(() => controller.abort(), 10000)` to `setTimeout(() => controller.abort(), 60000)`
 
-**File: `src/hooks/labels/useBatchImpose.ts`**
-- No changes needed. The "processing" + polling path remains as a fallback, but it should almost never be reached now.
+In the VPS payload construction (around line 170-175), override the gap values to zero:
 
-### Why This Works
+```typescript
+const vpsPayload = JSON.stringify({
+  dieline: {
+    ...imposeRequest.dieline,
+    roll_width_mm: pageWidth,
+    page_height_mm: pageHeight,
+    horizontal_gap_mm: 0,  // Labels are butted together on roll
+    vertical_gap_mm: 0,    // Page dimensions already account for exact fit
+  },
+  slots: slotsWithRotation,
+  meters: 0,
+  include_dielines: imposeRequest.include_dielines,
+  upload_config: uploadConfig,
+  callback_config: callbackConfig,
+});
+```
 
-| VPS response time | Before (10s timeout) | After (60s timeout) |
-|---|---|---|
-| 2-9 seconds | Synchronous, works | Synchronous, works |
-| 10-15 seconds | Abort fires, enters broken polling path, reports phantom failure | Synchronous, works |
-| 15-60 seconds | Same broken polling path | Synchronous, works |
-| >60 seconds | N/A (never happens) | Falls back to polling (rare) |
+This ensures:
+- Page dimensions remain 292 x 309mm (correct)
+- VPS places all 12 labels (4x3) without subtracting gap space
+- Labels are positioned edge-to-edge as required for roll printing
 
-This is a one-line fix that eliminates the entire class of failures.
+### Files
+
+| File | Change |
+|------|--------|
+| `supabase/functions/label-impose/index.ts` | Zero out `horizontal_gap_mm` and `vertical_gap_mm` in VPS payload |
 
