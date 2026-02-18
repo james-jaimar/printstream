@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
     console.log(`[label-impose] Firing single VPS request (no retry — client handles 503)`);
 
     const controller = new AbortController();
-    const acceptTimeout = setTimeout(() => controller.abort(), 10000);
+    const acceptTimeout = setTimeout(() => controller.abort(), 60000);
     let response: Response | null = null;
     let aborted = false;
 
