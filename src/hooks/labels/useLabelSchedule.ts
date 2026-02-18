@@ -188,7 +188,7 @@ export function useUnscheduledRuns() {
             substrate_id
           )
         `)
-        .in('status', ['planned', 'approved'])
+        .in('status', ['planned', 'approved', 'printing'])
         .order('created_at', { ascending: true });
 
       if (scheduledIds.length > 0) {
