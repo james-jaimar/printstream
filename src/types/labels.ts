@@ -3,11 +3,28 @@
  * Completely isolated from Digital Division
  */
 
+// Ink configuration types
+export type LabelInkConfig = 'CMY' | 'CMYK' | 'CMYKW' | 'CMYKO';
+
+export const INK_CONFIG_SPEEDS: Record<LabelInkConfig, number> = {
+  CMY: 26,
+  CMYK: 22,
+  CMYKW: 20,
+  CMYKO: 20,
+};
+
+export const INK_CONFIG_LABELS: Record<LabelInkConfig, string> = {
+  CMY: 'CMY (3-colour)',
+  CMYK: 'CMYK (4-colour)',
+  CMYKW: 'CMYK + White',
+  CMYKO: 'CMYK + Orange',
+};
+
 // HP Indigo Label Printing Constants
 export const LABEL_PRINT_CONSTANTS = {
   MAX_FRAME_LENGTH_MM: 960,        // HP Indigo max print length
   ROLL_WIDTHS_MM: [250, 280, 320, 330] as const,
-  PRESS_SPEED_M_PER_MIN: 25,      // 25 metres/min average print speed
+  PRESS_SPEED_M_PER_MIN: 22,      // Default CMYK speed (use INK_CONFIG_SPEEDS for dynamic)
   MAKE_READY_FIRST_MIN: 20,       // 20 min make ready for first run
   MAKE_READY_SUBSEQUENT_MIN: 10,  // 10 min if not changing material
 } as const;
@@ -153,6 +170,7 @@ export interface LabelOrder {
   total_label_count: number;
   estimated_meters: number | null;
   estimated_frames: number | null;
+  ink_config: LabelInkConfig;
   orientation: number;
   orientation_confirmed: boolean;
   due_date: string | null;
@@ -332,6 +350,7 @@ export interface CreateLabelOrderInput {
   notes?: string;
   quickeasy_wo_no?: string;
   orientation?: number;
+  ink_config?: LabelInkConfig;
 }
 
 export interface CreateLabelItemInput {

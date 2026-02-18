@@ -47,7 +47,8 @@ import { useLabelDielines } from '@/hooks/labels/useLabelDielines';
 import { useLabelStock } from '@/hooks/labels/useLabelStock';
 import { useLabelCustomers } from '@/hooks/labels/useClientPortal';
 import { useCustomerContacts, CustomerContact } from '@/hooks/labels/useCustomerContacts';
-import { LABEL_PRINT_CONSTANTS } from '@/types/labels';
+import { LABEL_PRINT_CONSTANTS, INK_CONFIG_LABELS, INK_CONFIG_SPEEDS } from '@/types/labels';
+import type { LabelInkConfig } from '@/types/labels';
 
 const formSchema = z.object({
   customer_id: z.string().optional(),
@@ -58,6 +59,7 @@ const formSchema = z.object({
   dieline_id: z.string().optional(),
   roll_width_mm: z.number().optional(),
   substrate_id: z.string().optional(),
+  ink_config: z.enum(['CMY', 'CMYK', 'CMYKW', 'CMYKO']).default('CMYK'),
   due_date: z.date().optional(),
   notes: z.string().optional(),
   orientation: z.number().min(1).max(8).default(1),
@@ -86,6 +88,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
       quickeasy_wo_no: '',
       notes: '',
       orientation: 1,
+      ink_config: 'CMYK' as LabelInkConfig,
     },
   });
 
@@ -157,6 +160,7 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
         due_date: data.due_date?.toISOString().split('T')[0],
         notes: data.notes || undefined,
         orientation: data.orientation ?? 1,
+        ink_config: data.ink_config,
       });
       
       setOpen(false);
@@ -409,6 +413,31 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
                         {stock?.filter(s => s.is_active).map((substrate) => (
                           <SelectItem key={substrate.id} value={substrate.id}>
                             {substrate.name} - {substrate.width_mm}mm ({substrate.current_stock_meters}m available)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="ink_config"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Ink Configuration</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select ink config" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {(Object.keys(INK_CONFIG_LABELS) as LabelInkConfig[]).map((key) => (
+                          <SelectItem key={key} value={key}>
+                            {INK_CONFIG_LABELS[key]} — {INK_CONFIG_SPEEDS[key]} m/min
                           </SelectItem>
                         ))}
                       </SelectContent>

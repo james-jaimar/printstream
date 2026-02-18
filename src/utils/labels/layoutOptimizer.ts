@@ -13,22 +13,24 @@
  * 5. Fewer runs = less changeover time = better.
  */
 
-import { LABEL_PRINT_CONSTANTS, DEFAULT_OPTIMIZATION_WEIGHTS } from '@/types/labels';
+import { LABEL_PRINT_CONSTANTS, DEFAULT_OPTIMIZATION_WEIGHTS, INK_CONFIG_SPEEDS } from '@/types/labels';
 import type { 
   LabelItem, 
   LabelDieline, 
+  LabelInkConfig,
   LayoutOption, 
   ProposedRun, 
   SlotAssignment,
   OptimizationWeights 
 } from '@/types/labels';
 
-const { MAX_FRAME_LENGTH_MM, PRESS_SPEED_M_PER_MIN, MAKE_READY_FIRST_MIN, MAKE_READY_SUBSEQUENT_MIN } = LABEL_PRINT_CONSTANTS;
+const { MAX_FRAME_LENGTH_MM, MAKE_READY_FIRST_MIN, MAKE_READY_SUBSEQUENT_MIN } = LABEL_PRINT_CONSTANTS;
 
 export interface LayoutInput {
   items: LabelItem[];
   dieline: LabelDieline;
   weights?: OptimizationWeights;
+  inkConfig?: LabelInkConfig;
 }
 
 export interface SlotConfig {
@@ -84,9 +86,10 @@ export function calculateMeters(frames: number, config: SlotConfig): number {
  * The 10-min subsequent setup applies between different orders on the same
  * substrate and is handled at the scheduling/planning level, not here.
  */
-export function calculateProductionTime(runs: ProposedRun[]): number {
+export function calculateProductionTime(runs: ProposedRun[], inkConfig?: LabelInkConfig): number {
+  const speed = INK_CONFIG_SPEEDS[inkConfig || 'CMYK'];
   const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
-  const printTimeMinutes = totalMeters / PRESS_SPEED_M_PER_MIN;
+  const printTimeMinutes = totalMeters / speed;
   const makeReadyMinutes = MAKE_READY_FIRST_MIN; // single setup for entire order
   return Math.ceil(makeReadyMinutes + printTimeMinutes);
 }
@@ -95,8 +98,9 @@ export function calculateProductionTime(runs: ProposedRun[]): number {
  * Calculate print-only time for a single run (no make-ready).
  * Used when storing per-run durations in the database.
  */
-export function calculateRunPrintTime(run: ProposedRun): number {
-  return Math.ceil(run.meters / PRESS_SPEED_M_PER_MIN);
+export function calculateRunPrintTime(run: ProposedRun, inkConfig?: LabelInkConfig): number {
+  const speed = INK_CONFIG_SPEEDS[inkConfig || 'CMYK'];
+  return Math.ceil(run.meters / speed);
 }
 
 /**

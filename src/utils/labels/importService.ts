@@ -103,7 +103,8 @@ async function importOrder(
         roll_width_mm: order.roll_width_mm || null,
         total_label_count: totalLabels,
         notes: order.raw_notes || null,
-        status: 'quote'
+        status: 'quote',
+        ink_config: 'CMYK'
       })
       .select()
       .single();
