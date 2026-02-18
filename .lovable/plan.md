@@ -1,54 +1,58 @@
 
 
-## Fix: VPS Page Size and Missing Label (11 of 12)
+## Fix: Page Dimensions and Dieline Preview Width
 
-### Root Cause
+### Two Issues
 
-The edge function sends the dieline's `horizontal_gap_mm: 3` and `vertical_gap_mm: 3` to the VPS, but also calculates page dimensions **without** gaps (cell size x grid count). The VPS then applies the gap values on top of the already-tight page dimensions, which:
+**Issue 1: Edge function calculates wrong page height (300mm instead of 309mm)**
 
-1. **Reduces the page height**: The VPS subtracts gap space from the available area, resulting in 306mm instead of 309mm (lost 3mm = one vertical gap).
-2. **Drops one label**: With reduced space, the VPS can only fit 11 labels instead of 12 (4 columns x 3 rows).
+The edge function derives cell size from `bleed_left_mm`, `bleed_right_mm`, `bleed_top_mm`, `bleed_bottom_mm` fields, which can be null or zero depending on how the dieline was created. The correct approach (as you described) is to derive bleed from the gap values:
 
-The dieline for this order is `70x100mm` with `1.5mm` bleed on all sides:
-- Cell size: 73mm x 103mm
-- Expected page: 73 x 4 = **292mm** wide, 103 x 3 = **309mm** tall
-- Actual output: 292 x **306mm** (3mm short = one `vertical_gap_mm`)
+- `horizontal_gap_mm` (3mm) / 2 = 1.5mm bleed left + 1.5mm bleed right
+- `vertical_gap_mm` (3mm) / 2 = 1.5mm bleed top + 1.5mm bleed bottom
 
-### The Fix
+This way, the cell size is always `label_width + gap` and `label_height + gap`, regardless of whether separate bleed fields are populated.
 
-Since labels are butted together on the roll (no gaps in production), the edge function should **zero out the gap values** in the payload sent to the VPS. The page dimensions are already calculated correctly without gaps.
+**Issue 2: Dieline form shows "Total width: 289mm" instead of 292mm**
+
+The formula is `columns * label_width + (columns - 1) * gap`, which treats gaps as *between* labels only. The correct formula is `(label_width + gap) * columns`, because each label carries its own bleed (half the gap) on each side, so every label cell is `label + gap` wide, and cells butt together.
 
 ### Changes
 
-**File: `supabase/functions/label-impose/index.ts`**
+**File: `supabase/functions/label-impose/index.ts` (lines 161-168)**
 
-In the VPS payload construction (around line 170-175), override the gap values to zero:
+Replace the bleed-based calculation with gap-based:
 
 ```typescript
-const vpsPayload = JSON.stringify({
-  dieline: {
-    ...imposeRequest.dieline,
-    roll_width_mm: pageWidth,
-    page_height_mm: pageHeight,
-    horizontal_gap_mm: 0,  // Labels are butted together on roll
-    vertical_gap_mm: 0,    // Page dimensions already account for exact fit
-  },
-  slots: slotsWithRotation,
-  meters: 0,
-  include_dielines: imposeRequest.include_dielines,
-  upload_config: uploadConfig,
-  callback_config: callbackConfig,
-});
+// Calculate page dimensions: cell = label + gap (gap = bleed left + bleed right)
+const d = imposeRequest.dieline;
+const cellWidth = d.label_width_mm + d.horizontal_gap_mm;
+const cellHeight = d.label_height_mm + d.vertical_gap_mm;
+const pageWidth = cellWidth * d.columns_across;
+const pageHeight = cellHeight * d.rows_around;
 ```
 
-This ensures:
-- Page dimensions remain 292 x 309mm (correct)
-- VPS places all 12 labels (4x3) without subtracting gap space
-- Labels are positioned edge-to-edge as required for roll printing
+For the 70x100mm / 4-across / 3-around / 3mm gaps example:
+- cellWidth = 70 + 3 = 73mm, pageWidth = 73 x 4 = **292mm**
+- cellHeight = 100 + 3 = 103mm, pageHeight = 103 x 3 = **309mm**
+- 12 labels on the page
 
-### Files
+**File: `src/components/labels/dielines/DielineFormDialog.tsx` (line 107-108)**
+
+Change the totalWidth formula:
+
+```typescript
+const totalWidth = (formData.label_width_mm + (formData.horizontal_gap_mm ?? 3)) * formData.columns_across;
+```
+
+For the same dieline: `(70 + 3) * 4 = 292mm` (correct).
+
+Also add a totalHeight preview so operators can see both dimensions at a glance.
+
+### Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/label-impose/index.ts` | Zero out `horizontal_gap_mm` and `vertical_gap_mm` in VPS payload |
+| `supabase/functions/label-impose/index.ts` | Use `label + gap` for cell size instead of `label + bleed fields` |
+| `src/components/labels/dielines/DielineFormDialog.tsx` | Fix totalWidth formula, add totalHeight display |
 
