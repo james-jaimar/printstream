@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
       for (let row = 0; row < rowsAround; row++) {
         expandedSlots.push({
           ...slot,
-          slot: (row * columnsAcross) + slot.slot,
+          slot: (row * columnsAcross) + slot.slot + 1, // 1-based for VPS
         });
       }
     }
