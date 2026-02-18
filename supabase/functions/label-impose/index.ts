@@ -172,6 +172,8 @@ Deno.serve(async (req) => {
         ...imposeRequest.dieline,
         roll_width_mm: pageWidth,
         page_height_mm: pageHeight,
+        horizontal_gap_mm: 0,  // Labels are butted together on roll
+        vertical_gap_mm: 0,    // Page dimensions already account for exact fit
       },
       slots: slotsWithRotation,
       meters: 0,
