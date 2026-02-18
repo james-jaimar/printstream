@@ -1,86 +1,78 @@
 
 
-## Bulk Import Customers and Contacts from Excel
+## Labels Division Users — Group-Based Access and Auto-Routing
 
 ### Overview
 
-Build a client-side Excel import feature on the Customers page that parses the uploaded spreadsheet, groups rows by company name, creates one `label_customers` record per unique company, and creates `label_customer_contacts` records for each contact row -- handling multiple email addresses per contact.
+Create a "Labels" user group in the existing `user_groups` system. Users assigned to this group will:
+- Be redirected straight to `/labels` on login (bypassing the app selector)
+- Have the Labels Division as their home base
+- Be able to view Tracker/Printstream in read-only mode (no changes needed to those routes for now — just the routing logic)
 
-### Data Mapping
+No new database tables or roles are needed. We leverage the existing `user_groups` + `user_group_memberships` infrastructure.
 
-| Excel Column | Maps To | Table |
-|---|---|---|
-| Company | `company_name` | `label_customers` |
-| Post Address / Street Address | `billing_address` (street preferred, fall back to post) | `label_customers` |
-| Rep | `notes` (stored as "Rep: {name}") | `label_customers` |
-| Contact | `name` | `label_customer_contacts` |
-| E-mail | `email` (multiple emails joined with `;`) | `label_customer_contacts` |
-| Telephone | `phone` (combined with mobile if both exist) | `label_customer_contacts` |
-| Mobile | `phone` (or appended to telephone) | `label_customer_contacts` |
-| Position | `role` | `label_customer_contacts` |
+### Step 1: Create the "Labels" User Group
 
-### Multiple Email Handling
+Insert a new group via the Supabase insert tool:
 
-Emails separated by `;`, `,`, or spaces will be stored as a single semicolon-delimited string in the `email` field (e.g. `info@bestbranding.co.za;bestbranding@gmail.com`). When sending notifications/proofs, the system will split on `;` and send to all addresses. The first contact per company is marked as `is_primary = true`.
-
-### Duplicate Prevention
-
-Before inserting, the import will check existing customers by `company_name` (case-insensitive match). If a company already exists, new contacts will be added to the existing customer rather than creating a duplicate.
-
-### New Files
-
-1. **`src/utils/labels/customerImport.ts`** -- Pure parsing logic:
-   - Read XLS using the existing `xlsx` dependency
-   - Group rows by company name
-   - Normalize emails (split on `;`, `,`, space; trim; rejoin with `;`)
-   - Combine telephone + mobile into phone field
-   - Return structured data ready for insert
-
-2. **`src/components/labels/customers/CustomerImportDialog.tsx`** -- UI dialog:
-   - File upload (accept `.xls`, `.xlsx`)
-   - Preview parsed data: number of companies, contacts, contacts with multiple emails
-   - "Import" button with progress
-   - Results summary: created, skipped (duplicates), errors
-
-### Modified Files
-
-3. **`src/pages/labels/LabelsCustomers.tsx`** -- Add "Import" button next to "New Customer" in the header, opening the import dialog.
-
-4. **`src/hooks/labels/useCustomerImport.ts`** -- Hook that handles the import transaction:
-   - Fetches existing customers to check for duplicates
-   - Batch-inserts new customers (groups of 50)
-   - Batch-inserts contacts for each customer
-   - Returns stats (created, skipped, errors)
-   - Invalidates customer queries on completion
-
-### Technical Details
-
-- Uses the existing `xlsx` package (already installed) for parsing
-- No database schema changes needed -- `email` field is already `text` so it can hold semicolon-delimited addresses
-- Contacts without a name are skipped (some rows have empty Contact fields)
-- Contacts without an email still get imported (phone-only contacts are valid)
-- The first contact per company gets `is_primary = true`; subsequent contacts get `is_primary = false`
-- All imported contacts default to `receives_proofs = true`, `receives_notifications = true`, `can_approve_proofs = true`
-- Import processes client-side with batch inserts to Supabase (no edge function needed)
-
-### Import Flow
-
-```text
-Upload .xls --> Parse with xlsx --> Group by Company
-    |
-    v
-Check existing customers (case-insensitive match)
-    |
-    v
-For each new company:
-  1. Insert into label_customers
-  2. Insert all contacts into label_customer_contacts
-    |
-    v
-For each existing company:
-  1. Insert new contacts only (skip if name+email match exists)
-    |
-    v
-Show results: X companies created, Y contacts added, Z skipped
+```sql
+INSERT INTO user_groups (name, description, permissions)
+VALUES ('Labels', 'Labels Division staff — orders, proofing, production', '{"labels_access": true}'::jsonb);
 ```
+
+Admins can then assign users to this group through the existing user management UI.
+
+### Step 2: Detect Labels Group Membership
+
+**File: `src/hooks/tracker/useUserRole.tsx`**
+
+Add a new derived property `isLabelsUser` that checks if the user belongs to the "Labels" group. The hook already fetches `groupMemberships` with group names, so we just need to add:
+
+```typescript
+const isInLabelsGroup = groupNames.some(name => name.toLowerCase() === 'labels');
+```
+
+And expose `isLabelsUser` in the return object.
+
+### Step 3: Auto-Redirect Labels Users on Login
+
+**File: `src/pages/Index.tsx`**
+
+After existing operator redirects, add a check for Labels group membership. If the user is a Labels user (and not an admin/manager), redirect to `/labels`:
+
+```typescript
+if (isLabelsUser && !isAdmin && !isManager) {
+  navigate('/labels');
+  return;
+}
+```
+
+This requires the `useUserRole` hook to expose `isLabelsUser`, which we add in Step 2.
+
+### Step 4: Update AppSelector for Labels-Only Users
+
+**File: `src/pages/AppSelector.tsx`**
+
+Since Labels-only users go straight to `/labels`, they won't normally see the AppSelector. But if they navigate back to `/`, the existing redirect in Index.tsx will send them to `/labels` again. No changes needed here.
+
+### Step 5: Update RoleAwareLayout for Labels Users
+
+**File: `src/components/tracker/RoleAwareLayout.tsx`**
+
+If a Labels user navigates to `/tracker`, they should still be able to view it (read-only per your preference). The existing `RoleAwareLayout` will default them to the dashboard view, which is fine. No blocking needed.
+
+### Summary of File Changes
+
+| File | Change |
+|---|---|
+| `src/hooks/tracker/useUserRole.tsx` | Add `isLabelsUser` boolean based on "Labels" group membership; expose in return |
+| `src/pages/Index.tsx` | Add Labels user redirect to `/labels` after operator checks |
+| Database | Insert "Labels" user group |
+
+### What This Enables
+
+- Assign any existing staff user to the "Labels" group via admin user management
+- They auto-land on the Labels dashboard on login
+- They can still browse Tracker/Printstream if needed (read-only intent, no enforcement yet)
+- Admins/managers with Labels group membership still see the full app selector (they're not restricted)
 
