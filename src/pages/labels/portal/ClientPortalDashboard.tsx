@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useMemo, useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -191,6 +191,15 @@ export default function ClientPortalDashboard() {
   const { contact, logout } = useClientAuth();
   const { data: orders, isLoading } = useClientPortalOrders();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+  const ordersRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to orders section when ?view=orders is set
+  useEffect(() => {
+    if (searchParams.get('view') === 'orders' && !isLoading && ordersRef.current) {
+      ordersRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [searchParams, isLoading]);
 
   const handleLogout = () => {
     logout();
@@ -460,7 +469,7 @@ export default function ClientPortalDashboard() {
                 )}
 
                 {/* ─── Two-Column: Recent Orders + Tracking Widget ─── */}
-                <section className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                <section ref={ordersRef} id="orders" className="grid grid-cols-1 lg:grid-cols-5 gap-6 scroll-mt-24">
                   {/* Recent Orders Table — 3 cols */}
                   <div className="lg:col-span-3 space-y-4">
                     <div className="flex items-center gap-2.5">
