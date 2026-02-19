@@ -35,6 +35,7 @@ import { DualArtworkUploadZone } from '../items/DualArtworkUploadZone';
 import { LabelItemsGrid } from '../items/LabelItemsGrid';
 import { LabelRunsCard } from '../LabelRunsCard';
 import { LayoutOptimizer } from '../LayoutOptimizer';
+import { AddLabelItemDialog } from '../AddLabelItemDialog';
 import { SendProofingDialog } from '../proofing/SendProofingDialog';
 import { RequestArtworkDialog } from '../proofing/RequestArtworkDialog';
 import { runPreflight, getPageBoxes, splitPdf } from '@/services/labels/vpsApiService';
@@ -100,9 +101,10 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     );
     
     if (artworkTab === 'proof') {
-      // Proof view: items with proof artwork or legacy artwork_pdf_url (but not print-only items)
+      // Proof view: items with proof artwork, legacy artwork, OR placeholders (no artwork at all)
       return visibleItems.filter(item => 
-        item.proof_pdf_url || (item.artwork_pdf_url && !item.print_pdf_url)
+        item.proof_pdf_url || (item.artwork_pdf_url && !item.print_pdf_url) ||
+        (!item.proof_pdf_url && !item.artwork_pdf_url && !item.print_pdf_url) // placeholders
       );
     } else {
       // Print-ready view: show ALL visible items so admin can see which still need print artwork
@@ -110,10 +112,9 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     }
   }, [order?.items, artworkTab]);
 
-  // Items with any artwork (proof or print-ready) for AI Layout Optimizer
+  // Items eligible for AI Layout Optimizer (includes placeholders with no artwork)
   const layoutEligibleItems = useMemo(() => {
     return (order?.items || []).filter(item => 
-      (item.print_pdf_url || item.proof_pdf_url || item.artwork_pdf_url) &&
       !(item.page_count > 1 && !item.parent_item_id)
     );
   }, [order?.items]);
@@ -244,6 +245,39 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             });
             continue;
           }
+        }
+
+        // PROOF UPLOAD or unmatched PRINT: Check for placeholder match by name
+        const placeholderMatch = order.items?.find(item => {
+          const isPlaceholder = !item.proof_pdf_url && !item.artwork_pdf_url && !item.print_pdf_url;
+          return isPlaceholder && normalizeItemName(item.name) === normalizedFileName;
+        });
+
+        if (placeholderMatch) {
+          // Fill placeholder with artwork
+          updateItem.mutate({
+            id: placeholderMatch.id,
+            updates: {
+              ...(isProof
+                ? { proof_pdf_url: file.url, artwork_pdf_url: file.url, artwork_thumbnail_url: file.thumbnailUrl }
+                : { print_pdf_url: file.url, print_pdf_status: 'ready' as const, print_thumbnail_url: file.thumbnailUrl }),
+              width_mm: file.width_mm ?? order.dieline?.label_width_mm,
+              height_mm: file.height_mm ?? order.dieline?.label_height_mm,
+              preflight_status: file.preflightStatus,
+              preflight_report: file.preflightReport as any,
+              needs_rotation: file.needs_rotation ?? false,
+              page_count: file.page_count ?? 1,
+            }
+          });
+          toast.success(`Matched "${file.name}" to placeholder "${placeholderMatch.name}"`);
+          
+          // Still run VPS analysis on matched placeholder
+          const pdfUrl = file.url;
+          if (pdfUrl) {
+            getPageBoxes(pdfUrl, placeholderMatch.id).catch(() => {});
+            runPreflight({ pdf_url: pdfUrl, item_id: placeholderMatch.id }).catch(() => {});
+          }
+          continue;
         }
 
         // Create new item - route fields based on isProof
@@ -729,11 +763,14 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
 
               {/* Label Items Section */}
               <div className="space-y-4">
-                <div>
-                  <h2 className="text-lg font-semibold">Label Items</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {(() => { const count = order.items?.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length || 0; return `${count} artwork${count !== 1 ? 's' : ''} in this order`; })()}
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold">Label Items</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {(() => { const count = order.items?.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length || 0; return `${count} artwork${count !== 1 ? 's' : ''} in this order`; })()}
+                    </p>
+                  </div>
+                  <AddLabelItemDialog orderId={order.id} onSuccess={() => refetch()} />
                 </div>
 
                 {/* Dual Upload Zone */}
