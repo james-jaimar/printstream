@@ -124,7 +124,7 @@ export function scoreLayout(
  * round-robin to ensure no empty slots.
  */
 function fillAllSlots(
-  itemSlots: { item_id: string; quantity: number }[],
+  itemSlots: { item_id: string; quantity: number; needs_rotation?: boolean }[],
   totalSlots: number
 ): SlotAssignment[] {
   if (itemSlots.length === 0) return [];
@@ -137,6 +137,7 @@ function fillAllSlots(
       slot: s,
       item_id: source.item_id,
       quantity_in_slot: source.quantity, // placeholder, adjusted below
+      needs_rotation: source.needs_rotation || false,
     });
   }
   
@@ -206,14 +207,14 @@ function balanceSlotQuantities(
   };
   
   // Build remainder assignments for items that had more than minQty
-  const remainderItemSlots: { item_id: string; quantity: number }[] = [];
+  const remainderItemSlots: { item_id: string; quantity: number; needs_rotation?: boolean }[] = [];
   const seen = new Set<string>();
   for (const a of assignments) {
     if (seen.has(a.item_id)) continue;
     seen.add(a.item_id);
     const remainder = a.quantity_in_slot - minQty;
     if (remainder > 0) {
-      remainderItemSlots.push({ item_id: a.item_id, quantity: remainder });
+      remainderItemSlots.push({ item_id: a.item_id, quantity: remainder, needs_rotation: a.needs_rotation });
     }
   }
   
@@ -233,6 +234,7 @@ function createGangedRuns(items: LabelItem[], config: SlotConfig): ProposedRun[]
   const itemSlots = items.slice(0, config.totalSlots).map(item => ({
     item_id: item.id,
     quantity: item.quantity,
+    needs_rotation: item.needs_rotation || false,
   }));
   
   const assignments = fillAllSlots(itemSlots, config.totalSlots);
@@ -259,6 +261,7 @@ function createSingleItemRun(
       slot: s,
       item_id: item.id,
       quantity_in_slot: qty,
+      needs_rotation: item.needs_rotation || false,
     });
     remaining -= qty;
   }
@@ -331,6 +334,7 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
       const itemSlots = batch.map(item => ({
         item_id: item.id,
         quantity: level,
+        needs_rotation: item.needs_rotation || false,
       }));
       
       // Fill all slots (round-robin if fewer items than slots)
@@ -372,6 +376,7 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
         const itemSlots = batch.map(item => ({
           item_id: item.id,
           quantity: qty,
+          needs_rotation: item.needs_rotation || false,
         }));
         
         const assignments = fillAllSlots(itemSlots, config.totalSlots);
@@ -398,7 +403,7 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
   for (const item of items) {
     const rem = remaining.get(item.id) || 0;
     if (rem > 0) {
-      const itemSlots = [{ item_id: item.id, quantity: rem }];
+      const itemSlots = [{ item_id: item.id, quantity: rem, needs_rotation: item.needs_rotation || false }];
       const assignments = fillAllSlots(itemSlots, config.totalSlots);
       const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
       const frames = calculateFramesForSlot(maxSlotQty, config);

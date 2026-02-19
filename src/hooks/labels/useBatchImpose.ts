@@ -183,7 +183,7 @@ export function useBatchImpose(
             slot: slot.slot,
             item_id: slot.item_id,
             quantity_in_slot: slot.quantity_in_slot,
-            needs_rotation: slot.needs_rotation,
+            needs_rotation: item?.needs_rotation ?? slot.needs_rotation ?? false,
             pdf_url: item?.print_pdf_url || '',
           };
         });
