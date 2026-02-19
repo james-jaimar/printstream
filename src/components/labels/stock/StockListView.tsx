@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -9,7 +9,6 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { MoreHorizontal, TrendingUp, Eye, Barcode, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { MoreHorizontal, TrendingUp, Eye, Barcode, Pencil, Trash2, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { useDeleteLabelStock } from '@/hooks/labels/useLabelStock';
 import type { LabelStock } from '@/types/labels';
 
@@ -38,9 +37,56 @@ interface StockListViewProps {
   onEdit: (stock: LabelStock) => void;
 }
 
+type SortKey = 'name' | 'substrate_type' | 'finish' | 'glue_type' | 'width_mm' | 'current_stock_meters' | 'reorder_level_meters' | 'cost_per_meter';
+type SortDir = 'asc' | 'desc';
+
+const SUBSTRATE_COLORS: Record<string, string> = {
+  'PP': 'bg-blue-100 text-blue-800 border-blue-200',
+  'PE': 'bg-purple-100 text-purple-800 border-purple-200',
+  'PET': 'bg-teal-100 text-teal-800 border-teal-200',
+  'Vinyl': 'bg-orange-100 text-orange-800 border-orange-200',
+  'Semi Gloss': 'bg-pink-100 text-pink-800 border-pink-200',
+  'Paper': 'bg-amber-100 text-amber-800 border-amber-200',
+};
+
+const GLUE_COLORS: Record<string, string> = {
+  'Hot Melt': 'bg-red-100 text-red-800 border-red-200',
+  'Acrylic': 'bg-cyan-100 text-cyan-800 border-cyan-200',
+};
+
 export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode, onEdit }: StockListViewProps) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const deleteMutation = useDeleteLabelStock();
+
+  const sortedStock = useMemo(() => {
+    if (!sortKey) return stock;
+    return [...stock].sort((a, b) => {
+      const aVal = a[sortKey];
+      const bVal = b[sortKey];
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+      const cmp = typeof aVal === 'string' ? aVal.localeCompare(bVal as string) : (aVal as number) - (bVal as number);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [stock, sortKey, sortDir]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      if (sortDir === 'asc') setSortDir('desc');
+      else { setSortKey(null); setSortDir('asc'); }
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ column }: { column: SortKey }) => {
+    if (sortKey !== column) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
 
   const getStockLevel = (current: number, reorder: number) => {
     const pct = (current / reorder) * 100;
@@ -69,20 +115,36 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Finish</TableHead>
-              <TableHead>Glue</TableHead>
-              <TableHead className="text-right">Width</TableHead>
-              <TableHead className="text-right">Stock</TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
+                <div className="flex items-center">Name <SortIcon column="name" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('substrate_type')}>
+                <div className="flex items-center">Type <SortIcon column="substrate_type" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('finish')}>
+                <div className="flex items-center">Finish <SortIcon column="finish" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('glue_type')}>
+                <div className="flex items-center">Glue <SortIcon column="glue_type" /></div>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('width_mm')}>
+                <div className="flex items-center justify-end">Width <SortIcon column="width_mm" /></div>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('current_stock_meters')}>
+                <div className="flex items-center justify-end">Stock <SortIcon column="current_stock_meters" /></div>
+              </TableHead>
               <TableHead className="w-[140px]">Level</TableHead>
-              <TableHead className="text-right">Reorder</TableHead>
-              <TableHead className="text-right">Cost/m</TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('reorder_level_meters')}>
+                <div className="flex items-center justify-end">Reorder <SortIcon column="reorder_level_meters" /></div>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('cost_per_meter')}>
+                <div className="flex items-center justify-end">Cost/m <SortIcon column="cost_per_meter" /></div>
+              </TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {stock.map((item) => {
+            {sortedStock.map((item) => {
               const level = getStockLevel(item.current_stock_meters, item.reorder_level_meters);
               const pct = Math.min((item.current_stock_meters / item.reorder_level_meters) * 100, 200);
               return (
@@ -98,10 +160,20 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{item.substrate_type}</Badge>
+                    <Badge className={`border ${SUBSTRATE_COLORS[item.substrate_type] ?? 'bg-secondary text-secondary-foreground'}`}>
+                      {item.substrate_type}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{item.finish}</TableCell>
-                  <TableCell className="text-muted-foreground">{item.glue_type ?? '—'}</TableCell>
+                  <TableCell>
+                    {item.glue_type ? (
+                      <Badge className={`border ${GLUE_COLORS[item.glue_type] ?? 'bg-secondary text-secondary-foreground'}`}>
+                        {item.glue_type}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right">{item.width_mm}mm</TableCell>
                   <TableCell className="text-right font-medium">
                     <div className="flex items-center justify-end gap-1">
