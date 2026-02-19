@@ -1,13 +1,14 @@
 /**
  * Low Stock Alert Banner
- * Displays warning when substrate stock is below reorder level
+ * Collapsible warning when substrate stock is below reorder level
  */
 
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLowStockAlerts } from '@/hooks/labels/useLabelStock';
 
 interface LowStockAlertProps {
@@ -16,6 +17,7 @@ interface LowStockAlertProps {
 
 export function LowStockAlert({ compact = false }: LowStockAlertProps) {
   const { data: lowStock, isLoading } = useLowStockAlerts();
+  const [open, setOpen] = useState(false);
 
   if (isLoading || !lowStock || lowStock.length === 0) {
     return null;
@@ -38,30 +40,31 @@ export function LowStockAlert({ compact = false }: LowStockAlertProps) {
   }
 
   return (
-    <Alert variant="destructive">
-      <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>Low Stock Warning</AlertTitle>
-      <AlertDescription>
-        <p className="mb-3">
-          The following substrates are below their reorder levels:
-        </p>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {lowStock.map((stock) => (
-            <Badge
-              key={stock.id}
-              variant="outline"
-              className="border-destructive text-destructive"
-            >
-              {stock.name} ({stock.current_stock_meters.toFixed(0)}m / {stock.reorder_level_meters}m)
-            </Badge>
-          ))}
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors text-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <span className="font-medium">
+            Low Stock: <strong>{lowStock.length}</strong> item{lowStock.length !== 1 ? 's' : ''} below reorder level
+          </span>
+          <ChevronDown className={`h-4 w-4 ml-auto shrink-0 text-amber-600 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1 px-3 py-2 rounded-b-lg border border-t-0 border-amber-200 bg-amber-50/50">
+          <div className="flex flex-wrap gap-1.5">
+            {lowStock.map((stock) => (
+              <Badge
+                key={stock.id}
+                variant="outline"
+                className="border-amber-300 text-amber-800 bg-white/60 text-xs"
+              >
+                {stock.name} ({stock.current_stock_meters.toFixed(0)}m / {stock.reorder_level_meters}m)
+              </Badge>
+            ))}
+          </div>
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/labels/stock">
-            View Stock Management
-          </Link>
-        </Button>
-      </AlertDescription>
-    </Alert>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
