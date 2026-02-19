@@ -770,7 +770,13 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       {(() => { const count = order.items?.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length || 0; return `${count} artwork${count !== 1 ? 's' : ''} in this order`; })()}
                     </p>
                   </div>
-                  <AddLabelItemDialog orderId={order.id} onSuccess={() => refetch()} />
+                  <AddLabelItemDialog
+                    orderId={order.id}
+                    onSuccess={() => refetch()}
+                    dielineWidth={order.dieline?.label_width_mm}
+                    dielineHeight={order.dieline?.label_height_mm}
+                    existingItemCount={order.items?.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length || 0}
+                  />
                 </div>
 
                 {/* Dual Upload Zone */}

@@ -1,8 +1,5 @@
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Plus, Upload } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,63 +9,58 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { useCreateLabelItem } from '@/hooks/labels/useLabelItems';
-
-const formSchema = z.object({
-  name: z.string().min(1, 'Item name is required'),
-  quantity: z.number().min(1, 'Quantity must be at least 1'),
-  width_mm: z.number().optional(),
-  height_mm: z.number().optional(),
-  notes: z.string().optional(),
-});
-
-type FormData = z.infer<typeof formSchema>;
+import { toast } from 'sonner';
 
 interface AddLabelItemDialogProps {
   orderId: string;
   onSuccess?: () => void;
+  /** Auto-fill from dieline template */
+  dielineWidth?: number;
+  dielineHeight?: number;
+  /** How many items already exist (for naming Page N+1, N+2…) */
+  existingItemCount?: number;
 }
 
-export function AddLabelItemDialog({ orderId, onSuccess }: AddLabelItemDialogProps) {
+export function AddLabelItemDialog({
+  orderId,
+  onSuccess,
+  dielineWidth,
+  dielineHeight,
+  existingItemCount = 0,
+}: AddLabelItemDialogProps) {
   const [open, setOpen] = useState(false);
+  const [count, setCount] = useState(1);
+  const [quantity, setQuantity] = useState(1);
   const createItem = useCreateLabelItem();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const form = useForm<FormData>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: '',
-      quantity: 1000,
-      notes: '',
-    },
-  });
+  async function handleSubmit() {
+    if (count < 1 || quantity < 1) return;
+    setIsSubmitting(true);
 
-  async function onSubmit(data: FormData) {
     try {
-      await createItem.mutateAsync({
-        order_id: orderId,
-        name: data.name,
-        quantity: data.quantity,
-        width_mm: data.width_mm,
-        height_mm: data.height_mm,
-        notes: data.notes,
-      });
-      
+      for (let i = 0; i < count; i++) {
+        await createItem.mutateAsync({
+          order_id: orderId,
+          name: `Page ${existingItemCount + i + 1}`,
+          quantity,
+          width_mm: dielineWidth,
+          height_mm: dielineHeight,
+        });
+      }
+      toast.success(`Added ${count} placeholder${count > 1 ? 's' : ''}`);
       setOpen(false);
-      form.reset();
+      setCount(1);
+      setQuantity(1);
       onSuccess?.();
-    } catch (error) {
+    } catch {
       // Error handled by mutation
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -82,123 +74,66 @@ export function AddLabelItemDialog({ orderId, onSuccess }: AddLabelItemDialogPro
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Placeholder Item</DialogTitle>
+          <DialogTitle>Add Placeholders</DialogTitle>
           <DialogDescription>
-            Add a placeholder item for quoting. Enter name and quantity — artwork can be uploaded later.
+            Add placeholder items for quoting. Artwork can be uploaded later.
+            {dielineWidth && dielineHeight && (
+              <span className="block mt-1 text-xs">
+                Size auto-filled from dieline: {dielineWidth}×{dielineHeight}mm
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Item Name *</FormLabel>
-                  <FormControl>
-                    <Input placeholder="SKU-12345 or Flavour: Vanilla" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Number of placeholders</Label>
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={count}
+                onChange={(e) => setCount(Math.max(1, parseInt(e.target.value) || 1))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Named Page {existingItemCount + 1}
+                {count > 1 ? ` – Page ${existingItemCount + count}` : ''}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Quantity per label</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+              />
+            </div>
+          </div>
 
-            <FormField
-              control={form.control}
-              name="quantity"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Quantity *</FormLabel>
-                  <FormControl>
-                    <Input 
-                      type="number" 
-                      min={1}
-                      placeholder="1000"
-                      {...field}
-                      onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
+          {dielineWidth && dielineHeight && (
             <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="width_mm"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Width (mm)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        step="0.1"
-                        placeholder="50"
-                        {...field}
-                        onChange={(e) => field.onChange(parseFloat(e.target.value) || undefined)}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="height_mm"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Height (mm)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number"
-                        step="0.1" 
-                        placeholder="30"
-                        {...field}
-                        onChange={(e) => field.onChange(parseFloat(e.target.value) || undefined)}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">Width (mm)</Label>
+                <Input value={dielineWidth} disabled />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">Height (mm)</Label>
+                <Input value={dielineHeight} disabled />
+              </div>
             </div>
+          )}
+        </div>
 
-            <FormField
-              control={form.control}
-              name="notes"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Notes</FormLabel>
-                  <FormControl>
-                    <Textarea 
-                      placeholder="Any special instructions..."
-                      className="min-h-[60px]"
-                      {...field} 
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="p-4 border-2 border-dashed rounded-lg text-center text-muted-foreground">
-              <Upload className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">PDF upload will be available after creating the item</p>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={createItem.isPending}>
-                {createItem.isPending ? 'Adding...' : 'Add Item'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? 'Adding...' : `Add ${count} Placeholder${count > 1 ? 's' : ''}`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
