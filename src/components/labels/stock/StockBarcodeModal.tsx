@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState } from 'react';
-import JsBarcode from 'jsbarcode';
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import {
   Dialog,
   DialogContent,
@@ -9,10 +9,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Printer, Download, RefreshCw } from 'lucide-react';
+import { Printer, Download } from 'lucide-react';
 import { useUpdateLabelStock } from '@/hooks/labels/useLabelStock';
+import { mmToPoints } from '@/utils/pdf/pdfUnitHelpers';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import type { LabelStock } from '@/types/labels';
 
 interface StockBarcodeModalProps {
@@ -21,172 +21,180 @@ interface StockBarcodeModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/** Generate a unique barcode value for a stock item */
+const generateBarcodeValue = (stock: LabelStock): string => {
+  const abbr = stock.substrate_type.substring(0, 3).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `LS-${stock.width_mm}-${abbr}-${random}`;
+};
+
 export function StockBarcodeModal({ stock, open, onOpenChange }: StockBarcodeModalProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [customBarcode, setCustomBarcode] = useState('');
+  const [qrDataURL, setQrDataURL] = useState<string | null>(null);
+  const [barcodeValue, setBarcodeValue] = useState('');
+  const [labelTimestamp, setLabelTimestamp] = useState('');
+  const [saving, setSaving] = useState(false);
   const updateStockMutation = useUpdateLabelStock();
 
-  // Generate barcode value if none exists
-  const generateBarcodeValue = () => {
-    if (!stock) return '';
-    // Format: LS-{width}-{substrate_type_abbr}-{random}
-    const abbr = stock.substrate_type.substring(0, 3).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return `LS-${stock.width_mm}-${abbr}-${random}`;
-  };
-
-  const barcodeValue = stock?.barcode || customBarcode || generateBarcodeValue();
-
+  // Generate barcode + QR when modal opens
   useEffect(() => {
-    if (canvasRef.current && barcodeValue && open) {
-      try {
-        JsBarcode(canvasRef.current, barcodeValue, {
-          format: 'CODE128',
-          width: 2,
-          height: 80,
-          displayValue: true,
-          fontSize: 14,
-          margin: 10,
-          background: '#ffffff',
-          lineColor: '#000000',
-        });
-      } catch (error) {
-        console.error('Barcode generation error:', error);
-      }
-    }
-  }, [barcodeValue, open]);
+    if (!stock || !open) return;
 
-  const handlePrint = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const newBarcode = generateBarcodeValue(stock);
+    setBarcodeValue(newBarcode);
+    setLabelTimestamp(new Date().toLocaleString());
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const stockInfo = stock ? `
-      <p style="margin: 0; font-weight: bold; font-size: 14px;">${stock.name}</p>
-      <p style="margin: 4px 0; color: #666; font-size: 12px;">${stock.substrate_type} • ${stock.finish} • ${stock.width_mm}mm</p>
-    ` : '';
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Stock Barcode - ${stock?.name || 'Unknown'}</title>
-          <style>
-            body {
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              margin: 0;
-              padding: 20px;
-              font-family: system-ui, sans-serif;
-            }
-            .label {
-              text-align: center;
-              padding: 16px;
-              border: 1px dashed #ccc;
-            }
-            @media print {
-              .label { border: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="label">
-            ${stockInfo}
-            <img src="${canvas.toDataURL('image/png')}" alt="Barcode" style="margin-top: 8px;" />
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            }
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
-
-  const handleDownload = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const link = document.createElement('a');
-    link.download = `barcode-${stock?.name || 'stock'}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  };
-
-  const handleSaveBarcode = async () => {
-    if (!stock || !barcodeValue) return;
-    
-    await updateStockMutation.mutateAsync({
-      id: stock.id,
-      updates: { barcode: barcodeValue },
+    const qrPayload = JSON.stringify({
+      barcode: newBarcode,
+      stock_id: stock.id,
+      name: stock.name,
+      substrate_type: stock.substrate_type,
+      width_mm: stock.width_mm,
+      gsm: stock.gsm,
+      current_stock_meters: stock.current_stock_meters,
+      generated_at: new Date().toISOString(),
     });
-  };
 
-  const handleGenerateNew = () => {
-    setCustomBarcode(generateBarcodeValue());
-  };
+    QRCode.toDataURL(qrPayload, {
+      width: 200,
+      margin: 1,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    }).then(setQrDataURL).catch(console.error);
+  }, [stock, open]);
 
   if (!stock) return null;
 
+  const stockMeters = stock.current_stock_meters.toFixed(0);
+  const gsmText = stock.gsm ? `${stock.gsm}gsm` : '';
+  const subtitleParts = [stock.substrate_type, stock.finish, gsmText, `${stock.width_mm}mm`].filter(Boolean);
+
+  const handleSaveAndPrint = async (mode: 'print' | 'download') => {
+    setSaving(true);
+    try {
+      // Save barcode value to DB (overwrites previous)
+      await updateStockMutation.mutateAsync({
+        id: stock.id,
+        updates: { barcode: barcodeValue },
+      });
+
+      // Generate the 100x50mm PDF label
+      const pdfBytes = await generateLabelPDF();
+
+      if (mode === 'print') {
+        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const printWindow = window.open(url, '_blank');
+        if (printWindow) {
+          printWindow.onload = () => {
+            printWindow.print();
+          };
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } else {
+        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `stock-label-${stock.name.replace(/\s+/g, '-')}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error('Error saving/printing label:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const generateLabelPDF = async (): Promise<Uint8Array> => {
+    const pdfDoc = await PDFDocument.create();
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    const w = mmToPoints(100);
+    const h = mmToPoints(50);
+    const page = pdfDoc.addPage([w, h]);
+
+    // Border
+    page.drawRectangle({ x: 0, y: 0, width: w, height: h, borderColor: rgb(0, 0, 0), borderWidth: 0.5 });
+
+    // --- Left side: Text info ---
+    const leftX = mmToPoints(5);
+    let textY = h - mmToPoints(6);
+
+    // Substrate name (bold, larger)
+    page.drawText(stock.name, { x: leftX, y: textY, size: 10, font: boldFont, color: rgb(0, 0, 0) });
+    textY -= 12;
+
+    // Subtitle line
+    const subtitle = subtitleParts.join(' • ');
+    page.drawText(subtitle, { x: leftX, y: textY, size: 7, font, color: rgb(0.3, 0.3, 0.3) });
+    textY -= 14;
+
+    // Stock level
+    page.drawText(`Stock: ${stockMeters}m`, { x: leftX, y: textY, size: 9, font: boldFont, color: rgb(0, 0, 0) });
+    textY -= 12;
+
+    // Barcode value
+    page.drawText(barcodeValue, { x: leftX, y: textY, size: 7, font, color: rgb(0.4, 0.4, 0.4) });
+    textY -= 12;
+
+    // Date/time
+    page.drawText(labelTimestamp, { x: leftX, y: textY, size: 6, font, color: rgb(0.5, 0.5, 0.5) });
+
+    // --- Right side: QR code ---
+    if (qrDataURL) {
+      const qrImageBytes = await fetch(qrDataURL).then(r => r.arrayBuffer());
+      const qrImage = await pdfDoc.embedPng(qrImageBytes);
+      const qrSize = mmToPoints(28);
+      const qrX = w - qrSize - mmToPoints(5);
+      const qrY = (h - qrSize) / 2;
+      page.drawImage(qrImage, { x: qrX, y: qrY, width: qrSize, height: qrSize });
+    }
+
+    return await pdfDoc.save();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Roll Barcode</DialogTitle>
-          <DialogDescription>
-            {stock.name} - {stock.substrate_type} {stock.width_mm}mm
-          </DialogDescription>
+          <DialogTitle>Stock Roll Label</DialogTitle>
+          <DialogDescription>{subtitleParts.join(' • ')}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {/* Barcode Preview */}
-          <div className="flex justify-center p-4 bg-white rounded-lg border">
-            <canvas ref={canvasRef} />
+        {/* Label Preview - mimics the 100x50mm label at 2:1 ratio */}
+        <div
+          className="mx-auto bg-white border border-border rounded-sm overflow-hidden"
+          style={{ width: '400px', height: '200px', position: 'relative' }}
+        >
+          {/* Left side: text */}
+          <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-center px-5 py-4" style={{ width: '60%' }}>
+            <p className="font-bold text-sm text-black leading-tight truncate">{stock.name}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{subtitleParts.join(' • ')}</p>
+            <p className="font-bold text-base text-black mt-3">Stock: {stockMeters}m</p>
+            <p className="text-[9px] text-muted-foreground mt-2 font-mono">{barcodeValue}</p>
+            <p className="text-[9px] text-muted-foreground mt-1">{labelTimestamp}</p>
           </div>
-
-          {/* Barcode Value Input */}
-          <div className="space-y-2">
-            <Label>Barcode Value</Label>
-            <div className="flex gap-2">
-              <Input
-                value={barcodeValue}
-                onChange={(e) => setCustomBarcode(e.target.value)}
-                placeholder="Enter or generate barcode..."
-              />
-              <Button variant="outline" size="icon" onClick={handleGenerateNew}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {stock.barcode ? 'Current saved barcode' : 'Barcode not yet saved to stock'}
-            </p>
+          {/* Right side: QR */}
+          <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center px-4" style={{ width: '40%' }}>
+            {qrDataURL && (
+              <img src={qrDataURL} alt="QR Code" className="w-[120px] h-[120px]" />
+            )}
           </div>
         </div>
 
+        <p className="text-xs text-muted-foreground text-center">
+          Saving will overwrite any existing barcode for this stock item.
+        </p>
+
         <DialogFooter className="flex-col sm:flex-row gap-2">
-          {!stock.barcode && (
-            <Button 
-              variant="outline" 
-              onClick={handleSaveBarcode}
-              disabled={updateStockMutation.isPending}
-            >
-              {updateStockMutation.isPending ? 'Saving...' : 'Save to Stock'}
-            </Button>
-          )}
-          <Button variant="outline" onClick={handleDownload}>
+          <Button variant="outline" onClick={() => handleSaveAndPrint('download')} disabled={saving}>
             <Download className="h-4 w-4 mr-2" />
-            Download
+            {saving ? 'Saving...' : 'Save & Download'}
           </Button>
-          <Button onClick={handlePrint}>
+          <Button onClick={() => handleSaveAndPrint('print')} disabled={saving}>
             <Printer className="h-4 w-4 mr-2" />
-            Print
+            {saving ? 'Saving...' : 'Save & Print'}
           </Button>
         </DialogFooter>
       </DialogContent>
