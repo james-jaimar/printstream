@@ -25,7 +25,7 @@ import {
 import { LowStockAlert } from '@/components/labels/production';
 import type { LabelStock, SubstrateType, FinishType } from '@/types/labels';
 
-const SUBSTRATE_TYPES: SubstrateType[] = ['Paper', 'PP', 'PE', 'PET', 'Vinyl'];
+const SUBSTRATE_TYPES: SubstrateType[] = ['Paper', 'Semi Gloss', 'PP', 'PE', 'PET', 'Vinyl'];
 const FINISH_TYPES: FinishType[] = ['Gloss', 'Matt', 'Uncoated'];
 
 export default function LabelsStock() {
