@@ -175,6 +175,29 @@ export function useDeleteLabelStock() {
 
   return useMutation({
     mutationFn: async (id: string): Promise<void> => {
+      // Check if any orders reference this stock
+      const { data: orders } = await supabase
+        .from('label_orders')
+        .select('id, order_number')
+        .eq('substrate_id', id)
+        .limit(5);
+
+      if (orders && orders.length > 0) {
+        const nums = orders.map(o => o.order_number).join(', ');
+        throw new Error(`Cannot delete: stock is used by order(s) ${nums}. Remove the substrate from those orders first.`);
+      }
+
+      // Delete related transactions first
+      const { error: txError } = await supabase
+        .from('label_stock_transactions')
+        .delete()
+        .eq('stock_id', id);
+
+      if (txError) {
+        console.error('Error deleting stock transactions:', txError);
+        throw txError;
+      }
+
       const { error } = await supabase
         .from('label_stock')
         .delete()
