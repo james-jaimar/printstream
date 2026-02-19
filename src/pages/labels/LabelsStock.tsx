@@ -23,10 +23,11 @@ import {
   StockListView,
 } from '@/components/labels/stock';
 import { LowStockAlert } from '@/components/labels/production';
-import type { LabelStock, SubstrateType, FinishType } from '@/types/labels';
+import type { LabelStock, SubstrateType, FinishType, GlueType } from '@/types/labels';
 
 const SUBSTRATE_TYPES: SubstrateType[] = ['Paper', 'Semi Gloss', 'PP', 'PE', 'PET', 'Vinyl'];
 const FINISH_TYPES: FinishType[] = ['Gloss', 'Matt', 'Uncoated'];
+const GLUE_TYPES: GlueType[] = ['Hot Melt', 'Acrylic'];
 
 export default function LabelsStock() {
   const [search, setSearch] = useState('');
@@ -35,6 +36,7 @@ export default function LabelsStock() {
   const [substrateFilter, setSubstrateFilter] = useState<string>('all');
   const [finishFilter, setFinishFilter] = useState<string>('all');
   const [stockLevelFilter, setStockLevelFilter] = useState<string>('all');
+  const [glueFilter, setGlueFilter] = useState<string>('all');
 
   // Modals
   const [selectedStockId, setSelectedStockId] = useState<string | null>(null);
@@ -73,11 +75,15 @@ export default function LabelsStock() {
         matchesLevel = s.current_stock_meters > s.reorder_level_meters;
       }
 
-      return matchesSearch && matchesSubstrate && matchesFinish && matchesLevel;
-    });
-  }, [stock, search, substrateFilter, finishFilter, stockLevelFilter]);
+      // Glue filter
+      const matchesGlue = glueFilter === 'all' || 
+        (glueFilter === 'none' ? s.glue_type == null : s.glue_type === glueFilter);
 
-  const activeFilterCount = [substrateFilter, finishFilter, stockLevelFilter]
+      return matchesSearch && matchesSubstrate && matchesFinish && matchesLevel && matchesGlue;
+    });
+  }, [stock, search, substrateFilter, finishFilter, stockLevelFilter, glueFilter]);
+
+  const activeFilterCount = [substrateFilter, finishFilter, stockLevelFilter, glueFilter]
     .filter(f => f !== 'all').length;
 
   const handleAddStock = (stockId: string) => {
@@ -115,6 +121,7 @@ export default function LabelsStock() {
     setSubstrateFilter('all');
     setFinishFilter('all');
     setStockLevelFilter('all');
+    setGlueFilter('all');
     setSearch('');
   };
 
@@ -167,6 +174,19 @@ export default function LabelsStock() {
               {FINISH_TYPES.map(f => (
                 <SelectItem key={f} value={f}>{f}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={glueFilter} onValueChange={setGlueFilter}>
+            <SelectTrigger className="w-[130px]">
+              <SelectValue placeholder="Glue" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Glues</SelectItem>
+              {GLUE_TYPES.map(g => (
+                <SelectItem key={g} value={g}>{g}</SelectItem>
+              ))}
+              <SelectItem value="none">No Glue</SelectItem>
             </SelectContent>
           </Select>
 
