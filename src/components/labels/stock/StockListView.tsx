@@ -72,6 +72,7 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
               <TableHead>Name</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Finish</TableHead>
+              <TableHead>Glue</TableHead>
               <TableHead className="text-right">Width</TableHead>
               <TableHead className="text-right">Stock</TableHead>
               <TableHead className="w-[140px]">Level</TableHead>
@@ -100,6 +101,7 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
                     <Badge variant="secondary">{item.substrate_type}</Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{item.finish}</TableCell>
+                  <TableCell className="text-muted-foreground">{item.glue_type ?? '—'}</TableCell>
                   <TableCell className="text-right">{item.width_mm}mm</TableCell>
                   <TableCell className="text-right font-medium">
                     <div className="flex items-center justify-end gap-1">
@@ -160,7 +162,7 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
             })}
             {stock.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                   No stock items found
                 </TableCell>
               </TableRow>
