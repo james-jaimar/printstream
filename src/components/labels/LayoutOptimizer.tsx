@@ -25,7 +25,9 @@ import {
   Zap,
   LayoutGrid,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Save,
+  RotateCcw
 } from 'lucide-react';
 import { 
   Collapsible, 
@@ -42,17 +44,21 @@ interface LayoutOptimizerProps {
   orderId: string;
   items: LabelItem[];
   dieline: LabelDieline | null;
+  savedLayout?: Record<string, any> | null;
   onLayoutApplied?: () => void;
+  onLayoutSaved?: () => void;
 }
 
 export function LayoutOptimizer({ 
   orderId, 
   items, 
   dieline,
-  onLayoutApplied 
+  savedLayout,
+  onLayoutApplied,
+  onLayoutSaved
 }: LayoutOptimizerProps) {
   const [showWeights, setShowWeights] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreview, setShowPreview] = useState(!!savedLayout);
   
   const {
     options,
@@ -66,8 +72,12 @@ export function LayoutOptimizer({
     selectOption,
     applyLayout,
     updateWeights,
-    getProductionTime
-  } = useLayoutOptimizer({ orderId, items, dieline });
+    getProductionTime,
+    isSaving,
+    hasSavedLayout,
+    saveLayout,
+    clearSavedLayout
+  } = useLayoutOptimizer({ orderId, items, dieline, savedLayout: savedLayout as any });
 
   const { prepareBulk, isProcessing: isPreparingArtwork } = usePrepareArtwork(orderId);
 
@@ -121,6 +131,13 @@ export function LayoutOptimizer({
     const success = await applyLayout();
     if (success && onLayoutApplied) {
       onLayoutApplied();
+    }
+  };
+
+  const handleSave = async () => {
+    const success = await saveLayout();
+    if (success && onLayoutSaved) {
+      onLayoutSaved();
     }
   };
 
@@ -315,7 +332,6 @@ export function LayoutOptimizer({
           </Collapsible>
         )}
 
-        {/* Summary & Apply */}
         {summary && selectedOption && (
           <div className="border-t pt-4 space-y-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -336,6 +352,41 @@ export function LayoutOptimizer({
                 <span className="text-destructive">{summary.wasteMeters.toFixed(2)}m</span>
               </div>
             </div>
+
+            {/* Save Layout for Quoting */}
+            <div className="flex gap-2">
+              <Button
+                onClick={handleSave}
+                disabled={isSaving}
+                variant={hasSavedLayout ? "outline" : "default"}
+                className="flex-1"
+              >
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                {hasSavedLayout ? 'Update Saved Layout' : 'Save Layout for Quoting'}
+              </Button>
+              {hasSavedLayout && (
+                <Button
+                  onClick={clearSavedLayout}
+                  disabled={isSaving}
+                  variant="ghost"
+                  size="icon"
+                  title="Clear saved layout"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {hasSavedLayout && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3 text-primary" />
+                Layout saved — this will persist when you close and reopen.
+              </p>
+            )}
             
             <Button 
               onClick={handleApply} 

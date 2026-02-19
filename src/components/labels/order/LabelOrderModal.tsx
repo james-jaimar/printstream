@@ -543,10 +543,12 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                         orderId={order.id}
                         items={layoutEligibleItems}
                         dieline={order.dieline || null}
+                        savedLayout={order.saved_layout as any}
                         onLayoutApplied={() => {
                           setLayoutDialogOpen(false);
                           refetch();
                         }}
+                        onLayoutSaved={() => refetch()}
                       />
                     </DialogContent>
                   </Dialog>

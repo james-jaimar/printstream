@@ -1581,6 +1581,7 @@ export type Database = {
           proof_version: number
           quickeasy_wo_no: string | null
           roll_width_mm: number | null
+          saved_layout: Json | null
           status: string
           substrate_id: string | null
           total_label_count: number
@@ -1610,6 +1611,7 @@ export type Database = {
           proof_version?: number
           quickeasy_wo_no?: string | null
           roll_width_mm?: number | null
+          saved_layout?: Json | null
           status?: string
           substrate_id?: string | null
           total_label_count?: number
@@ -1639,6 +1641,7 @@ export type Database = {
           proof_version?: number
           quickeasy_wo_no?: string | null
           roll_width_mm?: number | null
+          saved_layout?: Json | null
           status?: string
           substrate_id?: string | null
           total_label_count?: number
