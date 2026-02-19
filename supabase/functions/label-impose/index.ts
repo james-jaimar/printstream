@@ -85,12 +85,18 @@ async function preRotatePdf(
     throw new Error(`Failed to upload rotated PDF for item ${itemId}: ${uploadError.message}`);
   }
 
-  const { data: pubData } = supabase.storage
+  // Use a signed URL (bucket is private) so VPS can access it
+  const { data: signedData, error: signedError } = await supabase
+    .storage
     .from("label-files")
-    .getPublicUrl(rotatedPath);
+    .createSignedUrl(rotatedPath, 3600); // 1 hour expiry
 
-  console.log(`[label-impose] Pre-rotated PDF uploaded for item ${itemId}: ${pubData.publicUrl}`);
-  return pubData.publicUrl;
+  if (signedError || !signedData?.signedUrl) {
+    throw new Error(`Failed to create signed URL for rotated PDF: ${signedError?.message || 'no URL returned'}`);
+  }
+
+  console.log(`[label-impose] Pre-rotated PDF uploaded for item ${itemId}, signed URL created`);
+  return signedData.signedUrl;
 }
 
 Deno.serve(async (req) => {
@@ -123,7 +129,14 @@ Deno.serve(async (req) => {
 
     console.log(`[label-impose] === START run=${imposeRequest.run_id} ===`);
     console.log(`[label-impose] Dieline: ${imposeRequest.dieline.columns_across}x${imposeRequest.dieline.rows_around}`);
+    console.log(`[label-impose] Label size: ${imposeRequest.dieline.label_width_mm}x${imposeRequest.dieline.label_height_mm}mm`);
+    console.log(`[label-impose] Gaps: h=${imposeRequest.dieline.horizontal_gap_mm}mm v=${imposeRequest.dieline.vertical_gap_mm}mm`);
     console.log(`[label-impose] Slot assignments: ${imposeRequest.slot_assignments.length}`);
+
+    // Log rotation flags for each slot
+    for (const slot of imposeRequest.slot_assignments) {
+      console.log(`[label-impose]   Slot ${slot.slot}: item=${slot.item_id} needs_rotation=${slot.needs_rotation} pdf_url=${slot.pdf_url ? 'present' : 'MISSING'}`);
+    }
 
     // ─── PRE-ROTATE: rotate artwork for items that need it ───
     // Collect unique items that need rotation
