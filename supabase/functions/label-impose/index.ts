@@ -33,6 +33,66 @@ interface ImposeRequest {
   meters_to_print: number;
 }
 
+/**
+ * Pre-rotate a PDF 90° via VPS and upload the result to storage.
+ * Returns the public URL of the rotated PDF.
+ */
+async function preRotatePdf(
+  pdfUrl: string,
+  itemId: string,
+  orderId: string,
+  runId: string,
+  apiKey: string,
+  supabase: any
+): Promise<string> {
+  console.log(`[label-impose] Pre-rotating PDF for item ${itemId}: ${pdfUrl}`);
+
+  const rotateResponse = await fetch(`${VPS_PDF_API_URL}/manipulate/rotate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify({ pdf_url: pdfUrl, angle: 90 }),
+  });
+
+  if (!rotateResponse.ok) {
+    const errorText = await rotateResponse.text().catch(() => "");
+    throw new Error(`VPS rotate failed for item ${itemId}: ${rotateResponse.status} - ${errorText}`);
+  }
+
+  const rotateData = await rotateResponse.json();
+  const rotatedBase64 = rotateData.rotated_pdf_base64;
+  if (!rotatedBase64) {
+    throw new Error(`VPS rotate returned no data for item ${itemId}`);
+  }
+
+  // Decode base64 to bytes
+  const binaryString = atob(rotatedBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  // Upload to storage
+  const rotatedPath = `label-runs/${orderId}/${runId}/rotated_${itemId}_${Date.now()}.pdf`;
+  const { error: uploadError } = await supabase
+    .storage
+    .from("label-files")
+    .upload(rotatedPath, bytes, { contentType: "application/pdf", upsert: true });
+
+  if (uploadError) {
+    throw new Error(`Failed to upload rotated PDF for item ${itemId}: ${uploadError.message}`);
+  }
+
+  const { data: pubData } = supabase.storage
+    .from("label-files")
+    .getPublicUrl(rotatedPath);
+
+  console.log(`[label-impose] Pre-rotated PDF uploaded for item ${itemId}: ${pubData.publicUrl}`);
+  return pubData.publicUrl;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -64,6 +124,46 @@ Deno.serve(async (req) => {
     console.log(`[label-impose] === START run=${imposeRequest.run_id} ===`);
     console.log(`[label-impose] Dieline: ${imposeRequest.dieline.columns_across}x${imposeRequest.dieline.rows_around}`);
     console.log(`[label-impose] Slot assignments: ${imposeRequest.slot_assignments.length}`);
+
+    // ─── PRE-ROTATE: rotate artwork for items that need it ───
+    // Collect unique items that need rotation
+    const itemsNeedingRotation = new Map<string, string>(); // item_id -> pdf_url
+    for (const slot of imposeRequest.slot_assignments) {
+      if (slot.needs_rotation && slot.pdf_url && !itemsNeedingRotation.has(slot.item_id)) {
+        itemsNeedingRotation.set(slot.item_id, slot.pdf_url);
+      }
+    }
+
+    // Rotate each unique item's PDF and cache the rotated URL
+    const rotatedUrlMap = new Map<string, string>(); // item_id -> rotated_public_url
+    if (itemsNeedingRotation.size > 0) {
+      console.log(`[label-impose] Pre-rotating ${itemsNeedingRotation.size} item(s) that need rotation`);
+      for (const [itemId, pdfUrl] of itemsNeedingRotation) {
+        try {
+          const rotatedUrl = await preRotatePdf(
+            pdfUrl, itemId, imposeRequest.order_id, imposeRequest.run_id, apiKey, supabase
+          );
+          rotatedUrlMap.set(itemId, rotatedUrl);
+        } catch (rotErr) {
+          console.error(`[label-impose] Pre-rotation failed for item ${itemId}:`, rotErr);
+          throw rotErr; // Fail the whole run — don't produce squashed output
+        }
+      }
+      console.log(`[label-impose] All pre-rotations complete`);
+    }
+
+    // Swap pdf_urls for rotated items and clear rotation flag
+    const finalSlotAssignments = imposeRequest.slot_assignments.map(slot => {
+      if (slot.needs_rotation && rotatedUrlMap.has(slot.item_id)) {
+        return {
+          ...slot,
+          pdf_url: rotatedUrlMap.get(slot.item_id)!,
+          needs_rotation: false, // Already rotated
+        };
+      }
+      return slot;
+    });
+    // ─── END PRE-ROTATE ───
 
     const timestamp = Date.now();
     const basePath = `label-runs/${imposeRequest.order_id}/${imposeRequest.run_id}`;
@@ -116,7 +216,7 @@ Deno.serve(async (req) => {
     const rowsAround = imposeRequest.dieline.rows_around;
     const expandedSlots: SlotAssignment[] = [];
 
-    for (const slot of imposeRequest.slot_assignments) {
+    for (const slot of finalSlotAssignments) {
       for (let row = 0; row < rowsAround; row++) {
         expandedSlots.push({
           ...slot,
@@ -125,11 +225,12 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`[label-impose] Expanded ${imposeRequest.slot_assignments.length} column slots to ${expandedSlots.length} grid slots`);
+    console.log(`[label-impose] Expanded ${finalSlotAssignments.length} column slots to ${expandedSlots.length} grid slots`);
 
+    // All artwork is already correctly oriented — rotation is always 0
     const slotsWithRotation = expandedSlots.map(slot => ({
       ...slot,
-      rotation: slot.needs_rotation ? 90 : 0,
+      rotation: 0,
     }));
 
     const uploadConfig: Record<string, string> = {
@@ -158,7 +259,7 @@ Deno.serve(async (req) => {
       })
       .eq("id", imposeRequest.run_id);
 
-    // Calculate page dimensions: cell = label + gap (gap/2 = bleed per side, cells butt together)
+    // Calculate page dimensions: cell = label + gap
     const d = imposeRequest.dieline;
     const cellWidth = d.label_width_mm + d.horizontal_gap_mm;
     const cellHeight = d.label_height_mm + d.vertical_gap_mm;
@@ -171,10 +272,10 @@ Deno.serve(async (req) => {
       dieline: {
         ...imposeRequest.dieline,
         // Override label dims with cell size so VPS calculates correct page
-        label_width_mm: cellWidth,    // e.g. 70 + 3 = 73
-        label_height_mm: cellHeight,  // e.g. 100 + 3 = 103
-        roll_width_mm: pageWidth,     // e.g. 73 * 4 = 292
-        page_height_mm: pageHeight,   // e.g. 103 * 3 = 309
+        label_width_mm: cellWidth,
+        label_height_mm: cellHeight,
+        roll_width_mm: pageWidth,
+        page_height_mm: pageHeight,
         horizontal_gap_mm: 0,
         vertical_gap_mm: 0,
       },
@@ -208,7 +309,7 @@ Deno.serve(async (req) => {
     } catch (fetchError) {
       clearTimeout(acceptTimeout);
       if (fetchError.name === "AbortError") {
-        console.log(`[label-impose] VPS accepted request (10s timeout hit — processing asynchronously via callback)`);
+        console.log(`[label-impose] VPS accepted request (timeout hit — processing asynchronously via callback)`);
         aborted = true;
       } else {
         console.error(`[label-impose] VPS connection error:`, fetchError.message);
@@ -229,7 +330,6 @@ Deno.serve(async (req) => {
       if (response.status === 503) {
         const busyBody = await response.text().catch(() => '');
         console.warn(`[label-impose] VPS returned 503 (busy): ${busyBody.substring(0, 200)}`);
-        // Reset status back to planned so client can retry
         await supabase
           .from("label_runs")
           .update({ status: "planned", updated_at: new Date().toISOString() })
