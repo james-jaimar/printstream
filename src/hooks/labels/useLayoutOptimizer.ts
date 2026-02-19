@@ -33,15 +33,20 @@ interface UseLayoutOptimizerProps {
   orderId: string;
   items: LabelItem[];
   dieline: LabelDieline | null;
+  savedLayout?: LayoutOption | null;
 }
 
-export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimizerProps) {
+export function useLayoutOptimizer({ orderId, items, dieline, savedLayout }: UseLayoutOptimizerProps) {
   const [options, setOptions] = useState<LayoutOption[]>([]);
-  const [selectedOption, setSelectedOption] = useState<LayoutOption | null>(null);
+  const [selectedOption, setSelectedOption] = useState<LayoutOption | null>(
+    savedLayout ? savedLayout as LayoutOption : null
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [weights, setWeights] = useState<OptimizationWeights>(DEFAULT_OPTIMIZATION_WEIGHTS);
   const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasSavedLayout, setHasSavedLayout] = useState(!!savedLayout);
   
   const { mutateAsync: createRun, isPending: isCreating } = useCreateLabelRun();
 
@@ -199,6 +204,61 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
     return dieline !== null && items.length > 0;
   }, [dieline, items]);
 
+  /**
+   * Save selected layout to the order in database
+   */
+  const saveLayout = useCallback(async () => {
+    if (!selectedOption) {
+      toast.error('Please select a layout option first');
+      return false;
+    }
+    
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from('label_orders')
+        .update({ saved_layout: selectedOption as any })
+        .eq('id', orderId);
+      
+      if (error) throw error;
+      
+      setHasSavedLayout(true);
+      toast.success('Layout saved for quoting');
+      return true;
+    } catch (error) {
+      console.error('Failed to save layout:', error);
+      toast.error('Failed to save layout');
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [selectedOption, orderId]);
+
+  /**
+   * Clear saved layout from the order
+   */
+  const clearSavedLayout = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from('label_orders')
+        .update({ saved_layout: null })
+        .eq('id', orderId);
+      
+      if (error) throw error;
+      
+      setHasSavedLayout(false);
+      setSelectedOption(null);
+      setOptions([]);
+      toast.success('Saved layout cleared');
+    } catch (error) {
+      console.error('Failed to clear layout:', error);
+      toast.error('Failed to clear layout');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [orderId]);
+
   return {
     // State
     options,
@@ -210,6 +270,8 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
     canGenerate,
     aiSuggestion,
     isLoadingAI,
+    isSaving,
+    hasSavedLayout,
     
     // Actions
     generateOptions: generateLayoutOptions,
@@ -217,6 +279,8 @@ export function useLayoutOptimizer({ orderId, items, dieline }: UseLayoutOptimiz
     applyLayout,
     updateWeights: setWeights,
     getProductionTime,
-    fetchAISuggestion
+    fetchAISuggestion,
+    saveLayout,
+    clearSavedLayout
   };
 }

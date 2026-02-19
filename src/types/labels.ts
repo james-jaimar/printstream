@@ -179,6 +179,7 @@ export interface LabelOrder {
   proof_token: string | null;
   proof_version: number;
   notes: string | null;
+  saved_layout: Record<string, any> | null; // JSON column storing LayoutOption
   created_by: string | null;
   created_at: string;
   updated_at: string;
