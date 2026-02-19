@@ -251,7 +251,7 @@ export function DielineFormDialog({
           {/* Gaps */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Horizontal Gap (mm)</Label>
+              <Label>Gap Across (mm)</Label>
               <Input
                 type="number"
                 value={formData.horizontal_gap_mm ?? 3}
@@ -263,7 +263,7 @@ export function DielineFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>Vertical Gap (mm)</Label>
+              <Label>Gap Around (mm)</Label>
               <Input
                 type="number"
                 value={formData.vertical_gap_mm ?? 2.5}
