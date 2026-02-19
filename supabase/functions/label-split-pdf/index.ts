@@ -172,7 +172,7 @@ Deno.serve(async (req) => {
               parent_item_id: item_id,
               source_page_number: page.page_number,
               page_count: 1,
-              needs_rotation: false,
+              needs_rotation: parentItem?.needs_rotation ?? false,
             })
             .select("id")
             .single();
@@ -298,7 +298,7 @@ Deno.serve(async (req) => {
             artwork_source: parentItem.artwork_source || "admin",
             proofing_status: parentItem.proofing_status || "draft",
             preflight_status: "pending",
-            needs_rotation: false,
+            needs_rotation: parentItem.needs_rotation ?? false,
           })
           .eq("id", placeholderId);
 
@@ -330,7 +330,7 @@ Deno.serve(async (req) => {
             parent_item_id: item_id,
             source_page_number: page.page_number,
             page_count: 1,
-            needs_rotation: false,
+            needs_rotation: parentItem.needs_rotation ?? false,
           })
           .select("id")
           .single();
