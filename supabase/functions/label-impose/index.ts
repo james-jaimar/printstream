@@ -205,45 +205,7 @@ Deno.serve(async (req) => {
     }
     // ─── END DIMENSION AUTO-DETECTION ───
 
-    // ─── PRE-ROTATE: rotate artwork for items that need it ───
-    // Collect unique items that need rotation
-    const itemsNeedingRotation = new Map<string, string>(); // item_id -> pdf_url
-    for (const slot of imposeRequest.slot_assignments) {
-      if (slot.needs_rotation && slot.pdf_url && !itemsNeedingRotation.has(slot.item_id)) {
-        itemsNeedingRotation.set(slot.item_id, slot.pdf_url);
-      }
-    }
-
-    // Rotate each unique item's PDF and cache the rotated URL
-    const rotatedUrlMap = new Map<string, string>(); // item_id -> rotated_public_url
-    if (itemsNeedingRotation.size > 0) {
-      console.log(`[label-impose] Pre-rotating ${itemsNeedingRotation.size} item(s) that need rotation`);
-      for (const [itemId, pdfUrl] of itemsNeedingRotation) {
-        try {
-          const rotatedUrl = await preRotatePdf(
-            pdfUrl, itemId, imposeRequest.order_id, imposeRequest.run_id, apiKey, supabase
-          );
-          rotatedUrlMap.set(itemId, rotatedUrl);
-        } catch (rotErr) {
-          console.error(`[label-impose] Pre-rotation failed for item ${itemId}:`, rotErr);
-          throw rotErr; // Fail the whole run — don't produce squashed output
-        }
-      }
-      console.log(`[label-impose] All pre-rotations complete`);
-    }
-
-    // Swap pdf_urls for rotated items and clear rotation flag
-    const finalSlotAssignments = imposeRequest.slot_assignments.map(slot => {
-      if (slot.needs_rotation && rotatedUrlMap.has(slot.item_id)) {
-        return {
-          ...slot,
-          pdf_url: rotatedUrlMap.get(slot.item_id)!,
-          needs_rotation: false, // Already rotated
-        };
-      }
-      return slot;
-    });
-    // ─── END PRE-ROTATE ───
+    // ─── NO PRE-ROTATION: rotation is handled natively by VPS during placement ───
 
     const timestamp = Date.now();
     const basePath = `label-runs/${imposeRequest.order_id}/${imposeRequest.run_id}`;
@@ -296,22 +258,25 @@ Deno.serve(async (req) => {
     const rowsAround = imposeRequest.dieline.rows_around;
     const expandedSlots: SlotAssignment[] = [];
 
-    for (const slot of finalSlotAssignments) {
+    for (const slot of imposeRequest.slot_assignments) {
       for (let row = 0; row < rowsAround; row++) {
+        const gridSlot = (row * columnsAcross) + slot.slot + 1; // 1-based for VPS
+        const rotationValue = slot.needs_rotation ? 90 : 0;
         expandedSlots.push({
           ...slot,
-          slot: (row * columnsAcross) + slot.slot + 1, // 1-based for VPS
+          slot: gridSlot,
+          rotation: rotationValue,
         });
       }
     }
 
-    console.log(`[label-impose] Expanded ${finalSlotAssignments.length} column slots to ${expandedSlots.length} grid slots`);
+    console.log(`[label-impose] Expanded ${imposeRequest.slot_assignments.length} column slots to ${expandedSlots.length} grid slots`);
 
-    // All artwork is already correctly oriented — rotation is always 0
-    const slotsWithRotation = expandedSlots.map(slot => ({
-      ...slot,
-      rotation: 0,
-    }));
+    // Log rotation values being sent to VPS
+    const rotatedCount = expandedSlots.filter(s => s.rotation === 90).length;
+    console.log(`[label-impose] Rotation: ${rotatedCount}/${expandedSlots.length} slots set to 90°`);
+
+    const slotsWithRotation = expandedSlots;
 
     const uploadConfig: Record<string, string> = {
       production_upload_url: productionUploadUrl,
