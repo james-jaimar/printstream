@@ -65,8 +65,6 @@ export function StockBarcodeModal({ stock, open, onOpenChange }: StockBarcodeMod
           substrate_type: stock.substrate_type,
           width_mm: stock.width_mm,
           gsm: stock.gsm,
-          roll_number: i,
-          total_rolls: totalRolls,
           meters_remaining: metersOnRoll,
           generated_at: new Date().toISOString(),
         });
@@ -153,7 +151,7 @@ export function StockBarcodeModal({ stock, open, onOpenChange }: StockBarcodeMod
       page.drawText(subtitle, { x: leftX, y: textY, size: 7, font, color: rgb(0.3, 0.3, 0.3) });
       textY -= 14;
 
-      const rollInfo = `Roll ${roll.rollNumber} of ${totalRolls} | ${roll.meters.toFixed(0)}m`;
+      const rollInfo = `${roll.meters.toFixed(0)}m`;
       page.drawText(rollInfo, { x: leftX, y: textY, size: 9, font: boldFont, color: rgb(0, 0, 0) });
       textY -= 12;
 
@@ -182,7 +180,7 @@ export function StockBarcodeModal({ stock, open, onOpenChange }: StockBarcodeMod
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Stock Roll Labels ({totalRolls} rolls)</DialogTitle>
+          <DialogTitle>Stock Roll Labels</DialogTitle>
           <DialogDescription>{subtitleParts.join(' • ')}</DialogDescription>
         </DialogHeader>
 
@@ -195,7 +193,7 @@ export function StockBarcodeModal({ stock, open, onOpenChange }: StockBarcodeMod
             <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-center px-5 py-4" style={{ width: '60%' }}>
               <p className="font-bold text-sm text-black leading-tight truncate">{stock.name}</p>
               <p className="text-[10px] text-muted-foreground mt-0.5">{subtitleParts.join(' • ')}</p>
-              <p className="font-bold text-base text-black mt-3">Roll {previewRoll.rollNumber} of {totalRolls} | {previewRoll.meters.toFixed(0)}m</p>
+              <p className="font-bold text-base text-black mt-3">{previewRoll.meters.toFixed(0)}m</p>
               <p className="text-[9px] text-muted-foreground mt-2 font-mono">{previewRoll.barcode}</p>
               <p className="text-[9px] text-muted-foreground mt-1">{labelTimestamp}</p>
             </div>
@@ -206,7 +204,7 @@ export function StockBarcodeModal({ stock, open, onOpenChange }: StockBarcodeMod
         )}
 
         <p className="text-xs text-muted-foreground text-center">
-          {totalRolls} label{totalRolls !== 1 ? 's' : ''} will be generated — one per roll ({stock.roll_length_meters}m each).
+          {totalRolls} label{totalRolls !== 1 ? 's' : ''} will be generated.
         </p>
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
