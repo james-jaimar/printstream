@@ -81,8 +81,8 @@ export function LayoutOptimizer({
       item.proof_pdf_url || item.artwork_pdf_url || item.print_pdf_url
     );
     
-    // Items missing all artwork (blocks layout generation)
-    const missingArtwork = items.filter(item => 
+    // Placeholder items (no artwork at all)
+    const placeholders = items.filter(item => 
       !item.proof_pdf_url && !item.artwork_pdf_url && !item.print_pdf_url
     );
     
@@ -96,12 +96,16 @@ export function LayoutOptimizer({
     );
     
     return {
-      // For layout generation - only need some artwork
-      allHaveArtwork: missingArtwork.length === 0,
-      missingArtworkCount: missingArtwork.length,
+      // Placeholders - valid for generation but block apply
+      placeholderCount: placeholders.length,
+      hasPlaceholders: placeholders.length > 0,
       
-      // For apply - need print-ready
-      allPrintReady: printReady.length === items.length,
+      // For layout generation - placeholders are now allowed
+      allHaveArtwork: true, // Always allow generation
+      missingArtworkCount: 0,
+      
+      // For apply - need print-ready AND no placeholders
+      allPrintReady: printReady.length === items.length && placeholders.length === 0,
       notPrintReadyCount: notPrintReady.length,
       notPrintReadyItems: notPrintReady,
       
@@ -183,7 +187,19 @@ export function LayoutOptimizer({
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Missing Artwork Alert - Blocks layout generation */}
+        {/* Placeholder Items Info */}
+        {artworkReadiness.hasPlaceholders && (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Placeholder Items</AlertTitle>
+            <AlertDescription>
+              {artworkReadiness.placeholderCount} item{artworkReadiness.placeholderCount !== 1 ? 's are' : ' is'} placeholder{artworkReadiness.placeholderCount !== 1 ? 's' : ''} — upload artwork before applying this layout to production.
+              You can still generate and preview layouts for quoting.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Missing Artwork Alert - no longer blocks generation */}
         {!artworkReadiness.allHaveArtwork && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
@@ -329,6 +345,11 @@ export function LayoutOptimizer({
             >
               {isApplying ? (
                 <>Creating Runs...</>
+              ) : artworkReadiness.hasPlaceholders ? (
+                <>
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                  Upload Artwork First ({artworkReadiness.placeholderCount} placeholder{artworkReadiness.placeholderCount !== 1 ? 's' : ''})
+                </>
               ) : !artworkReadiness.allPrintReady ? (
                 <>
                   <AlertTriangle className="h-4 w-4 mr-2" />

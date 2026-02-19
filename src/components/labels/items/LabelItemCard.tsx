@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2, Crop, FileCheck } from 'lucide-react';
+import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2, Crop, FileCheck, ImageOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -86,6 +86,7 @@ export function LabelItemCard({
   
   const printStatus = printStatusConfig[item.print_pdf_status || 'pending'];
   const hasProof = !!(item.proof_pdf_url || item.artwork_pdf_url);
+  const isPlaceholder = !hasProof && !item.print_pdf_url;
   const isPrintReady = item.print_pdf_status === 'ready';
   const needsCrop = item.requires_crop || item.print_pdf_status === 'needs_crop';
 
@@ -104,11 +105,19 @@ export function LabelItemCard({
   };
 
   return (
-    <Card className="overflow-hidden">
+    <Card className={cn("overflow-hidden", isPlaceholder && "border-2 border-dashed border-muted-foreground/30")}>
       <CardContent className="p-0">
         {/* Thumbnail / Preview */}
-        <div className="relative aspect-[4/3] bg-muted flex items-center justify-center border-b">
-          {thumbnailLoading ? (
+        <div className={cn(
+          "relative aspect-[4/3] flex items-center justify-center border-b",
+          isPlaceholder ? "bg-muted/50" : "bg-muted"
+        )}>
+          {isPlaceholder ? (
+            <div className="flex flex-col items-center gap-2 text-muted-foreground/60">
+              <ImageOff className="h-10 w-10" />
+              <span className="text-xs font-medium">Placeholder</span>
+            </div>
+          ) : thumbnailLoading ? (
             <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
           ) : thumbnailUrl ? (
             <img
@@ -121,17 +130,26 @@ export function LabelItemCard({
           )}
           
           {/* Status Badge */}
-          <Badge
-            className={cn(
-              "absolute top-2 right-2 gap-1",
-              status.bgColor,
-              status.color,
-              "border-0"
-            )}
-          >
-            <StatusIcon className="h-3 w-3" />
-            {status.label}
-          </Badge>
+          {isPlaceholder ? (
+            <Badge
+              className="absolute top-2 right-2 gap-1 border-0 bg-amber-100 text-amber-700"
+            >
+              <ImageOff className="h-3 w-3" />
+              Awaiting Artwork
+            </Badge>
+          ) : (
+            <Badge
+              className={cn(
+                "absolute top-2 right-2 gap-1",
+                status.bgColor,
+                status.color,
+                "border-0"
+              )}
+            >
+              <StatusIcon className="h-3 w-3" />
+              {status.label}
+            </Badge>
+          )}
 
           {/* Delete Button */}
           <Button

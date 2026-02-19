@@ -77,14 +77,14 @@ export function AddLabelItemDialog({ orderId, onSuccess }: AddLabelItemDialogPro
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Plus className="h-4 w-4 mr-2" />
-          Add Item
+          Add Placeholder
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Label Item</DialogTitle>
+          <DialogTitle>Add Placeholder Item</DialogTitle>
           <DialogDescription>
-            Add a new artwork item to this order. You can upload the PDF artwork after adding the item.
+            Add a placeholder item for quoting. Enter name and quantity — artwork can be uploaded later.
           </DialogDescription>
         </DialogHeader>
 
