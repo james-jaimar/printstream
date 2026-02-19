@@ -170,6 +170,31 @@ export function useUpdateLabelStock() {
   });
 }
 
+export function useDeleteLabelStock() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      const { error } = await supabase
+        .from('label_stock')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error deleting stock:', error);
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STOCK_QUERY_KEY });
+      toast.success('Stock item deleted');
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete stock: ${error.message}`);
+    },
+  });
+}
+
 export function useAddStockTransaction() {
   const queryClient = useQueryClient();
 
