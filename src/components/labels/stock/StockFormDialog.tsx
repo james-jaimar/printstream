@@ -18,10 +18,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useCreateLabelStock, useUpdateLabelStock } from '@/hooks/labels/useLabelStock';
-import type { LabelStock, SubstrateType, FinishType } from '@/types/labels';
+import type { LabelStock, SubstrateType, FinishType, GlueType } from '@/types/labels';
 
 const SUBSTRATE_TYPES: SubstrateType[] = ['Paper', 'Semi Gloss', 'PP', 'PE', 'PET', 'Vinyl'];
 const FINISH_TYPES: FinishType[] = ['Gloss', 'Matt', 'Uncoated'];
+const GLUE_TYPES: GlueType[] = ['Hot Melt', 'Acrylic'];
 
 interface StockFormDialogProps {
   open: boolean;
@@ -40,6 +41,7 @@ const defaultForm = {
   reorder_level_meters: 500,
   cost_per_meter: undefined as number | undefined,
   supplier: '',
+  glue_type: 'Hot Melt' as GlueType | null,
 };
 
 export function StockFormDialog({ open, onOpenChange, editStock }: StockFormDialogProps) {
@@ -62,6 +64,7 @@ export function StockFormDialog({ open, onOpenChange, editStock }: StockFormDial
         reorder_level_meters: editStock.reorder_level_meters,
         cost_per_meter: editStock.cost_per_meter ?? undefined,
         supplier: editStock.supplier ?? '',
+        glue_type: editStock.glue_type ?? (editStock.substrate_type === 'Paper' ? null : 'Hot Melt'),
       });
     } else {
       setForm(defaultForm);
@@ -82,6 +85,7 @@ export function StockFormDialog({ open, onOpenChange, editStock }: StockFormDial
       reorder_level_meters: form.reorder_level_meters,
       cost_per_meter: form.cost_per_meter || null,
       supplier: form.supplier || null,
+      glue_type: form.substrate_type === 'Paper' ? null : (form.glue_type || null),
     };
 
     if (isEditing) {
@@ -122,7 +126,11 @@ export function StockFormDialog({ open, onOpenChange, editStock }: StockFormDial
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Substrate Type</Label>
-              <Select value={form.substrate_type} onValueChange={(v) => set('substrate_type', v)}>
+              <Select value={form.substrate_type} onValueChange={(v) => {
+                set('substrate_type', v);
+                if (v === 'Paper') set('glue_type', null);
+                else if (!form.glue_type) set('glue_type', 'Hot Melt');
+              }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {SUBSTRATE_TYPES.map(t => (
@@ -143,6 +151,21 @@ export function StockFormDialog({ open, onOpenChange, editStock }: StockFormDial
               </Select>
             </div>
           </div>
+
+          {/* Glue Type - only for non-Paper substrates */}
+          {form.substrate_type !== 'Paper' && (
+            <div className="space-y-2">
+              <Label>Glue Type</Label>
+              <Select value={form.glue_type ?? ''} onValueChange={(v) => set('glue_type', v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {GLUE_TYPES.map(g => (
+                    <SelectItem key={g} value={g}>{g}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Width & GSM */}
           <div className="grid grid-cols-2 gap-4">
