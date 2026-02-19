@@ -1,43 +1,61 @@
 
 
-## Fix: Multi-Page PDF Upload Should Fill Existing Placeholders
+## Visual Roll View for Stock Management
 
-### The Problem
+Add a third "Rolls" view mode that shows each substrate as a set of roll icons, where each icon represents one physical roll and its fill level shows how much material remains.
 
-When you add 7 placeholders ("Page 1" through "Page 7") and then upload a 7-page proof PDF, the system creates 7 **new** child items alongside the 7 existing placeholders -- giving you 14 items instead of 7.
+### How It Works
 
-This happens because the `label-split-pdf` edge function's proof mode always creates new rows. It never checks whether matching placeholders already exist.
+For each substrate, the system calculates:
+- **Full rolls**: `Math.floor(current_stock_meters / roll_length_meters)` -- shown as 100% filled icons
+- **Partial roll**: `current_stock_meters % roll_length_meters` -- shown as a partially filled icon (e.g., 750m remaining on a 1500m roll = 50% filled)
+- If a substrate has 0 meters, show one empty roll icon
 
-### The Fix
+### Fill Level and Colours
 
-Modify the **proof mode** section of `supabase/functions/label-split-pdf/index.ts` to:
+Each roll icon fills from the bottom up based on `meters_remaining_on_this_roll / roll_length_meters`:
+- **Green** (above 75%): nearly full roll
+- **Amber/Yellow** (25%-75%): partially used
+- **Red** (below 25%): almost empty
 
-1. Before creating children, query for existing placeholder items in the same order -- items where `proof_pdf_url`, `artwork_pdf_url`, and `print_pdf_url` are all null
-2. Match placeholders by name pattern: "Page 1" matches split page 1, "Page 2" matches page 2, etc.
-3. If a matching placeholder is found, **update** it with the split page's artwork URL and dimensions instead of inserting a new row
-4. If no placeholder matches (e.g., extra pages beyond the placeholder count), fall back to creating a new child item as before
+This gives the print operator a direct visual match to what they see on their shelves -- 3 rolls, one green, one amber, one red.
 
-### Technical Detail
+### What Each Roll Card Shows
 
-**File: `supabase/functions/label-split-pdf/index.ts`**
+- Roll icon (SVG) with proportional fill
+- Substrate name and key specs (width, type, glue)
+- Meters on this roll (e.g., "1500m" for full, "375m" for partial)
+- "Full" badge for complete rolls vs actual meters for partial
+- Click to open substrate details
 
-In the proof mode section (around line 210-315):
+### View Toggle
 
-- After fetching the parent item, query for placeholders:
-  ```
-  SELECT id, name FROM label_items
-  WHERE order_id = $order_id
-    AND proof_pdf_url IS NULL
-    AND artwork_pdf_url IS NULL
-    AND print_pdf_url IS NULL
-    AND parent_item_id IS NULL
-  ```
+The existing List/Grid toggle becomes a three-way toggle: **List | Grid | Rolls**
 
-- Build a map: extract page number from name (e.g., "Page 3" -> 3), map page_number -> placeholder_id
+### Filters
 
-- In the per-page loop, check the map first:
-  - **Match found**: UPDATE the placeholder row with `artwork_pdf_url`, `proof_pdf_url`, `width_mm`, `height_mm`, `parent_item_id`, `source_page_number`, `page_count = 1`
-  - **No match**: INSERT a new child item (existing behaviour)
+All existing filters (search, substrate type, finish, glue, stock level) apply identically -- substrates are filtered first, then their rolls are rendered.
 
-This is a single-file change to the edge function. No client-side code changes needed since the client already handles the response correctly -- it just needs the edge function to fill placeholders instead of duplicating them.
+---
+
+### Technical Details
+
+**New file: `src/components/labels/stock/StockRollView.tsx`**
+
+- Accepts same props as other views (stock array + callbacks)
+- For each substrate, calculates number of full rolls + one partial roll from `current_stock_meters` and `roll_length_meters`
+- Renders an inline SVG roll graphic per roll, with a clip-rect that fills proportionally
+- Color based on fill percentage thresholds (green/amber/red)
+- Responsive grid layout, grouped by substrate
+
+**Modified: `src/components/labels/stock/index.ts`**
+
+- Export `StockRollView`
+
+**Modified: `src/pages/labels/LabelsStock.tsx`**
+
+- Extend `viewMode` state to `'list' | 'grid' | 'rolls'`
+- Add third toggle button with a cylinder/roll icon
+- Render `StockRollView` when `viewMode === 'rolls'`
+- Add "Out of Stock" option to stock level filter (`current_stock_meters === 0`)
 
