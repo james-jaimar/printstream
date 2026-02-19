@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
     }
 
     // ========================================================================
-    // PROOF MODE (default): create new child items
+    // PROOF MODE (default): fill placeholders first, then create new items
     // ========================================================================
 
     // Get parent item to inherit properties
@@ -222,6 +222,27 @@ Deno.serve(async (req) => {
       throw new Error(`Parent item not found: ${parentError?.message}`);
     }
 
+    // Query for existing placeholder items (no artwork at all, no parent)
+    const { data: placeholders } = await supabase
+      .from("label_items")
+      .select("id, name")
+      .eq("order_id", order_id)
+      .is("proof_pdf_url", null)
+      .is("artwork_pdf_url", null)
+      .is("print_pdf_url", null)
+      .is("parent_item_id", null)
+      .neq("id", item_id); // exclude the parent item being split
+
+    // Build map: page number -> placeholder id (from "Page X" naming)
+    const placeholderMap = new Map<number, string>();
+    for (const ph of placeholders || []) {
+      const match = ph.name.match(/^Page\s+(\d+)$/i);
+      if (match) {
+        placeholderMap.set(parseInt(match[1], 10), ph.id);
+      }
+    }
+    console.log(`[label-split-pdf] Found ${placeholderMap.size} matching placeholders`);
+
     // Get current max item_number for this order
     const { data: maxItem } = await supabase
       .from("label_items")
@@ -234,6 +255,7 @@ Deno.serve(async (req) => {
     let nextItemNumber = (maxItem?.item_number || 0) + 1;
 
     const childItemIds: string[] = [];
+    const updatedPlaceholderIds: string[] = [];
     const pagesResult: { page_number: number; pdf_url: string; width_mm: number; height_mm: number }[] = [];
 
     for (const page of splitData.pages) {
@@ -250,47 +272,77 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Create signed URL for the uploaded file
       const { data: signedData } = await supabase.storage
         .from("label-files")
-        .createSignedUrl(pagePath, 60 * 60 * 24 * 365); // 1 year
+        .createSignedUrl(pagePath, 60 * 60 * 24 * 365);
 
       const pageUrl = signedData?.signedUrl || "";
-
       const width_mm = Math.round(page.width_pts * PT_TO_MM * 100) / 100;
       const height_mm = Math.round(page.height_pts * PT_TO_MM * 100) / 100;
 
-      // Create child label_item - proof mode only sets proof/artwork URLs
-      const { data: childItem, error: childError } = await supabase
-        .from("label_items")
-        .insert({
-          order_id,
-          item_number: nextItemNumber++,
-          name: `${parentItem.name} - Page ${page.page_number}`,
-          quantity: parentItem.quantity,
-          width_mm,
-          height_mm,
-          artwork_pdf_url: pageUrl,
-          proof_pdf_url: parentItem.proof_pdf_url || pageUrl,
-          print_pdf_url: null,
-          print_pdf_status: "pending",
-          artwork_source: parentItem.artwork_source || "admin",
-          proofing_status: parentItem.proofing_status || "draft",
-          preflight_status: "pending",
-          parent_item_id: item_id,
-          source_page_number: page.page_number,
-          page_count: 1,
-          needs_rotation: false,
-        })
-        .select("id")
-        .single();
+      // Check if a placeholder exists for this page number
+      const placeholderId = placeholderMap.get(page.page_number);
 
-      if (childError) {
-        console.error(`[label-split-pdf] Insert error page ${page.page_number}:`, childError);
-        continue;
+      if (placeholderId) {
+        // UPDATE existing placeholder with artwork
+        const { error: updateError } = await supabase
+          .from("label_items")
+          .update({
+            artwork_pdf_url: pageUrl,
+            proof_pdf_url: parentItem.proof_pdf_url || pageUrl,
+            width_mm,
+            height_mm,
+            parent_item_id: item_id,
+            source_page_number: page.page_number,
+            page_count: 1,
+            artwork_source: parentItem.artwork_source || "admin",
+            proofing_status: parentItem.proofing_status || "draft",
+            preflight_status: "pending",
+            needs_rotation: false,
+          })
+          .eq("id", placeholderId);
+
+        if (updateError) {
+          console.error(`[label-split-pdf] Update placeholder error page ${page.page_number}:`, updateError);
+          continue;
+        }
+
+        updatedPlaceholderIds.push(placeholderId);
+        console.log(`[label-split-pdf] Filled placeholder ${placeholderId} with page ${page.page_number}`);
+      } else {
+        // No placeholder - INSERT new child item
+        const { data: childItem, error: childError } = await supabase
+          .from("label_items")
+          .insert({
+            order_id,
+            item_number: nextItemNumber++,
+            name: `${parentItem.name} - Page ${page.page_number}`,
+            quantity: parentItem.quantity,
+            width_mm,
+            height_mm,
+            artwork_pdf_url: pageUrl,
+            proof_pdf_url: parentItem.proof_pdf_url || pageUrl,
+            print_pdf_url: null,
+            print_pdf_status: "pending",
+            artwork_source: parentItem.artwork_source || "admin",
+            proofing_status: parentItem.proofing_status || "draft",
+            preflight_status: "pending",
+            parent_item_id: item_id,
+            source_page_number: page.page_number,
+            page_count: 1,
+            needs_rotation: false,
+          })
+          .select("id")
+          .single();
+
+        if (childError) {
+          console.error(`[label-split-pdf] Insert error page ${page.page_number}:`, childError);
+          continue;
+        }
+
+        childItemIds.push(childItem.id);
       }
 
-      childItemIds.push(childItem.id);
       pagesResult.push({ page_number: page.page_number, pdf_url: pageUrl, width_mm, height_mm });
     }
 
@@ -300,7 +352,7 @@ Deno.serve(async (req) => {
       .update({ page_count: splitData.page_count })
       .eq("id", item_id);
 
-    console.log(`[label-split-pdf] Created ${childItemIds.length} child items`);
+    console.log(`[label-split-pdf] Filled ${updatedPlaceholderIds.length} placeholders, created ${childItemIds.length} new items`);
 
     return new Response(
       JSON.stringify({
@@ -310,6 +362,7 @@ Deno.serve(async (req) => {
         page_count: splitData.page_count,
         pages: pagesResult,
         child_item_ids: childItemIds,
+        updated_placeholder_ids: updatedPlaceholderIds,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
