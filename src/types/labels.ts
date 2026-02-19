@@ -137,6 +137,8 @@ export interface LabelDieline {
   client: string | null;
 }
 
+export type GlueType = 'Hot Melt' | 'Acrylic';
+
 export interface LabelStock {
   id: string;
   name: string;
@@ -151,6 +153,7 @@ export interface LabelStock {
   supplier: string | null;
   last_stock_take: string | null;
   barcode: string | null;
+  glue_type: GlueType | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

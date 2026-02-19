@@ -1920,6 +1920,7 @@ export type Database = {
           created_at: string
           current_stock_meters: number
           finish: string
+          glue_type: string | null
           gsm: number | null
           id: string
           is_active: boolean
@@ -1938,6 +1939,7 @@ export type Database = {
           created_at?: string
           current_stock_meters?: number
           finish?: string
+          glue_type?: string | null
           gsm?: number | null
           id?: string
           is_active?: boolean
@@ -1956,6 +1958,7 @@ export type Database = {
           created_at?: string
           current_stock_meters?: number
           finish?: string
+          glue_type?: string | null
           gsm?: number | null
           id?: string
           is_active?: boolean
