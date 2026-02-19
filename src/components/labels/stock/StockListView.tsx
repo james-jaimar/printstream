@@ -122,7 +122,7 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
                     {item.cost_per_meter ? `R${item.cost_per_meter.toFixed(2)}` : '—'}
                   </TableCell>
                   <TableCell>
-                    <DropdownMenu>
+                    <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <MoreHorizontal className="h-4 w-4" />
