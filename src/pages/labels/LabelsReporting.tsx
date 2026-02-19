@@ -78,7 +78,7 @@ export default function LabelsReporting() {
         <p className="text-sm text-slate-500">Metrics, efficiency analysis, and production insights</p>
       </div>
 
-      <LowStockAlert />
+      <LowStockAlert compact />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
