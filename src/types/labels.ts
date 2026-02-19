@@ -90,6 +90,7 @@ export interface CropAmountMm {
 
 export type SubstrateType = 
   | 'Paper' 
+  | 'Semi Gloss'
   | 'PP' 
   | 'PE' 
   | 'PET' 

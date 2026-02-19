@@ -20,7 +20,7 @@ import {
 import { useCreateLabelStock, useUpdateLabelStock } from '@/hooks/labels/useLabelStock';
 import type { LabelStock, SubstrateType, FinishType } from '@/types/labels';
 
-const SUBSTRATE_TYPES: SubstrateType[] = ['Paper', 'PP', 'PE', 'PET', 'Vinyl'];
+const SUBSTRATE_TYPES: SubstrateType[] = ['Paper', 'Semi Gloss', 'PP', 'PE', 'PET', 'Vinyl'];
 const FINISH_TYPES: FinishType[] = ['Gloss', 'Matt', 'Uncoated'];
 
 interface StockFormDialogProps {
