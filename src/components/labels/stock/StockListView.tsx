@@ -60,16 +60,33 @@ export function StockListView({ stock, onAddStock, onViewDetails, onPrintBarcode
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const deleteMutation = useDeleteLabelStock();
 
+  const compareValues = (aVal: unknown, bVal: unknown): number => {
+    if (aVal == null && bVal == null) return 0;
+    if (aVal == null) return 1;
+    if (bVal == null) return -1;
+    return typeof aVal === 'string' ? (aVal as string).localeCompare(bVal as string) : (aVal as number) - (bVal as number);
+  };
+
   const sortedStock = useMemo(() => {
     if (!sortKey) return stock;
+    // Secondary sort chains: name → glue_type → width_mm
+    const secondarySorts: Partial<Record<SortKey, SortKey[]>> = {
+      name: ['glue_type', 'width_mm'],
+      glue_type: ['name', 'width_mm'],
+      substrate_type: ['name', 'glue_type', 'width_mm'],
+    };
+    const extras = secondarySorts[sortKey] ?? [];
+
     return [...stock].sort((a, b) => {
-      const aVal = a[sortKey];
-      const bVal = b[sortKey];
-      if (aVal == null && bVal == null) return 0;
-      if (aVal == null) return 1;
-      if (bVal == null) return -1;
-      const cmp = typeof aVal === 'string' ? aVal.localeCompare(bVal as string) : (aVal as number) - (bVal as number);
-      return sortDir === 'asc' ? cmp : -cmp;
+      const primary = compareValues(a[sortKey], b[sortKey]);
+      const primaryResult = sortDir === 'asc' ? primary : -primary;
+      if (primaryResult !== 0) return primaryResult;
+
+      for (const key of extras) {
+        const cmp = compareValues(a[key], b[key]);
+        if (cmp !== 0) return cmp; // secondary sorts always ascending
+      }
+      return 0;
     });
   }, [stock, sortKey, sortDir]);
 
