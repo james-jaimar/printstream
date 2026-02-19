@@ -138,6 +138,73 @@ Deno.serve(async (req) => {
       console.log(`[label-impose]   Slot ${slot.slot}: item=${slot.item_id} needs_rotation=${slot.needs_rotation} pdf_url=${slot.pdf_url ? 'present' : 'MISSING'}`);
     }
 
+    // ─── DIMENSION AUTO-DETECTION: check artwork vs dieline orientation ───
+    // This is a failsafe that physically prevents squashing regardless of DB flags
+    const d = imposeRequest.dieline;
+    const bleedH = (d.bleed_left_mm || 0) + (d.bleed_right_mm || 0);
+    const bleedV = (d.bleed_top_mm || 0) + (d.bleed_bottom_mm || 0);
+    const cellW = d.label_width_mm + bleedH;
+    const cellH = d.label_height_mm + bleedV;
+    const cellIsPortrait = cellH > cellW;
+    const cellIsSquare = Math.abs(cellW - cellH) < 0.5;
+
+    // Collect unique item PDFs to check dimensions
+    const uniqueItems = new Map<string, string>(); // item_id -> pdf_url
+    for (const slot of imposeRequest.slot_assignments) {
+      if (slot.pdf_url && !uniqueItems.has(slot.item_id)) {
+        uniqueItems.set(slot.item_id, slot.pdf_url);
+      }
+    }
+
+    // Check each unique artwork's actual dimensions against the dieline
+    const autoRotateItems = new Set<string>();
+    if (!cellIsSquare) {
+      const PT_TO_MM = 25.4 / 72;
+      for (const [itemId, pdfUrl] of uniqueItems) {
+        try {
+          const pbResponse = await fetch(`${VPS_PDF_API_URL}/page-boxes`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-API-Key": apiKey,
+            },
+            body: JSON.stringify({ pdf_url: pdfUrl }),
+          });
+
+          if (pbResponse.ok) {
+            const pbData = await pbResponse.json();
+            // Use trimbox first, fall back to mediabox
+            const box = pbData.trimbox || pbData.bleedbox || pbData.cropbox || pbData.mediabox;
+            if (box) {
+              const artW = box.width * PT_TO_MM;
+              const artH = box.height * PT_TO_MM;
+              const artIsPortrait = artH > artW;
+
+              if (artIsPortrait !== cellIsPortrait) {
+                console.warn(`[label-impose] ⚠️ AUTO-DETECTED rotation needed for item ${itemId}: artwork=${Math.round(artW)}x${Math.round(artH)}mm (${artIsPortrait ? 'portrait' : 'landscape'}) vs cell=${Math.round(cellW)}x${Math.round(cellH)}mm (${cellIsPortrait ? 'portrait' : 'landscape'})`);
+                autoRotateItems.add(itemId);
+              } else {
+                console.log(`[label-impose] ✓ Item ${itemId} orientation OK: artwork=${Math.round(artW)}x${Math.round(artH)}mm matches cell=${Math.round(cellW)}x${Math.round(cellH)}mm`);
+              }
+            }
+          } else {
+            const errText = await pbResponse.text().catch(() => '');
+            console.warn(`[label-impose] Could not check page boxes for item ${itemId}: ${pbResponse.status} ${errText.substring(0, 100)}`);
+          }
+        } catch (pbErr) {
+          console.warn(`[label-impose] Page boxes check failed for item ${itemId}:`, pbErr);
+        }
+      }
+    }
+
+    // Apply auto-detected rotation to slot assignments
+    for (const slot of imposeRequest.slot_assignments) {
+      if (autoRotateItems.has(slot.item_id)) {
+        slot.needs_rotation = true;
+      }
+    }
+    // ─── END DIMENSION AUTO-DETECTION ───
+
     // ─── PRE-ROTATE: rotate artwork for items that need it ───
     // Collect unique items that need rotation
     const itemsNeedingRotation = new Map<string, string>(); // item_id -> pdf_url
@@ -272,8 +339,7 @@ Deno.serve(async (req) => {
       })
       .eq("id", imposeRequest.run_id);
 
-    // Calculate page dimensions: cell = label + gap
-    const d = imposeRequest.dieline;
+    // Calculate page dimensions: cell = label + gap (reuse d from auto-detection above)
     const cellWidth = d.label_width_mm + d.horizontal_gap_mm;
     const cellHeight = d.label_height_mm + d.vertical_gap_mm;
     const pageWidth = cellWidth * d.columns_across;
