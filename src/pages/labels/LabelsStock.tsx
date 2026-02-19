@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, Barcode, LayoutGrid, List } from 'lucide-react';
+import { Plus, Search, Barcode, LayoutGrid, List, Cylinder } from 'lucide-react';
 import { useLabelStock } from '@/hooks/labels/useLabelStock';
 import { 
   StockCard, 
@@ -21,6 +21,7 @@ import {
   StockBarcodeScanner,
   StockFormDialog,
   StockListView,
+  StockRollView,
 } from '@/components/labels/stock';
 import { LowStockAlert } from '@/components/labels/production';
 import type { LabelStock, SubstrateType, FinishType, GlueType } from '@/types/labels';
@@ -32,7 +33,7 @@ const GLUE_TYPES: GlueType[] = ['Hot Melt', 'Acrylic'];
 export default function LabelsStock() {
   const [search, setSearch] = useState('');
   const [scannerActive, setScannerActive] = useState(true);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'rolls'>('list');
   const [substrateFilter, setSubstrateFilter] = useState<string>('all');
   const [finishFilter, setFinishFilter] = useState<string>('all');
   const [stockLevelFilter, setStockLevelFilter] = useState<string>('all');
@@ -68,11 +69,13 @@ export default function LabelsStock() {
       // Stock level filter
       let matchesLevel = true;
       if (stockLevelFilter === 'low') {
-        matchesLevel = s.current_stock_meters <= s.reorder_level_meters;
+        matchesLevel = s.current_stock_meters <= s.reorder_level_meters && s.current_stock_meters > 0;
       } else if (stockLevelFilter === 'critical') {
-        matchesLevel = s.current_stock_meters <= s.reorder_level_meters * 0.5;
+        matchesLevel = s.current_stock_meters <= s.reorder_level_meters * 0.5 && s.current_stock_meters > 0;
       } else if (stockLevelFilter === 'good') {
         matchesLevel = s.current_stock_meters > s.reorder_level_meters;
+      } else if (stockLevelFilter === 'out') {
+        matchesLevel = s.current_stock_meters <= 0;
       }
 
       // Glue filter
@@ -199,6 +202,7 @@ export default function LabelsStock() {
               <SelectItem value="good">In Stock</SelectItem>
               <SelectItem value="low">Low Stock</SelectItem>
               <SelectItem value="critical">Critical</SelectItem>
+              <SelectItem value="out">Out of Stock</SelectItem>
             </SelectContent>
           </Select>
 
@@ -231,16 +235,27 @@ export default function LabelsStock() {
                 size="icon"
                 className="h-8 w-8 rounded-r-none"
                 onClick={() => setViewMode('list')}
+                title="List view"
               >
                 <List className="h-4 w-4" />
               </Button>
               <Button
                 variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
                 size="icon"
-                className="h-8 w-8 rounded-l-none"
+                className="h-8 w-8 rounded-none"
                 onClick={() => setViewMode('grid')}
+                title="Grid view"
               >
                 <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === 'rolls' ? 'secondary' : 'ghost'}
+                size="icon"
+                className="h-8 w-8 rounded-l-none"
+                onClick={() => setViewMode('rolls')}
+                title="Roll view"
+              >
+                <Cylinder className="h-4 w-4" />
               </Button>
             </div>
           </div>
@@ -267,6 +282,14 @@ export default function LabelsStock() {
         <p className="text-muted-foreground text-center py-8">Loading stock...</p>
       ) : viewMode === 'list' ? (
         <StockListView
+          stock={filteredStock}
+          onAddStock={handleAddStock}
+          onViewDetails={handleViewDetails}
+          onPrintBarcode={handlePrintBarcode}
+          onEdit={handleEdit}
+        />
+      ) : viewMode === 'rolls' ? (
+        <StockRollView
           stock={filteredStock}
           onAddStock={handleAddStock}
           onViewDetails={handleViewDetails}
