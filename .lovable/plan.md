@@ -1,61 +1,64 @@
 
 
-## Visual Roll View for Stock Management
+## Fix: Artwork Rotation Lost During PDF Split
 
-Add a third "Rolls" view mode that shows each substrate as a set of roll icons, where each icon represents one physical roll and its fill level shows how much material remains.
+### Root Cause
 
-### How It Works
+The database confirms the parent item `ess health labels supplied` has `needs_rotation: true`, but all its child items (Page 1 through Page 7) have `needs_rotation: false`. This happens because the `label-split-pdf` Edge Function hardcodes `needs_rotation: false` when creating or updating child items -- it never inherits the parent's value.
 
-For each substrate, the system calculates:
-- **Full rolls**: `Math.floor(current_stock_meters / roll_length_meters)` -- shown as 100% filled icons
-- **Partial roll**: `current_stock_meters % roll_length_meters` -- shown as a partially filled icon (e.g., 750m remaining on a 1500m roll = 50% filled)
-- If a substrate has 0 meters, show one empty roll icon
+Since the child items are what end up in slot assignments, the imposition engine never sees `needs_rotation=true` and processes landscape artwork into portrait cells, causing the squashing.
 
-### Fill Level and Colours
+### The Fix (Two Layers)
 
-Each roll icon fills from the bottom up based on `meters_remaining_on_this_roll / roll_length_meters`:
-- **Green** (above 75%): nearly full roll
-- **Amber/Yellow** (25%-75%): partially used
-- **Red** (below 25%): almost empty
+**Layer 1 -- Inherit rotation flag during split (`label-split-pdf`)**
 
-This gives the print operator a direct visual match to what they see on their shelves -- 3 rolls, one green, one amber, one red.
+In `supabase/functions/label-split-pdf/index.ts`, change all three places where child items are created/updated to inherit `needs_rotation` from the parent item instead of hardcoding `false`:
 
-### What Each Roll Card Shows
+- Line 175 (print mode, new child): `needs_rotation: false` becomes `needs_rotation: parentItem?.needs_rotation ?? false`
+- Line 301 (proof mode, placeholder update): same change, using `parentItem.needs_rotation`
+- Line 333 (proof mode, new child): same change
 
-- Roll icon (SVG) with proportional fill
-- Substrate name and key specs (width, type, glue)
-- Meters on this roll (e.g., "1500m" for full, "375m" for partial)
-- "Full" badge for complete rolls vs actual meters for partial
-- Click to open substrate details
+**Layer 2 -- Dimension safeguard in imposition (`label-impose`)**
 
-### View Toggle
+Add a failsafe in `supabase/functions/label-impose/index.ts` that auto-detects rotation need by checking each artwork PDF's actual dimensions against the dieline, regardless of what `needs_rotation` says. This prevents squashing even if the flag is wrong for any reason:
 
-The existing List/Grid toggle becomes a three-way toggle: **List | Grid | Rolls**
+- Before the pre-rotation block, call the VPS `/manipulate/page-boxes` endpoint for each unique item's PDF
+- Extract the artwork width/height (TrimBox or MediaBox)
+- Compare against dieline `label_width_mm` x `label_height_mm` (with bleed)
+- If artwork is landscape but cell is portrait (or vice versa), force `needs_rotation = true` for that item's slots
+- Log a warning when auto-correcting so we can see it happening
 
-### Filters
+**Layer 3 -- Fix existing data**
 
-All existing filters (search, substrate type, finish, glue, stock level) apply identically -- substrates are filtered first, then their rolls are rendered.
+Provide a one-time SQL update to fix the current order's child items so you can reprocess without re-uploading:
 
----
+```sql
+UPDATE label_items
+SET needs_rotation = true
+WHERE order_id = 'b63f2a5a-8880-4748-95b9-f17ba5d60c3b'
+  AND parent_item_id IS NOT NULL
+  AND needs_rotation = false;
+```
 
-### Technical Details
+### Files Changed
 
-**New file: `src/components/labels/stock/StockRollView.tsx`**
+| File | Change |
+|------|--------|
+| `supabase/functions/label-split-pdf/index.ts` | Inherit `needs_rotation` from parent in all 3 locations |
+| `supabase/functions/label-impose/index.ts` | Add dimension-based rotation auto-detection as failsafe before pre-rotation block |
 
-- Accepts same props as other views (stock array + callbacks)
-- For each substrate, calculates number of full rolls + one partial roll from `current_stock_meters` and `roll_length_meters`
-- Renders an inline SVG roll graphic per roll, with a clip-rect that fills proportionally
-- Color based on fill percentage thresholds (green/amber/red)
-- Responsive grid layout, grouped by substrate
+### Technical Detail: Dimension Auto-Detection Logic
 
-**Modified: `src/components/labels/stock/index.ts`**
+```text
+For each unique item in slot_assignments:
+  1. Fetch page boxes from VPS (or use a lightweight HEAD/dimension check)
+  2. artworkW = trimbox width (mm), artworkH = trimbox height (mm)
+  3. cellW = label_width_mm + bleed, cellH = label_height_mm + bleed
+  4. If artwork orientation mismatches cell orientation:
+       - i.e. artworkW > artworkH but cellW < cellH (or vice versa)
+       - Force needs_rotation = true for all slots with that item
+       - Log: "Auto-detected rotation needed for item X"
+```
 
-- Export `StockRollView`
-
-**Modified: `src/pages/labels/LabelsStock.tsx`**
-
-- Extend `viewMode` state to `'list' | 'grid' | 'rolls'`
-- Add third toggle button with a cylinder/roll icon
-- Render `StockRollView` when `viewMode === 'rolls'`
-- Add "Out of Stock" option to stock level filter (`current_stock_meters === 0`)
+This ensures the system physically cannot produce squashed output regardless of database flags.
 
