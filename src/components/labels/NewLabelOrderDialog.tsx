@@ -3,7 +3,15 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus, User } from 'lucide-react';
+import { CalendarIcon, Plus, User, ChevronsUpDown, Check } from 'lucide-react';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { DielineCombobox } from '@/components/labels/DielineCombobox';
 import { OrientationPicker } from '@/components/labels/OrientationPicker';
 import {
@@ -400,26 +408,76 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
               <FormField
                 control={form.control}
                 name="substrate_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Substrate</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select substrate" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {stock?.filter(s => s.is_active).map((substrate) => (
-                          <SelectItem key={substrate.id} value={substrate.id}>
-                            {substrate.name} - {substrate.width_mm}mm ({substrate.current_stock_meters}m available)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => {
+                  const activeStock = stock?.filter(s => s.is_active) || [];
+                  const selectedSubstrate = activeStock.find(s => s.id === field.value);
+                  // Group by width
+                  const groupedByWidth = activeStock.reduce((acc, s) => {
+                    const key = `${s.width_mm}mm`;
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(s);
+                    return acc;
+                  }, {} as Record<string, typeof activeStock>);
+                  const sortedWidths = Object.keys(groupedByWidth).sort((a, b) => parseInt(a) - parseInt(b));
+
+                  return (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Substrate</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              className={cn(
+                                "w-full justify-between font-normal",
+                                !field.value && "text-muted-foreground"
+                              )}
+                            >
+                              {selectedSubstrate
+                                ? `${selectedSubstrate.name} - ${selectedSubstrate.width_mm}mm (${selectedSubstrate.current_stock_meters}m)`
+                                : "Select substrate"}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start"
+                          onOpenAutoFocus={(e) => e.preventDefault()}
+                        >
+                          <Command>
+                            <CommandInput placeholder="Search substrates..." />
+                            <CommandList>
+                              <CommandEmpty>No substrate found.</CommandEmpty>
+                              {sortedWidths.map((width) => (
+                                <CommandGroup key={width} heading={`${width} Roll`}>
+                                  {groupedByWidth[width].map((substrate) => (
+                                    <CommandItem
+                                      key={substrate.id}
+                                      value={`${substrate.name} ${substrate.width_mm}mm ${substrate.finish} ${substrate.substrate_type}`}
+                                      onSelect={() => field.onChange(substrate.id)}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          field.value === substrate.id ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      <span className="flex-1">{substrate.name}</span>
+                                      <span className="text-xs text-muted-foreground ml-2">
+                                        {substrate.current_stock_meters}m available
+                                      </span>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              ))}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
 
               <FormField
