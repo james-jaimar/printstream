@@ -1,64 +1,69 @@
 
 
-## Fix: Artwork Rotation Lost During PDF Split
+## Root Cause: Pre-Rotation is a No-Op for the VPS Imposition Engine
 
-### Root Cause
+### What's Actually Happening
 
-The database confirms the parent item `ess health labels supplied` has `needs_rotation: true`, but all its child items (Page 1 through Page 7) have `needs_rotation: false`. This happens because the `label-split-pdf` Edge Function hardcodes `needs_rotation: false` when creating or updating child items -- it never inherits the parent's value.
+The logs prove every layer is working correctly at the detection level:
+- Auto-detection correctly identifies landscape artwork (160x60mm) vs portrait cells (63x163mm)
+- Pre-rotation fires, uploads a "rotated" PDF, and creates a signed URL
+- The VPS imposition engine receives the payload and returns "1 frames" successfully
 
-Since the child items are what end up in slot assignments, the imposition engine never sees `needs_rotation=true` and processes landscape artwork into portrait cells, causing the squashing.
+**But the output is still squashed.** The issue is the pre-rotation strategy itself.
 
-### The Fix (Two Layers)
+### The Real Bug
 
-**Layer 1 -- Inherit rotation flag during split (`label-split-pdf`)**
+The VPS `/manipulate/rotate` endpoint almost certainly applies a PDF page-level rotation (setting the `/Rotate` flag on the PDF page dictionary) rather than performing a true content-stream transformation. This is a very common PDF behavior:
 
-In `supabase/functions/label-split-pdf/index.ts`, change all three places where child items are created/updated to inherit `needs_rotation` from the parent item instead of hardcoding `false`:
+- A PDF with `/Rotate 90` will **display** as portrait in a PDF viewer
+- But its **MediaBox** (the actual content dimensions) remains 160x60mm (landscape)
+- When the VPS imposition engine reads this "rotated" PDF to place it in a cell, it reads the raw content dimensions (160x60mm) and **scales it to fit** a 63x163mm cell -- producing the exact squashing you see
 
-- Line 175 (print mode, new child): `needs_rotation: false` becomes `needs_rotation: parentItem?.needs_rotation ?? false`
-- Line 301 (proof mode, placeholder update): same change, using `parentItem.needs_rotation`
-- Line 333 (proof mode, new child): same change
+The current code then sets `rotation: 0` for ALL slots (line 311), telling the VPS "don't rotate anything" -- but the artwork was never truly rotated in the first place.
 
-**Layer 2 -- Dimension safeguard in imposition (`label-impose`)**
+### The Fix
 
-Add a failsafe in `supabase/functions/label-impose/index.ts` that auto-detects rotation need by checking each artwork PDF's actual dimensions against the dieline, regardless of what `needs_rotation` says. This prevents squashing even if the flag is wrong for any reason:
+**Remove the entire pre-rotation step and instead tell the VPS imposition engine to rotate during placement** by setting `rotation: 90` per slot. The imposition engine handles rotation natively during placement -- it knows how to rotate content within a cell without scaling.
 
-- Before the pre-rotation block, call the VPS `/manipulate/page-boxes` endpoint for each unique item's PDF
-- Extract the artwork width/height (TrimBox or MediaBox)
-- Compare against dieline `label_width_mm` x `label_height_mm` (with bleed)
-- If artwork is landscape but cell is portrait (or vice versa), force `needs_rotation = true` for that item's slots
-- Log a warning when auto-correcting so we can see it happening
+### Changes to `supabase/functions/label-impose/index.ts`
 
-**Layer 3 -- Fix existing data**
+1. **Remove** the entire pre-rotation block (lines 208-246): the `preRotatePdf` function call, the rotated URL map, and the URL-swapping logic
+2. **Update** the slot rotation assignment (lines 310-314): instead of hardcoding `rotation: 0` for all slots, set `rotation: 90` for any slot where `needs_rotation` is true and `rotation: 0` for normal slots
+3. **Keep** the dimension auto-detection block (lines 141-206) -- this remains valuable as a failsafe that forces `needs_rotation = true` when artwork orientation mismatches the cell
+4. **Keep** the `preRotatePdf` function definition but it will become unused (can be removed for cleanliness)
+5. **Add a log** showing what rotation value each slot is being sent with, so we can verify in logs
 
-Provide a one-time SQL update to fix the current order's child items so you can reprocess without re-uploading:
+### Updated Rotation Logic (replaces lines 236-314)
 
-```sql
-UPDATE label_items
-SET needs_rotation = true
-WHERE order_id = 'b63f2a5a-8880-4748-95b9-f17ba5d60c3b'
-  AND parent_item_id IS NOT NULL
-  AND needs_rotation = false;
+```text
+// No URL swapping needed -- use original artwork URLs
+// Set rotation per slot based on needs_rotation flag
+const expandedSlots = [];
+for (const slot of imposeRequest.slot_assignments) {
+  for (let row = 0; row < rowsAround; row++) {
+    expandedSlots.push({
+      ...slot,
+      slot: (row * columnsAcross) + slot.slot + 1,
+      rotation: slot.needs_rotation ? 90 : 0,
+    });
+  }
+}
 ```
+
+### Why This Will Work
+
+- The VPS imposition engine already accepts a `rotation` field per slot
+- Setting `rotation: 90` tells the engine to rotate the 160x60mm artwork 90 degrees during placement into the 63x163mm cell
+- The engine handles this correctly because it transforms the content within the cell coordinate space, not by modifying the source PDF
+- The artwork size is never changed -- it is placed at its native dimensions, just rotated
 
 ### Files Changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/label-split-pdf/index.ts` | Inherit `needs_rotation` from parent in all 3 locations |
-| `supabase/functions/label-impose/index.ts` | Add dimension-based rotation auto-detection as failsafe before pre-rotation block |
+| `supabase/functions/label-impose/index.ts` | Remove pre-rotation block; set `rotation: 90` for rotated slots instead of 0 |
 
-### Technical Detail: Dimension Auto-Detection Logic
+### No Other Files Affected
 
-```text
-For each unique item in slot_assignments:
-  1. Fetch page boxes from VPS (or use a lightweight HEAD/dimension check)
-  2. artworkW = trimbox width (mm), artworkH = trimbox height (mm)
-  3. cellW = label_width_mm + bleed, cellH = label_height_mm + bleed
-  4. If artwork orientation mismatches cell orientation:
-       - i.e. artworkW > artworkH but cellW < cellH (or vice versa)
-       - Force needs_rotation = true for all slots with that item
-       - Log: "Auto-detected rotation needed for item X"
-```
-
-This ensures the system physically cannot produce squashed output regardless of database flags.
+The client-side code (`useBatchImpose.ts`, `vpsApiService.ts`) and the split function (`label-split-pdf`) remain unchanged. The `needs_rotation` flag detection, inheritance, and auto-detection all stay in place.
 
