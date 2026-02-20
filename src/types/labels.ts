@@ -183,7 +183,14 @@ export interface LabelOrder {
   proof_token: string | null;
   proof_version: number;
   notes: string | null;
-  saved_layout: Record<string, any> | null; // JSON column storing LayoutOption
+  saved_layout: Record<string, any> | null;
+  // Post-print / delivery fields
+  core_size_mm: number | null;
+  qty_per_roll: number | null;
+  roll_direction: string | null;
+  delivery_method: string | null;
+  delivery_address: string | null;
+  delivery_notes: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -192,6 +199,8 @@ export interface LabelOrder {
   substrate?: LabelStock;
   items?: LabelItem[];
   runs?: LabelRun[];
+  services?: LabelOrderService[];
+  stage_instances?: LabelOrderStageInstance[];
 }
 
 export interface LabelItem {
@@ -421,3 +430,47 @@ export interface OptimizationWeights {
   print_efficiency: number;
   labor_efficiency: number;
 }
+
+// ---- Post-print / finishing types (re-exported from hooks for use in LabelOrder) ----
+export type LabelServiceType =
+  | 'finishing' | 'rewinding' | 'joining' | 'handwork' | 'qa' | 'packaging' | 'delivery';
+
+export type LabelStageStatus = 'pending' | 'active' | 'completed' | 'skipped' | 'held';
+
+export interface LabelOrderService {
+  id: string;
+  order_id: string;
+  service_type: LabelServiceType;
+  finishing_option_id: string | null;
+  stage_id: string | null;
+  display_name: string;
+  quantity: number | null;
+  quantity_unit: string | null;
+  notes: string | null;
+  estimated_cost: number | null;
+  sort_order: number;
+  created_at: string;
+  finishing_option?: { id: string; display_name: string; category: string } | null;
+  stage?: { id: string; name: string; color: string } | null;
+}
+
+export interface LabelOrderStageInstance {
+  id: string;
+  order_id: string;
+  stage_id: string;
+  service_line_id: string | null;
+  stage_order: number;
+  status: LabelStageStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  started_by: string | null;
+  completed_by: string | null;
+  assigned_operator_id: string | null;
+  estimated_duration_minutes: number | null;
+  actual_duration_minutes: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  stage?: { id: string; name: string; color: string; stage_group: string } | null;
+}
+

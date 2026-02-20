@@ -1,27 +1,34 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Users, Sliders } from 'lucide-react';
-import { ClientManagement } from '@/components/labels/admin';
+import { Settings, Users, Sliders, Workflow, Layers, Wrench } from 'lucide-react';
+import { ClientManagement, LabelStageManagement, LabelFinishingManagement, LabelServicesManagement } from '@/components/labels/admin';
 
-const glassCard = 'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur';
+const glassCard = 'rounded-2xl border border-border bg-card shadow-sm';
 
 export default function LabelsSettings() {
   return (
     <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div className="pt-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Settings</h1>
-        <p className="text-sm text-slate-500">Manage label division settings and configuration</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
+        <p className="text-sm text-muted-foreground">Manage label division settings, stages, and configuration</p>
       </div>
 
       <Tabs defaultValue="clients" className="w-full">
         <TabsList>
           <TabsTrigger value="clients" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Clients
+            <Users className="h-4 w-4" />Clients
+          </TabsTrigger>
+          <TabsTrigger value="stages" className="flex items-center gap-2">
+            <Workflow className="h-4 w-4" />Stages
+          </TabsTrigger>
+          <TabsTrigger value="finishing" className="flex items-center gap-2">
+            <Layers className="h-4 w-4" />Finishing
+          </TabsTrigger>
+          <TabsTrigger value="services" className="flex items-center gap-2">
+            <Wrench className="h-4 w-4" />Services
           </TabsTrigger>
           <TabsTrigger value="general" className="flex items-center gap-2">
-            <Sliders className="h-4 w-4" />
-            General
+            <Sliders className="h-4 w-4" />General
           </TabsTrigger>
         </TabsList>
 
@@ -29,11 +36,35 @@ export default function LabelsSettings() {
           <ClientManagement />
         </TabsContent>
 
+        <TabsContent value="stages" className="mt-6">
+          <Card className={glassCard}>
+            <CardContent className="pt-6">
+              <LabelStageManagement />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="finishing" className="mt-6">
+          <Card className={glassCard}>
+            <CardContent className="pt-6">
+              <LabelFinishingManagement />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="services" className="mt-6">
+          <Card className={glassCard}>
+            <CardContent className="pt-6">
+              <LabelServicesManagement />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="general" className="mt-6">
           <Card className={glassCard}>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-900">
-                <Settings className="h-5 w-5 text-[#00B8D4]" />
+              <CardTitle className="flex items-center gap-2 text-foreground">
+                <Settings className="h-5 w-5 text-primary" />
                 General Settings
               </CardTitle>
               <CardDescription>Configure default values and preferences</CardDescription>

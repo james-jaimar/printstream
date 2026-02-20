@@ -1439,6 +1439,56 @@ export type Database = {
         }
         Relationships: []
       }
+      label_finishing_options: {
+        Row: {
+          category: string
+          created_at: string | null
+          description: string | null
+          display_name: string
+          id: string
+          is_active: boolean | null
+          name: string
+          properties: Json | null
+          sort_order: number | null
+          triggers_stage_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          category: string
+          created_at?: string | null
+          description?: string | null
+          display_name: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          properties?: Json | null
+          sort_order?: number | null
+          triggers_stage_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string | null
+          description?: string | null
+          display_name?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          properties?: Json | null
+          sort_order?: number | null
+          triggers_stage_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_finishing_options_triggers_stage_id_fkey"
+            columns: ["triggers_stage_id"]
+            isOneToOne: false
+            referencedRelation: "label_production_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       label_items: {
         Row: {
           artwork_issue: string | null
@@ -1556,17 +1606,167 @@ export type Database = {
           },
         ]
       }
+      label_order_services: {
+        Row: {
+          created_at: string | null
+          display_name: string
+          estimated_cost: number | null
+          finishing_option_id: string | null
+          id: string
+          notes: string | null
+          order_id: string
+          quantity: number | null
+          quantity_unit: string | null
+          service_type: string
+          sort_order: number | null
+          stage_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          display_name: string
+          estimated_cost?: number | null
+          finishing_option_id?: string | null
+          id?: string
+          notes?: string | null
+          order_id: string
+          quantity?: number | null
+          quantity_unit?: string | null
+          service_type: string
+          sort_order?: number | null
+          stage_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          display_name?: string
+          estimated_cost?: number | null
+          finishing_option_id?: string | null
+          id?: string
+          notes?: string | null
+          order_id?: string
+          quantity?: number | null
+          quantity_unit?: string | null
+          service_type?: string
+          sort_order?: number | null
+          stage_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_order_services_finishing_option_id_fkey"
+            columns: ["finishing_option_id"]
+            isOneToOne: false
+            referencedRelation: "label_finishing_options"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_order_services_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_order_services_stage_id_fkey"
+            columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "label_production_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_order_stage_instances: {
+        Row: {
+          actual_duration_minutes: number | null
+          assigned_operator_id: string | null
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string | null
+          estimated_duration_minutes: number | null
+          id: string
+          notes: string | null
+          order_id: string
+          service_line_id: string | null
+          stage_id: string
+          stage_order: number
+          started_at: string | null
+          started_by: string | null
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          actual_duration_minutes?: number | null
+          assigned_operator_id?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string | null
+          estimated_duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          order_id: string
+          service_line_id?: string | null
+          stage_id: string
+          stage_order: number
+          started_at?: string | null
+          started_by?: string | null
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          actual_duration_minutes?: number | null
+          assigned_operator_id?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string | null
+          estimated_duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          order_id?: string
+          service_line_id?: string | null
+          stage_id?: string
+          stage_order?: number
+          started_at?: string | null
+          started_by?: string | null
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_order_stage_instances_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_order_stage_instances_service_line_id_fkey"
+            columns: ["service_line_id"]
+            isOneToOne: false
+            referencedRelation: "label_order_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "label_order_stage_instances_stage_id_fkey"
+            columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "label_production_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       label_orders: {
         Row: {
           client_approved_at: string | null
           client_approved_by: string | null
           contact_email: string | null
           contact_name: string | null
+          core_size_mm: number | null
           created_at: string
           created_by: string | null
           customer_id: string | null
           customer_name: string
           customer_user_id: string | null
+          delivery_address: string | null
+          delivery_method: string | null
+          delivery_notes: string | null
           dieline_id: string | null
           due_date: string | null
           estimated_frames: number | null
@@ -1579,7 +1779,9 @@ export type Database = {
           orientation_confirmed: boolean
           proof_token: string | null
           proof_version: number
+          qty_per_roll: number | null
           quickeasy_wo_no: string | null
+          roll_direction: string | null
           roll_width_mm: number | null
           saved_layout: Json | null
           status: string
@@ -1592,11 +1794,15 @@ export type Database = {
           client_approved_by?: string | null
           contact_email?: string | null
           contact_name?: string | null
+          core_size_mm?: number | null
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
           customer_name: string
           customer_user_id?: string | null
+          delivery_address?: string | null
+          delivery_method?: string | null
+          delivery_notes?: string | null
           dieline_id?: string | null
           due_date?: string | null
           estimated_frames?: number | null
@@ -1609,7 +1815,9 @@ export type Database = {
           orientation_confirmed?: boolean
           proof_token?: string | null
           proof_version?: number
+          qty_per_roll?: number | null
           quickeasy_wo_no?: string | null
+          roll_direction?: string | null
           roll_width_mm?: number | null
           saved_layout?: Json | null
           status?: string
@@ -1622,11 +1830,15 @@ export type Database = {
           client_approved_by?: string | null
           contact_email?: string | null
           contact_name?: string | null
+          core_size_mm?: number | null
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
           customer_name?: string
           customer_user_id?: string | null
+          delivery_address?: string | null
+          delivery_method?: string | null
+          delivery_notes?: string | null
           dieline_id?: string | null
           due_date?: string | null
           estimated_frames?: number | null
@@ -1639,7 +1851,9 @@ export type Database = {
           orientation_confirmed?: boolean
           proof_token?: string | null
           proof_version?: number
+          qty_per_roll?: number | null
           quickeasy_wo_no?: string | null
+          roll_direction?: string | null
           roll_width_mm?: number | null
           saved_layout?: Json | null
           status?: string
@@ -1663,6 +1877,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      label_production_stages: {
+        Row: {
+          color: string | null
+          created_at: string | null
+          default_duration_minutes: number | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          is_conditional: boolean | null
+          name: string
+          order_index: number
+          speed_per_hour: number | null
+          speed_unit: string | null
+          stage_group: string
+          updated_at: string | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string | null
+          default_duration_minutes?: number | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_conditional?: boolean | null
+          name: string
+          order_index?: number
+          speed_per_hour?: number | null
+          speed_unit?: string | null
+          stage_group: string
+          updated_at?: string | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string | null
+          default_duration_minutes?: number | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_conditional?: boolean | null
+          name?: string
+          order_index?: number
+          speed_per_hour?: number | null
+          speed_unit?: string | null
+          stage_group?: string
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       label_proof_approvals: {
         Row: {
