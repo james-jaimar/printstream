@@ -18,7 +18,7 @@ import {
 } from '@/hooks/labels/useLabelStages';
 
 const GROUP_LABELS: Record<LabelStageGroup, string> = {
-  finishing: 'Finishing',
+  die_cutting_finishing: 'Die Cutting & Finishing',
   services: 'Services',
   qa: 'Quality Assurance',
   packaging: 'Packaging',
@@ -26,7 +26,7 @@ const GROUP_LABELS: Record<LabelStageGroup, string> = {
 };
 
 const GROUP_COLORS: Record<LabelStageGroup, string> = {
-  finishing: 'bg-primary/10 text-primary',
+  die_cutting_finishing: 'bg-orange-100 text-orange-700 border-orange-200',
   services: 'bg-accent text-accent-foreground',
   qa: 'bg-primary/10 text-primary',
   packaging: 'bg-secondary text-secondary-foreground',
@@ -49,7 +49,7 @@ interface StageFormState {
 const defaultForm: StageFormState = {
   name: '',
   description: '',
-  stage_group: 'finishing',
+  stage_group: 'die_cutting_finishing',
   color: '#6B7280',
   is_conditional: false,
   default_duration_minutes: '',

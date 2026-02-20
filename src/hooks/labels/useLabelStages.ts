@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-export type LabelStageGroup = 'finishing' | 'services' | 'qa' | 'packaging' | 'dispatch';
+export type LabelStageGroup = 'die_cutting_finishing' | 'services' | 'qa' | 'packaging' | 'dispatch';
 
 export interface LabelProductionStage {
   id: string;

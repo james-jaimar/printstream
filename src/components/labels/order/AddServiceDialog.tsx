@@ -15,10 +15,11 @@ interface AddServiceDialogProps {
   orderId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  outputRollsCount?: number | null;
 }
 
 const SERVICE_TYPES: { value: LabelServiceType; label: string; icon: string; description: string }[] = [
-  { value: 'finishing', label: 'Finishing', icon: '✨', description: 'Lamination, UV varnish, sheeting' },
+  { value: 'finishing', label: 'Die Cutting & Finishing', icon: '✨', description: 'Die cutting, lamination, UV varnish' },
   { value: 'rewinding', label: 'Rewinding', icon: '🔄', description: 'Rewind to specified core sizes' },
   { value: 'joining', label: 'Joining Rolls', icon: '🔗', description: 'Join rolls into one continuous roll' },
   { value: 'handwork', label: 'Handwork', icon: '🖐', description: 'Manual application or sorting' },
@@ -44,7 +45,7 @@ const QUANTITY_UNITS: Record<LabelServiceType, string[]> = {
   delivery: ['parcels', 'boxes'],
 };
 
-export function AddServiceDialog({ orderId, open, onOpenChange }: AddServiceDialogProps) {
+export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount }: AddServiceDialogProps) {
   const { data: finishingOptions } = useLabelFinishingOptions();
   const { data: stages } = useLabelStages();
   const addService = useAddOrderService();
@@ -84,6 +85,11 @@ export function AddServiceDialog({ orderId, open, onOpenChange }: AddServiceDial
     // Pre-fill default unit
     const units = QUANTITY_UNITS[type];
     if (units.length === 1) setQuantityUnit(units[0]);
+    // Auto-populate rewinding quantity from output_rolls_count
+    if (type === 'rewinding' && outputRollsCount != null) {
+      setQuantity(String(outputRollsCount));
+      setQuantityUnit('rolls');
+    }
     setStep(2);
   };
 

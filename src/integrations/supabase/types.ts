@@ -1754,6 +1754,7 @@ export type Database = {
       }
       label_orders: {
         Row: {
+          abg_speed_m_per_min: number | null
           client_approved_at: string | null
           client_approved_by: string | null
           contact_email: string | null
@@ -1777,6 +1778,7 @@ export type Database = {
           order_number: string
           orientation: number
           orientation_confirmed: boolean
+          output_rolls_count: number | null
           proof_token: string | null
           proof_version: number
           qty_per_roll: number | null
@@ -1790,6 +1792,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          abg_speed_m_per_min?: number | null
           client_approved_at?: string | null
           client_approved_by?: string | null
           contact_email?: string | null
@@ -1813,6 +1816,7 @@ export type Database = {
           order_number: string
           orientation?: number
           orientation_confirmed?: boolean
+          output_rolls_count?: number | null
           proof_token?: string | null
           proof_version?: number
           qty_per_roll?: number | null
@@ -1826,6 +1830,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          abg_speed_m_per_min?: number | null
           client_approved_at?: string | null
           client_approved_by?: string | null
           contact_email?: string | null
@@ -1849,6 +1854,7 @@ export type Database = {
           order_number?: string
           orientation?: number
           orientation_confirmed?: boolean
+          output_rolls_count?: number | null
           proof_token?: string | null
           proof_version?: number
           qty_per_roll?: number | null

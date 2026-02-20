@@ -114,6 +114,9 @@ export function useCreateLabelOrder() {
           delivery_method: input.delivery_method ?? null,
           delivery_address: input.delivery_address ?? null,
           delivery_notes: input.delivery_notes ?? null,
+          // ABG machine output fields
+          output_rolls_count: input.output_rolls_count ?? null,
+          abg_speed_m_per_min: input.abg_speed_m_per_min ?? 30,
           created_by: user.user?.id,
           status: 'quote',
         })
