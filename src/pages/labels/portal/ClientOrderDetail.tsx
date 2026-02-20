@@ -40,6 +40,7 @@ import {
 import ClientItemCard from '@/components/labels/portal/ClientItemCard';
 import ApprovalDisclaimer from '@/components/labels/portal/ApprovalDisclaimer';
 import { OrientationConfirmBanner } from '@/components/labels/portal/OrientationConfirmBanner';
+import { SpecsConfirmationCard } from '@/components/labels/portal/SpecsConfirmationCard';
 import impressLogo from '@/assets/impress-logo-colour.png';
 
 const workflowSteps = [
@@ -298,6 +299,9 @@ export default function ClientOrderDetail() {
               isPending={confirmOrientationMutation.isPending}
             />
 
+            {/* Specs Confirmation Card */}
+            <SpecsConfirmationCard order={order as any} orderId={orderId!} />
+
             {/* All approved banner */}
             {allItemsApproved && (
               <div className="flex items-center gap-3 rounded-2xl p-4 border border-emerald-200/70 bg-emerald-50/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur">
@@ -358,6 +362,24 @@ export default function ClientOrderDetail() {
                 <CardTitle className="text-lg">Order Summary</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                {/* Reference & PO */}
+                {((order as any).reference || (order as any).po_number) && (
+                  <>
+                    {(order as any).reference && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Reference</span>
+                        <span className="font-medium font-mono text-xs">{(order as any).reference}</span>
+                      </div>
+                    )}
+                    {(order as any).po_number && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">PO Number</span>
+                        <span className="font-medium font-mono text-xs">{(order as any).po_number}</span>
+                      </div>
+                    )}
+                    <Separator />
+                  </>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Total Labels</span>
                   <span className="font-medium">{order.total_label_count.toLocaleString()}</span>

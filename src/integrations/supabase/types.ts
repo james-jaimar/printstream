@@ -1673,6 +1673,50 @@ export type Database = {
           },
         ]
       }
+      label_order_spec_confirmations: {
+        Row: {
+          confirmed_at: string | null
+          confirmed_by: string | null
+          created_at: string | null
+          flagged_comment: string | null
+          id: string
+          order_id: string
+          spec_key: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string | null
+          flagged_comment?: string | null
+          id?: string
+          order_id: string
+          spec_key: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string | null
+          flagged_comment?: string | null
+          id?: string
+          order_id?: string
+          spec_key?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_order_spec_confirmations_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "label_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       label_order_stage_instances: {
         Row: {
           actual_duration_minutes: number | null
@@ -1779,10 +1823,12 @@ export type Database = {
           orientation: number
           orientation_confirmed: boolean
           output_rolls_count: number | null
+          po_number: string | null
           proof_token: string | null
           proof_version: number
           qty_per_roll: number | null
           quickeasy_wo_no: string | null
+          reference: string | null
           roll_direction: string | null
           roll_width_mm: number | null
           saved_layout: Json | null
@@ -1817,10 +1863,12 @@ export type Database = {
           orientation?: number
           orientation_confirmed?: boolean
           output_rolls_count?: number | null
+          po_number?: string | null
           proof_token?: string | null
           proof_version?: number
           qty_per_roll?: number | null
           quickeasy_wo_no?: string | null
+          reference?: string | null
           roll_direction?: string | null
           roll_width_mm?: number | null
           saved_layout?: Json | null
@@ -1855,10 +1903,12 @@ export type Database = {
           orientation?: number
           orientation_confirmed?: boolean
           output_rolls_count?: number | null
+          po_number?: string | null
           proof_token?: string | null
           proof_version?: number
           qty_per_roll?: number | null
           quickeasy_wo_no?: string | null
+          reference?: string | null
           roll_direction?: string | null
           roll_width_mm?: number | null
           saved_layout?: Json | null

@@ -167,10 +167,26 @@ export interface LabelStock {
   updated_at: string;
 }
 
+export type SpecConfirmationStatus = 'pending' | 'confirmed' | 'flagged';
+
+export interface LabelOrderSpecConfirmation {
+  id: string;
+  order_id: string;
+  spec_key: string;
+  status: SpecConfirmationStatus;
+  flagged_comment: string | null;
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LabelOrder {
   id: string;
   order_number: string;
   quickeasy_wo_no: string | null;
+  reference: string | null;
+  po_number: string | null;
   customer_id: string | null;
   customer_name: string;
   contact_name: string | null;

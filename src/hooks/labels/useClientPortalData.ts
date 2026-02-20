@@ -173,6 +173,48 @@ export function useClientPortalUploadArtwork() {
   });
 }
 
+// Spec confirmations
+export function useClientPortalSpecConfirmations(orderId: string | undefined) {
+  const { token } = useClientAuth();
+  const clientFetch = useClientFetch();
+
+  return useQuery({
+    queryKey: ['label_spec_confirmations', orderId],
+    queryFn: async () => {
+      if (!orderId) return [];
+      const data = await clientFetch(`/spec-confirmations/${orderId}`);
+      return data?.confirmations || [];
+    },
+    enabled: !!token && !!orderId,
+  });
+}
+
+export function useClientPortalConfirmSpec() {
+  const queryClient = useQueryClient();
+  const clientFetch = useClientFetch();
+
+  return useMutation({
+    mutationFn: async (input: {
+      order_id: string;
+      spec_key: string;
+      status: 'confirmed' | 'flagged';
+      comment?: string;
+    }) => {
+      await clientFetch('/confirm-spec', {
+        method: 'POST',
+        body: input,
+      });
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['label_spec_confirmations', variables.order_id] });
+    },
+    onError: (error) => {
+      console.error('Spec confirm error:', error);
+      toast.error('Failed to save confirmation');
+    },
+  });
+}
+
 // Confirm orientation
 export function useClientPortalConfirmOrientation() {
   const queryClient = useQueryClient();

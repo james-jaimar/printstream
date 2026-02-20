@@ -136,6 +136,7 @@ Deno.serve(async (req) => {
 
   const customerId = payload.customer_id as string;
   const contactId = payload.contact_id as string;
+  const contactName = (payload.contact_name as string) || "";
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   const url = new URL(req.url);
@@ -192,7 +193,8 @@ Deno.serve(async (req) => {
           dieline:label_dielines(*),
           substrate:label_stock(*),
           items:label_items(*),
-          runs:label_runs(*)
+          runs:label_runs(*),
+          services:label_order_services(*, finishing_option:label_finishing_options(id, display_name, category))
         `
         )
         .eq("id", orderId)
@@ -236,6 +238,74 @@ Deno.serve(async (req) => {
 
       if (error) throw error;
       return jsonResponse({ approvals: data || [] });
+    }
+
+    // GET /spec-confirmations/:orderId
+    const specConfirmMatch = path.match(/^\/spec-confirmations\/([a-f0-9-]+)$/);
+    if (req.method === "GET" && specConfirmMatch) {
+      const orderId = specConfirmMatch[1];
+
+      // Verify order belongs to customer
+      const { data: order } = await supabase
+        .from("label_orders")
+        .select("id")
+        .eq("id", orderId)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
+      if (!order) return jsonResponse({ error: "Order not found" }, 404);
+
+      const { data, error } = await supabase
+        .from("label_order_spec_confirmations")
+        .select("*")
+        .eq("order_id", orderId);
+
+      if (error) throw error;
+      return jsonResponse({ confirmations: data || [] });
+    }
+
+    // POST /confirm-spec — client confirms/flags a spec
+    if (req.method === "POST" && path === "/confirm-spec") {
+      const body = await req.json();
+      const { order_id, spec_key, status, comment } = body;
+
+      if (!order_id || !spec_key || !status) {
+        return jsonResponse({ error: "order_id, spec_key, and status required" }, 400);
+      }
+      if (!["confirmed", "flagged"].includes(status)) {
+        return jsonResponse({ error: "status must be 'confirmed' or 'flagged'" }, 400);
+      }
+      if (status === "flagged" && !comment?.trim()) {
+        return jsonResponse({ error: "comment required when flagging" }, 400);
+      }
+
+      // Verify order belongs to customer
+      const { data: order } = await supabase
+        .from("label_orders")
+        .select("id")
+        .eq("id", order_id)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
+      if (!order) return jsonResponse({ error: "Order not found" }, 404);
+
+      const upsertData: Record<string, unknown> = {
+        order_id,
+        spec_key,
+        status,
+        flagged_comment: status === "flagged" ? (comment || null) : null,
+        confirmed_at: status === "confirmed" ? new Date().toISOString() : null,
+        confirmed_by: status === "confirmed" ? contactName : null,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: upsertErr } = await supabase
+        .from("label_order_spec_confirmations")
+        .upsert(upsertData, { onConflict: "order_id,spec_key" });
+
+      if (upsertErr) throw upsertErr;
+
+      return jsonResponse({ success: true });
     }
 
     // POST /approve (legacy - order level)
