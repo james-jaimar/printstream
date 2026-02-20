@@ -765,12 +765,12 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground font-medium">Core Size</p>
                       <Select
-                        value={String((order as any).core_size_mm ?? '')}
-                        onValueChange={(v) => updateOrder.mutate({ id: order.id, updates: { core_size_mm: v ? parseInt(v) : null } as any })}
+                        value={(order as any).core_size_mm ? String((order as any).core_size_mm) : 'none'}
+                        onValueChange={(v) => updateOrder.mutate({ id: order.id, updates: { core_size_mm: v === 'none' ? null : parseInt(v) } as any })}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not specified" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Not specified</SelectItem>
+                          <SelectItem value="none">Not specified</SelectItem>
                           {[25, 38, 40, 76].map(s => <SelectItem key={s} value={String(s)}>{s}mm</SelectItem>)}
                         </SelectContent>
                       </Select>
@@ -793,12 +793,12 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground font-medium">Roll Direction</p>
                       <Select
-                        value={(order as any).roll_direction ?? ''}
-                        onValueChange={v => updateOrder.mutate({ id: order.id, updates: { roll_direction: v || null } as any })}
+                        value={(order as any).roll_direction ?? 'none'}
+                        onValueChange={v => updateOrder.mutate({ id: order.id, updates: { roll_direction: v === 'none' ? null : v } as any })}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not specified" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Not specified</SelectItem>
+                          <SelectItem value="none">Not specified</SelectItem>
                           <SelectItem value="face_in">Face In</SelectItem>
                           <SelectItem value="face_out">Face Out</SelectItem>
                         </SelectContent>
@@ -808,12 +808,12 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground font-medium">Delivery Method</p>
                       <Select
-                        value={(order as any).delivery_method ?? ''}
-                        onValueChange={v => updateOrder.mutate({ id: order.id, updates: { delivery_method: v || null } as any })}
+                        value={(order as any).delivery_method ?? 'none'}
+                        onValueChange={v => updateOrder.mutate({ id: order.id, updates: { delivery_method: v === 'none' ? null : v } as any })}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not specified" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Not specified</SelectItem>
+                          <SelectItem value="none">Not specified</SelectItem>
                           <SelectItem value="collection">Collection</SelectItem>
                           <SelectItem value="local_delivery">Local Delivery</SelectItem>
                           <SelectItem value="courier">Courier</SelectItem>
