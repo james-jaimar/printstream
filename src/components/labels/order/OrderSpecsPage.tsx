@@ -97,6 +97,8 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
   const [notesValue, setNotesValue] = useState(order.notes ?? '');
+  const [referenceValue, setReferenceValue] = useState((order as any).reference ?? '');
+  const [poNumberValue, setPoNumberValue] = useState((order as any).po_number ?? '');
 
   const canEdit = order.status !== 'completed' && order.status !== 'cancelled';
 
@@ -181,6 +183,34 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
                   </Badge>
                 </SpecRow>
               )}
+              {/* Reference */}
+              <SpecRow label="Reference">
+                <Input
+                  className="h-7 text-xs text-right max-w-[160px] ml-auto"
+                  placeholder="e.g. ABC-123"
+                  value={referenceValue}
+                  onChange={(e) => setReferenceValue(e.target.value)}
+                  onBlur={() => {
+                    if (referenceValue !== ((order as any).reference ?? '')) {
+                      updateOrder.mutate({ id: order.id, updates: { reference: referenceValue || null } as any });
+                    }
+                  }}
+                />
+              </SpecRow>
+              {/* PO Number */}
+              <SpecRow label="PO Number">
+                <Input
+                  className="h-7 text-xs text-right max-w-[160px] ml-auto"
+                  placeholder="e.g. PO-9876"
+                  value={poNumberValue}
+                  onChange={(e) => setPoNumberValue(e.target.value)}
+                  onBlur={() => {
+                    if (poNumberValue !== ((order as any).po_number ?? '')) {
+                      updateOrder.mutate({ id: order.id, updates: { po_number: poNumberValue || null } as any });
+                    }
+                  }}
+                />
+              </SpecRow>
               {order.due_date && (
                 <SpecRow label="Due Date">
                   <span className="flex items-center justify-end gap-1 text-xs font-medium">
