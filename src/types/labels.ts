@@ -365,6 +365,13 @@ export interface CreateLabelOrderInput {
   quickeasy_wo_no?: string;
   orientation?: number;
   ink_config?: LabelInkConfig;
+  // Post-print / delivery fields
+  core_size_mm?: number | null;
+  qty_per_roll?: number | null;
+  roll_direction?: string | null;
+  delivery_method?: string | null;
+  delivery_address?: string | null;
+  delivery_notes?: string | null;
 }
 
 export interface CreateLabelItemInput {

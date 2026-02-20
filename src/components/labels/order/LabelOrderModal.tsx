@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import { 
   Calendar,
@@ -930,5 +930,3 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   );
 }
 
-// Need React import for createElement
-import React from 'react';
