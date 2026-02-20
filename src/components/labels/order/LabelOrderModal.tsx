@@ -470,7 +470,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             <Button onClick={() => onOpenChange(false)}>Close</Button>
           </div>
         ) : (
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col" style={{ height: '90vh' }}>
             {/* ── Header ──────────────────────────────────────────────────── */}
             <div className="sticky top-0 bg-background border-b z-10">
               {/* Top row: order info + close */}
