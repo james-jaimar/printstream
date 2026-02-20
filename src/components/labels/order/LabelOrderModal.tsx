@@ -45,8 +45,9 @@ import { OrientationPicker, getOrientationLabel, getOrientationSvg } from '@/com
 import { supabase } from '@/integrations/supabase/client';
 import { validatePdfDimensions } from '@/utils/pdf/thumbnailUtils';
 import type { LabelOrderStatus, PreflightReport, PdfBoxes, LabelInkConfig } from '@/types/labels';
-import { INK_CONFIG_LABELS, INK_CONFIG_SPEEDS } from '@/types/labels';
+import { INK_CONFIG_LABELS, INK_CONFIG_SPEEDS, LABEL_FINISHING_CONSTANTS } from '@/types/labels';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 
 
@@ -821,6 +822,83 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                         </SelectContent>
                       </Select>
                     </div>
+                    <Separator className="my-2" />
+                    {/* ABG Machine — Output Rolls */}
+                    {(() => {
+                      const columnsAcross = order.dieline?.columns_across ?? 1;
+                      const runCount = order.runs?.length || 1;
+                      const computedOutputRolls = columnsAcross * runCount;
+                      const savedOutputRolls = (order as any).output_rolls_count as number | null;
+                      const effectiveRolls = savedOutputRolls ?? computedOutputRolls;
+                      const totalLabels = order.total_label_count;
+                      const labelsPerRoll = effectiveRolls > 0 ? Math.round(totalLabels / effectiveRolls) : null;
+                      const { SHORT_ROLL_DANGER_THRESHOLD, SHORT_ROLL_WARNING_THRESHOLD } = LABEL_FINISHING_CONSTANTS;
+                      const rollWarning = labelsPerRoll !== null
+                        ? labelsPerRoll < SHORT_ROLL_DANGER_THRESHOLD
+                          ? 'danger'
+                          : labelsPerRoll < SHORT_ROLL_WARNING_THRESHOLD
+                            ? 'warning'
+                            : null
+                        : null;
+                      return (
+                        <>
+                          <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                              🔄 Output Rolls
+                              <span className="text-[10px] text-muted-foreground/60 font-normal">({columnsAcross} across × {runCount} run{runCount !== 1 ? 's' : ''})</span>
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-mono font-semibold text-foreground">{computedOutputRolls}</span>
+                              <span className="text-xs text-muted-foreground">computed</span>
+                              {savedOutputRolls !== null && savedOutputRolls !== computedOutputRolls && (
+                                <span className="text-xs font-mono text-amber-600">→ {savedOutputRolls} (override)</span>
+                              )}
+                            </div>
+                            <Input
+                              type="number"
+                              className="h-7 w-full text-xs"
+                              placeholder={`Override (default: ${computedOutputRolls})`}
+                              defaultValue={savedOutputRolls ?? ''}
+                              onBlur={e => {
+                                const val = e.target.value ? parseInt(e.target.value) : null;
+                                updateOrder.mutate({ id: order.id, updates: { output_rolls_count: val } as any });
+                              }}
+                            />
+                          </div>
+                          {labelsPerRoll !== null && (
+                            <div className="space-y-0.5">
+                              <p className="text-xs text-muted-foreground font-medium">Labels per Output Roll</p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-mono font-semibold">{labelsPerRoll.toLocaleString()}</span>
+                                {rollWarning === 'danger' && (
+                                  <span className="text-[10px] font-medium text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">
+                                    🔴 Very short — rewind &amp; join required
+                                  </span>
+                                )}
+                                {rollWarning === 'warning' && (
+                                  <span className="text-[10px] font-medium text-warning-foreground bg-warning/20 px-1.5 py-0.5 rounded">
+                                    🟡 Short — consider joining
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground font-medium">ABG Speed (m/min)</p>
+                            <Input
+                              type="number"
+                              className="h-7 w-full text-xs"
+                              defaultValue={(order as any).abg_speed_m_per_min ?? LABEL_FINISHING_CONSTANTS.ABG_MACHINE_SPEED_M_PER_MIN}
+                              onBlur={e => {
+                                const val = e.target.value ? parseInt(e.target.value) : LABEL_FINISHING_CONSTANTS.ABG_MACHINE_SPEED_M_PER_MIN;
+                                updateOrder.mutate({ id: order.id, updates: { abg_speed_m_per_min: val } as any });
+                              }}
+                            />
+                          </div>
+                        </>
+                      );
+                    })()}
+
                   </CardContent>
                 </Card>
               </div>
@@ -883,7 +961,12 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
               <Separator />
 
               {/* Finishing & Services */}
-              <FinishingServicesCard orderId={order.id} orderStatus={order.status} />
+              <FinishingServicesCard 
+                orderId={order.id} 
+                orderStatus={order.status}
+                outputRollsCount={(order as any).output_rolls_count ?? ((order.dieline?.columns_across ?? 1) * (order.runs?.length || 1))}
+                qtyPerRoll={(order as any).qty_per_roll}
+              />
 
               <Separator />
 

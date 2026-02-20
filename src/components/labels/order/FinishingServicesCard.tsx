@@ -11,6 +11,8 @@ import type { LabelOrderStatus } from '@/types/labels';
 interface FinishingServicesCardProps {
   orderId: string;
   orderStatus: LabelOrderStatus;
+  outputRollsCount?: number | null;
+  qtyPerRoll?: number | null;
 }
 
 const SERVICE_ICONS: Record<string, string> = {
@@ -33,8 +35,20 @@ const SERVICE_COLORS: Record<string, string> = {
   delivery: 'bg-muted text-muted-foreground',
 };
 
-function ServiceRow({ service, canEdit, orderId }: { service: LabelOrderService; canEdit: boolean; orderId: string }) {
+function ServiceRow({
+  service,
+  canEdit,
+  orderId,
+  qtyPerRoll,
+}: {
+  service: LabelOrderService;
+  canEdit: boolean;
+  orderId: string;
+  qtyPerRoll?: number | null;
+}) {
   const remove = useRemoveOrderService();
+
+  const rewindingRollQty = service.service_type === 'rewinding' && service.quantity ? service.quantity : null;
 
   return (
     <div className="flex items-center gap-3 py-2 px-3 rounded-lg border bg-card hover:bg-muted/20 transition-colors">
@@ -45,6 +59,11 @@ function ServiceRow({ service, canEdit, orderId }: { service: LabelOrderService;
           {service.quantity && (
             <Badge variant="outline" className="text-xs font-normal">
               {service.quantity} {service.quantity_unit || ''}
+            </Badge>
+          )}
+          {rewindingRollQty && qtyPerRoll && (
+            <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+              {qtyPerRoll.toLocaleString()} labels/roll
             </Badge>
           )}
         </div>
@@ -74,7 +93,7 @@ function ServiceRow({ service, canEdit, orderId }: { service: LabelOrderService;
   );
 }
 
-export function FinishingServicesCard({ orderId, orderStatus }: FinishingServicesCardProps) {
+export function FinishingServicesCard({ orderId, orderStatus, outputRollsCount, qtyPerRoll }: FinishingServicesCardProps) {
   const { data: services, isLoading } = useOrderServices(orderId);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -119,7 +138,7 @@ export function FinishingServicesCard({ orderId, orderStatus }: FinishingService
           ) : (
             <div className="space-y-1.5">
               {(services || []).map(svc => (
-                <ServiceRow key={svc.id} service={svc} canEdit={canEdit} orderId={orderId} />
+                <ServiceRow key={svc.id} service={svc} canEdit={canEdit} orderId={orderId} qtyPerRoll={qtyPerRoll} />
               ))}
             </div>
           )}
@@ -130,6 +149,7 @@ export function FinishingServicesCard({ orderId, orderStatus }: FinishingService
         orderId={orderId}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        outputRollsCount={outputRollsCount}
       />
     </>
   );

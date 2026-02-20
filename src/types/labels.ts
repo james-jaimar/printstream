@@ -29,6 +29,14 @@ export const LABEL_PRINT_CONSTANTS = {
   MAKE_READY_SUBSEQUENT_MIN: 10,  // 10 min if not changing material
 } as const;
 
+// ABG Machine Finishing Constants
+export const LABEL_FINISHING_CONSTANTS = {
+  ABG_MACHINE_SPEED_M_PER_MIN: 30,  // default ABG run speed (m/min)
+  ABG_DIE_CUT_ALWAYS: true,          // die cutting is always part of ABG pass
+  SHORT_ROLL_DANGER_THRESHOLD: 100,  // < 100 labels/roll = danger, rewind+join required
+  SHORT_ROLL_WARNING_THRESHOLD: 300, // < 300 labels/roll = warning, consider joining
+} as const;
+
 // AI Optimization Weights (Configurable)
 export const DEFAULT_OPTIMIZATION_WEIGHTS = {
   material_efficiency: 0.4,   // Minimize substrate waste
@@ -191,6 +199,9 @@ export interface LabelOrder {
   delivery_method: string | null;
   delivery_address: string | null;
   delivery_notes: string | null;
+  // ABG machine output fields
+  output_rolls_count: number | null;
+  abg_speed_m_per_min: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -372,6 +383,9 @@ export interface CreateLabelOrderInput {
   delivery_method?: string | null;
   delivery_address?: string | null;
   delivery_notes?: string | null;
+  // ABG machine output fields
+  output_rolls_count?: number | null;
+  abg_speed_m_per_min?: number | null;
 }
 
 export interface CreateLabelItemInput {
