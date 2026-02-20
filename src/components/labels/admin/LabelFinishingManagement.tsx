@@ -26,9 +26,9 @@ const CATEGORIES: { value: LabelFinishingCategory; label: string }[] = [
 ];
 
 const CATEGORY_COLORS: Record<LabelFinishingCategory, string> = {
-  lamination: 'bg-indigo-100 text-indigo-700',
-  uv_varnish: 'bg-amber-100 text-amber-700',
-  sheeting: 'bg-emerald-100 text-emerald-700',
+  lamination: 'bg-primary/10 text-primary',
+  uv_varnish: 'bg-secondary text-secondary-foreground',
+  sheeting: 'bg-accent text-accent-foreground',
 };
 
 interface FormState {

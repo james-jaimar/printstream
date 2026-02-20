@@ -50,6 +50,15 @@ export function useLabelOrder(orderId: string | undefined) {
           runs:label_runs(
             *,
             schedule:label_schedule(*)
+          ),
+          services:label_order_services(
+            *,
+            finishing_option:label_finishing_options(id, display_name, category),
+            stage:label_production_stages(id, name, color)
+          ),
+          stage_instances:label_order_stage_instances(
+            *,
+            stage:label_production_stages(id, name, color, stage_group)
           )
         `)
         .eq('id', orderId)
@@ -98,6 +107,13 @@ export function useCreateLabelOrder() {
           quickeasy_wo_no: input.quickeasy_wo_no,
           orientation: input.orientation ?? 1,
           ink_config: input.ink_config ?? 'CMYK',
+          // Post-print / delivery fields
+          core_size_mm: input.core_size_mm ?? null,
+          qty_per_roll: input.qty_per_roll ?? null,
+          roll_direction: input.roll_direction ?? null,
+          delivery_method: input.delivery_method ?? null,
+          delivery_address: input.delivery_address ?? null,
+          delivery_notes: input.delivery_notes ?? null,
           created_by: user.user?.id,
           status: 'quote',
         })

@@ -11,9 +11,9 @@ interface StageInstancesSectionProps {
 
 const STATUS_CONFIG: Record<LabelStageStatus, { label: string; icon: typeof Circle; className: string; badgeClass: string }> = {
   pending:   { label: 'Pending',   icon: Circle,       className: 'text-muted-foreground', badgeClass: 'bg-muted text-muted-foreground' },
-  active:    { label: 'Active',    icon: PlayCircle,   className: 'text-blue-600',         badgeClass: 'bg-blue-100 text-blue-700' },
-  completed: { label: 'Done',      icon: CheckCircle2, className: 'text-emerald-600',      badgeClass: 'bg-emerald-100 text-emerald-700' },
-  held:      { label: 'On Hold',   icon: PauseCircle,  className: 'text-amber-600',        badgeClass: 'bg-amber-100 text-amber-700' },
+  active:    { label: 'Active',    icon: PlayCircle,   className: 'text-primary',          badgeClass: 'bg-primary/10 text-primary' },
+  completed: { label: 'Done',      icon: CheckCircle2, className: 'text-primary',          badgeClass: 'bg-primary/20 text-primary' },
+  held:      { label: 'On Hold',   icon: PauseCircle,  className: 'text-muted-foreground', badgeClass: 'bg-secondary text-secondary-foreground' },
   skipped:   { label: 'Skipped',   icon: SkipForward,  className: 'text-muted-foreground', badgeClass: 'bg-muted text-muted-foreground' },
 };
 
@@ -143,7 +143,7 @@ export function StageInstancesSection({ orderId }: StageInstancesSectionProps) {
         </div>
         <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden">
           <div
-            className="h-full bg-emerald-500 rounded-full transition-all"
+            className="h-full bg-primary rounded-full transition-all"
             style={{ width: `${total > 0 ? (completed / total) * 100 : 0}%` }}
           />
         </div>

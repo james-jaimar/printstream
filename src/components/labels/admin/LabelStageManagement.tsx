@@ -26,11 +26,11 @@ const GROUP_LABELS: Record<LabelStageGroup, string> = {
 };
 
 const GROUP_COLORS: Record<LabelStageGroup, string> = {
-  finishing: 'bg-blue-100 text-blue-700',
-  services: 'bg-cyan-100 text-cyan-700',
-  qa: 'bg-green-100 text-green-700',
-  packaging: 'bg-lime-100 text-lime-700',
-  dispatch: 'bg-slate-100 text-slate-700',
+  finishing: 'bg-primary/10 text-primary',
+  services: 'bg-accent text-accent-foreground',
+  qa: 'bg-primary/10 text-primary',
+  packaging: 'bg-secondary text-secondary-foreground',
+  dispatch: 'bg-muted text-muted-foreground',
 };
 
 const SPEED_UNITS = ['labels_per_hour', 'meters_per_hour', 'rolls_per_hour'];

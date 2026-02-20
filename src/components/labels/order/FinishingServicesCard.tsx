@@ -24,13 +24,13 @@ const SERVICE_ICONS: Record<string, string> = {
 };
 
 const SERVICE_COLORS: Record<string, string> = {
-  finishing: 'bg-indigo-100 text-indigo-700',
-  rewinding: 'bg-cyan-100 text-cyan-700',
-  joining: 'bg-sky-100 text-sky-700',
-  handwork: 'bg-orange-100 text-orange-700',
-  qa: 'bg-green-100 text-green-700',
-  packaging: 'bg-lime-100 text-lime-700',
-  delivery: 'bg-slate-100 text-slate-700',
+  finishing: 'bg-primary/10 text-primary',
+  rewinding: 'bg-accent text-accent-foreground',
+  joining: 'bg-accent text-accent-foreground',
+  handwork: 'bg-secondary text-secondary-foreground',
+  qa: 'bg-primary/10 text-primary',
+  packaging: 'bg-secondary text-secondary-foreground',
+  delivery: 'bg-muted text-muted-foreground',
 };
 
 function ServiceRow({ service, canEdit, orderId }: { service: LabelOrderService; canEdit: boolean; orderId: string }) {
