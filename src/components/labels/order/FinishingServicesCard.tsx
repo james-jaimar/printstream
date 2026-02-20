@@ -13,6 +13,8 @@ interface FinishingServicesCardProps {
   orderStatus: LabelOrderStatus;
   outputRollsCount?: number | null;
   qtyPerRoll?: number | null;
+  /** When true, renders without the outer Card wrapper (for embedding inside another card) */
+  embedded?: boolean;
 }
 
 const SERVICE_ICONS: Record<string, string> = {
@@ -93,15 +95,15 @@ function ServiceRow({
   );
 }
 
-export function FinishingServicesCard({ orderId, orderStatus, outputRollsCount, qtyPerRoll }: FinishingServicesCardProps) {
+export function FinishingServicesCard({ orderId, orderStatus, outputRollsCount, qtyPerRoll, embedded = false }: FinishingServicesCardProps) {
   const { data: services, isLoading } = useOrderServices(orderId);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const canEdit = orderStatus !== 'completed' && orderStatus !== 'cancelled';
 
-  return (
+  const content = (
     <>
-      <Card>
+      {!embedded && (
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center justify-between gap-2">
             <span className="flex items-center gap-2">
@@ -119,31 +121,31 @@ export function FinishingServicesCard({ orderId, orderStatus, outputRollsCount, 
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10" />
-              <Skeleton className="h-10" />
-            </div>
-          ) : (services?.length || 0) === 0 ? (
-            <div className="text-center py-6 border-2 border-dashed rounded-lg">
-              <p className="text-xs text-muted-foreground">No finishing or services added yet</p>
-              {canEdit && (
-                <Button size="sm" variant="ghost" className="mt-2 text-xs h-7" onClick={() => setDialogOpen(true)}>
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  Add first service
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {(services || []).map(svc => (
-                <ServiceRow key={svc.id} service={svc} canEdit={canEdit} orderId={orderId} qtyPerRoll={qtyPerRoll} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      )}
+      <CardContent className={embedded ? 'p-0' : undefined}>
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </div>
+        ) : (services?.length || 0) === 0 ? (
+          <div className="text-center py-4 border-2 border-dashed rounded-lg">
+            <p className="text-xs text-muted-foreground">No finishing or services added yet</p>
+            {canEdit && !embedded && (
+              <Button size="sm" variant="ghost" className="mt-2 text-xs h-7" onClick={() => setDialogOpen(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add first service
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {(services || []).map(svc => (
+              <ServiceRow key={svc.id} service={svc} canEdit={canEdit} orderId={orderId} qtyPerRoll={qtyPerRoll} />
+            ))}
+          </div>
+        )}
+      </CardContent>
 
       <AddServiceDialog
         orderId={orderId}
@@ -152,5 +154,13 @@ export function FinishingServicesCard({ orderId, orderStatus, outputRollsCount, 
         outputRollsCount={outputRollsCount}
       />
     </>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <Card>
+      {content}
+    </Card>
   );
 }
