@@ -38,6 +38,8 @@ import { LayoutOptimizer } from '../LayoutOptimizer';
 import { AddLabelItemDialog } from '../AddLabelItemDialog';
 import { SendProofingDialog } from '../proofing/SendProofingDialog';
 import { RequestArtworkDialog } from '../proofing/RequestArtworkDialog';
+import { FinishingServicesCard } from './FinishingServicesCard';
+import { StageInstancesSection } from './StageInstancesSection';
 import { runPreflight, getPageBoxes, splitPdf } from '@/services/labels/vpsApiService';
 import { OrientationPicker, getOrientationLabel, getOrientationSvg } from '@/components/labels/OrientationPicker';
 import { supabase } from '@/integrations/supabase/client';
@@ -46,6 +48,7 @@ import type { LabelOrderStatus, PreflightReport, PdfBoxes, LabelInkConfig } from
 import { INK_CONFIG_LABELS, INK_CONFIG_SPEEDS } from '@/types/labels';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+
 
 const statusConfig: Record<LabelOrderStatus, { 
   label: string; 
@@ -738,7 +741,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   </CardContent>
                 </Card>
 
-                {/* Order Stats */}
+                {/* Order Stats / Summary */}
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm flex items-center gap-2">
@@ -757,6 +760,67 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                         Due: {format(new Date(order.due_date), 'PP')}
                       </p>
                     )}
+                    <Separator className="my-2" />
+                    {/* Core Size */}
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground font-medium">Core Size</p>
+                      <Select
+                        value={String((order as any).core_size_mm ?? '')}
+                        onValueChange={(v) => updateOrder.mutate({ id: order.id, updates: { core_size_mm: v ? parseInt(v) : null } as any })}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not specified" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Not specified</SelectItem>
+                          {[25, 38, 40, 76].map(s => <SelectItem key={s} value={String(s)}>{s}mm</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Qty per Roll */}
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground font-medium">Qty per Roll</p>
+                      <input
+                        type="number"
+                        className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="e.g. 1000"
+                        defaultValue={(order as any).qty_per_roll ?? ''}
+                        onBlur={e => {
+                          const val = e.target.value ? parseInt(e.target.value) : null;
+                          updateOrder.mutate({ id: order.id, updates: { qty_per_roll: val } as any });
+                        }}
+                      />
+                    </div>
+                    {/* Roll Direction */}
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground font-medium">Roll Direction</p>
+                      <Select
+                        value={(order as any).roll_direction ?? ''}
+                        onValueChange={v => updateOrder.mutate({ id: order.id, updates: { roll_direction: v || null } as any })}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not specified" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Not specified</SelectItem>
+                          <SelectItem value="face_in">Face In</SelectItem>
+                          <SelectItem value="face_out">Face Out</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Delivery Method */}
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground font-medium">Delivery Method</p>
+                      <Select
+                        value={(order as any).delivery_method ?? ''}
+                        onValueChange={v => updateOrder.mutate({ id: order.id, updates: { delivery_method: v || null } as any })}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not specified" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Not specified</SelectItem>
+                          <SelectItem value="collection">Collection</SelectItem>
+                          <SelectItem value="local_delivery">Local Delivery</SelectItem>
+                          <SelectItem value="courier">Courier</SelectItem>
+                          <SelectItem value="postal">Postal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
@@ -818,6 +882,11 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
 
               <Separator />
 
+              {/* Finishing & Services */}
+              <FinishingServicesCard orderId={order.id} orderStatus={order.status} />
+
+              <Separator />
+
               {/* Production Runs */}
               <div className="space-y-4">
                 <div>
@@ -827,6 +896,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                   </p>
                 </div>
                 <LabelRunsCard runs={order.runs || []} items={order.items || []} dieline={order.dieline} orderId={order.id} orderNumber={order.order_number} onImpositionComplete={() => refetch()} />
+                <StageInstancesSection orderId={order.id} />
               </div>
 
               {/* Timestamps */}

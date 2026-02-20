@@ -1,0 +1,136 @@
+import { useState } from 'react';
+import { Plus, Trash2, Layers } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { AddServiceDialog } from './AddServiceDialog';
+import { useOrderServices, useRemoveOrderService, type LabelOrderService } from '@/hooks/labels/useLabelOrderServices';
+import type { LabelOrderStatus } from '@/types/labels';
+
+interface FinishingServicesCardProps {
+  orderId: string;
+  orderStatus: LabelOrderStatus;
+}
+
+const SERVICE_ICONS: Record<string, string> = {
+  finishing: '✨',
+  rewinding: '🔄',
+  joining: '🔗',
+  handwork: '🖐',
+  qa: '✅',
+  packaging: '📦',
+  delivery: '🚚',
+};
+
+const SERVICE_COLORS: Record<string, string> = {
+  finishing: 'bg-indigo-100 text-indigo-700',
+  rewinding: 'bg-cyan-100 text-cyan-700',
+  joining: 'bg-sky-100 text-sky-700',
+  handwork: 'bg-orange-100 text-orange-700',
+  qa: 'bg-green-100 text-green-700',
+  packaging: 'bg-lime-100 text-lime-700',
+  delivery: 'bg-slate-100 text-slate-700',
+};
+
+function ServiceRow({ service, canEdit, orderId }: { service: LabelOrderService; canEdit: boolean; orderId: string }) {
+  const remove = useRemoveOrderService();
+
+  return (
+    <div className="flex items-center gap-3 py-2 px-3 rounded-lg border bg-card hover:bg-muted/20 transition-colors">
+      <span className="text-base shrink-0">{SERVICE_ICONS[service.service_type] || '⚙️'}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-foreground">{service.display_name}</span>
+          {service.quantity && (
+            <Badge variant="outline" className="text-xs font-normal">
+              {service.quantity} {service.quantity_unit || ''}
+            </Badge>
+          )}
+        </div>
+        {service.notes && <p className="text-xs text-muted-foreground">{service.notes}</p>}
+        {service.stage && (
+          <div className="flex items-center gap-1 mt-0.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: service.stage.color }} />
+            <span className="text-xs text-muted-foreground">→ {service.stage.name}</span>
+          </div>
+        )}
+      </div>
+      <Badge variant="secondary" className={`text-[10px] shrink-0 ${SERVICE_COLORS[service.service_type] || ''}`}>
+        {service.service_type}
+      </Badge>
+      {canEdit && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={() => remove.mutate({ id: service.id, orderId })}
+          disabled={remove.isPending}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+export function FinishingServicesCard({ orderId, orderStatus }: FinishingServicesCardProps) {
+  const { data: services, isLoading } = useOrderServices(orderId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const canEdit = orderStatus !== 'completed' && orderStatus !== 'cancelled';
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <Layers className="h-4 w-4" />
+              Finishing &amp; Services
+              {(services?.length || 0) > 0 && (
+                <Badge variant="secondary" className="text-xs">{services?.length}</Badge>
+              )}
+            </span>
+            {canEdit && (
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDialogOpen(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add
+              </Button>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+            </div>
+          ) : (services?.length || 0) === 0 ? (
+            <div className="text-center py-6 border-2 border-dashed rounded-lg">
+              <p className="text-xs text-muted-foreground">No finishing or services added yet</p>
+              {canEdit && (
+                <Button size="sm" variant="ghost" className="mt-2 text-xs h-7" onClick={() => setDialogOpen(true)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add first service
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {(services || []).map(svc => (
+                <ServiceRow key={svc.id} service={svc} canEdit={canEdit} orderId={orderId} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <AddServiceDialog
+        orderId={orderId}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      />
+    </>
+  );
+}
