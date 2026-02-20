@@ -20,8 +20,6 @@ import {
   FileText,
   AlertTriangle,
   AlertCircle,
-  RefreshCw,
-  ChevronRight,
   Info,
   Gauge,
   RotateCcw,
@@ -105,11 +103,9 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   // ABG machine calculations
   const columnsAcross = order.dieline?.columns_across ?? 1;
   const runCount = order.runs?.length || 1;
-  const computedOutputRolls = columnsAcross * runCount;
-  const savedOutputRolls = order.output_rolls_count;
-  const effectiveRolls = savedOutputRolls ?? computedOutputRolls;
+  const outputRolls = columnsAcross * runCount;
   const totalLabels = order.total_label_count;
-  const labelsPerRoll = effectiveRolls > 0 ? Math.round(totalLabels / effectiveRolls) : null;
+  const labelsPerRoll = outputRolls > 0 ? Math.round(totalLabels / outputRolls) : null;
   const { SHORT_ROLL_DANGER_THRESHOLD, SHORT_ROLL_WARNING_THRESHOLD } = LABEL_FINISHING_CONSTANTS;
   const rollWarning =
     labelsPerRoll !== null
@@ -370,64 +366,14 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
           </div>
 
           {/* ABG Key Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Output Rolls */}
             <div className="bg-muted/40 rounded-lg p-3 space-y-1">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Output Rolls</p>
-              <p className="text-2xl font-bold font-mono text-foreground">{effectiveRolls}</p>
+              <p className="text-2xl font-bold font-mono text-foreground">{outputRolls}</p>
               <p className="text-[10px] text-muted-foreground">
                 {columnsAcross} across × {runCount} run{runCount !== 1 ? 's' : ''}
               </p>
-              {savedOutputRolls !== null && savedOutputRolls !== computedOutputRolls && (
-                <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
-                  Manual override
-                </Badge>
-              )}
-            </div>
-
-            {/* Labels per Roll */}
-            <div className={`rounded-lg p-3 space-y-1 ${
-              rollWarning === 'danger'
-                ? 'bg-destructive/10 border border-destructive/30'
-                : rollWarning === 'warning'
-                  ? 'bg-yellow-500/10 border border-yellow-400/40'
-                  : 'bg-muted/40'
-            }`}>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Labels / Roll</p>
-              <p className={`text-2xl font-bold font-mono ${
-                rollWarning === 'danger' ? 'text-destructive' : rollWarning === 'warning' ? 'text-yellow-700' : 'text-foreground'
-              }`}>
-                {labelsPerRoll !== null ? labelsPerRoll.toLocaleString() : '—'}
-              </p>
-              {rollWarning === 'danger' && (
-                <p className="text-[10px] text-destructive font-medium flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" /> Very short — join required
-                </p>
-              )}
-              {rollWarning === 'warning' && (
-                <p className="text-[10px] text-yellow-700 font-medium flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" /> Short — consider joining
-                </p>
-              )}
-              {!rollWarning && labelsPerRoll !== null && (
-                <p className="text-[10px] text-emerald-600">✓ Good roll length</p>
-              )}
-            </div>
-
-            {/* Output Rolls — Override input */}
-            <div className="bg-muted/40 rounded-lg p-3 space-y-1.5">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Override Rolls</p>
-              <Input
-                type="number"
-                className="h-7 text-xs"
-                placeholder={`${computedOutputRolls}`}
-                defaultValue={savedOutputRolls ?? ''}
-                onBlur={(e) => {
-                  const val = e.target.value ? parseInt(e.target.value) : null;
-                  updateOrder.mutate({ id: order.id, updates: { output_rolls_count: val } as any });
-                }}
-              />
-              <p className="text-[10px] text-muted-foreground">Leave blank for auto</p>
             </div>
 
             {/* ABG Speed */}
@@ -479,7 +425,7 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
             <FinishingServicesCard
               orderId={order.id}
               orderStatus={order.status}
-              outputRollsCount={effectiveRolls}
+              outputRollsCount={outputRolls}
               qtyPerRoll={order.qty_per_roll}
               embedded
             />
@@ -537,30 +483,6 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
                 />
               </div>
 
-              {/* Roll Direction */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Roll Direction</label>
-                <Select
-                  value={order.roll_direction ?? 'none'}
-                  onValueChange={(v) =>
-                    updateOrder.mutate({
-                      id: order.id,
-                      updates: { roll_direction: v === 'none' ? null : v } as any,
-                    })
-                  }
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder="Not specified" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Not specified</SelectItem>
-                    <SelectItem value="face_in">Face In</SelectItem>
-                    <SelectItem value="face_out">Face Out</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Delivery Method */}
               <div className="space-y-1.5">
                 <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Delivery</label>
                 <Select
@@ -632,7 +554,7 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
         orderId={order.id}
         open={addServiceOpen}
         onOpenChange={setAddServiceOpen}
-        outputRollsCount={effectiveRolls}
+        outputRollsCount={outputRolls}
       />
     </div>
   );
