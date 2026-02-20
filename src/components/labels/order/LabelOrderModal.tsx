@@ -445,7 +445,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden p-0">
+      <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden p-0 flex flex-col">
         <VisuallyHidden>
           <DialogTitle>Label Order Details</DialogTitle>
           <DialogDescription>View and manage label order details, items, and production runs</DialogDescription>
@@ -470,7 +470,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             <Button onClick={() => onOpenChange(false)}>Close</Button>
           </div>
         ) : (
-          <div className="flex flex-col" style={{ height: '90vh' }}>
+          <div className="flex flex-col flex-1 min-h-0">
             {/* ── Header ──────────────────────────────────────────────────── */}
             <div className="sticky top-0 bg-background border-b z-10">
               {/* Top row: order info + close */}
