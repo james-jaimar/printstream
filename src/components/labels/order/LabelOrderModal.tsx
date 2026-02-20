@@ -651,7 +651,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             )}
 
             {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {/* ── Tab: Specifications & Finishing ── */}
               {activeTab === 'specs' && (
                 <OrderSpecsPage order={order} />
