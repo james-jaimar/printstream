@@ -1,139 +1,168 @@
 
-# ABG Machine: Die Cutting & Finishing Workflow Integration
+# Redesign: New Order Modal — Page 1 (Specs & Finishing)
 
-## What We're Modelling
+## What We're Doing
 
-The ABG finishing machine is a single inline system that handles the entire post-print workflow in one pass:
+Splitting the modal into two clearly-defined pages:
+
+- **Page 1 — Specs & Finishing**: Everything admin/account execs need to configure the order. This is also the client-facing summary page in the portal.
+- **Page 2 — Artwork & Production**: Proofs, print-ready files, AI layout, runs, and production scheduling. (This page exists already — we're just reorganising so the tabs make sense.)
+
+The current modal is a single long scroll with 3 small info cards at the top and then artwork below. We need to elevate the specs page into a premium, well-structured form view.
+
+---
+
+## Page 1 — Visual Design Concept
+
+The new Page 1 uses a two-column card layout within the 90vw modal, inspired by the teal visual identity already in use:
 
 ```text
-HP Indigo Roll (300/330mm wide)
-         ↓
-  [ABG Machine Pass]
-  ├── Lamination / UV Varnish (optional, inline)
-  ├── Die Cutting (semi-rotary, using the dieline template)
-  └── Slitting → N rolls (N = dieline.columns_across)
-         ↓
-  Output: 5 separate 160mm rolls (for a 5-across dieline)
+┌─────────────────────────────────────────────────────────────────────┐
+│  [LBL-0042] ● Quote  │  Acme Corp  •  WO#12345     [Page 1] [Page 2]│
+│  ──────────────────────────────────────────────────────────────────  │
+│  ┌──────────────────────────┐  ┌──────────────────────────────────┐  │
+│  │  🏢 CUSTOMER              │  │  📐 PRINT SPECIFICATIONS          │  │
+│  │  Acme Corp               │  │  60×160mm — 5 Across × 2 Around  │  │
+│  │  John Smith              │  │  on 330mm roll                   │  │
+│  │  john@acme.com           │  │  Die No: D-042  │  RPL: 123     │  │
+│  │  Due: 15 Mar 2026        │  │                                  │  │
+│  └──────────────────────────┘  │  Substrate: Semi Gloss 250mm     │  │
+│                                 │  Hot Melt  │  Acrylic            │  │
+│  ┌──────────────────────────┐  │                                  │  │
+│  │  🖨 INK & PRESS           │  │  Ink: CMYK (4-colour) 22 m/min  │  │
+│  │  CMYK — 22 m/min         │  │  Orientation: #1 Outwound ↑     │  │
+│  │  Orientation: #1         │  └──────────────────────────────────┘  │
+│  └──────────────────────────┘                                        │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  ✂ DIE CUTTING & FINISHING  (ABG Machine)                    │   │
+│  │  ──────────────────────────────────────────────────────────  │   │
+│  │  Output: 5 rolls   │  ABG Speed: 30 m/min                   │   │
+│  │  [⚠ 180 labels/roll — Short rolls, consider joining]        │   │
+│  │                                                              │   │
+│  │  Services:  [✨ Lamination] [🔄 Rewind ×5] [📦 Packaging]   │   │
+│  │                             [+ Add Service]                  │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  📦 DELIVERY & OUTPUT SPECS                                  │   │
+│  │  Core: 76mm  │  Qty/Roll: 1,000  │  Direction: Face In      │   │
+│  │  Delivery: Courier                                           │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+│  [Notes: Any special instructions...]                                │
+└─────────────────────────────────────────────────────────────────────┘
 ```
-
-The critical calculation: **output rolls = dieline.columns_across × number of print runs**
 
 ---
 
-## Changes Required
+## Detailed Changes
 
-### 1. Rename "finishing" group → "die_cutting_finishing"
+### A. Two-Tab Navigation in the Modal Header
 
-The `stage_group` value `'finishing'` in `label_production_stages` needs to become `'die_cutting_finishing'`. This affects:
+Add a pill/tab switcher in the modal header that replaces the current single-scroll layout:
 
-- The `LabelStageGroup` type in `useLabelStages.ts`
-- The `GROUP_LABELS` map in `LabelStageManagement.tsx` — label becomes **"Die Cutting & Finishing"**
-- The existing seeded stages in the DB need a one-off migration UPDATE
-- The `AddServiceDialog.tsx` service type description for 'finishing' → "Die cutting, lamination, UV varnish"
-
-### 2. Add `abg_machine_speed_m_per_min` to the label constants
-
-Add a new constant to `src/types/labels.ts`:
-
-```ts
-export const LABEL_FINISHING_CONSTANTS = {
-  ABG_MACHINE_SPEED_M_PER_MIN: 30,  // default ABG run speed
-  ABG_DIE_CUT_ALWAYS: true,          // die cutting is always part of ABG pass
-} as const;
+```
+[Specifications & Finishing]   [Artwork & Production]
 ```
 
-### 3. Add `output_rolls_count` to `label_orders` (new DB column)
+- Page 1 state stored as `activeTab: 'specs' | 'artwork'`
+- Toolbar buttons (Send Proof, AI Layout, etc.) only show on `artwork` tab
+- The `Bypass Proof` toggle moves to the artwork tab
 
-**Why:** Output rolls is a derived value (dieline.columns_across × run count) BUT it can also be overridden if the operator decides to gang fewer rolls or the order has multiple runs. Storing it on the order makes it available for:
-- Rewinding calculations
-- AI layout optimizer (labels per output roll)
-- Finishing service line auto-population
-- Labour time warnings
+### B. Page 1 — Card Structure (3 rows)
 
-New SQL migration:
-```sql
-ALTER TABLE label_orders
-  ADD COLUMN IF NOT EXISTS output_rolls_count integer,
-  ADD COLUMN IF NOT EXISTS abg_speed_m_per_min integer DEFAULT 30;
-```
+**Row 1: Two-column grid**
 
-`output_rolls_count` = computed when layout is confirmed (dieline.columns_across × runs.length), but editable.
-`abg_speed_m_per_min` = allows per-order speed override (default 30).
+**Left — Customer & Order Card**
+- Customer name (bold, large)
+- Contact name + clickable email (`mailto:`)
+- Quickeasy WO# (inline badge)
+- Due date (Calendar icon, formatted)
+- Status badge (editable dropdown for admin)
 
-### 4. Surface "Output Rolls" and "Labels per Output Roll" in the Summary card
+**Right — Print Specifications Card** (premium teal-accent header)
+- Dieline name (bold) + dimensions badge (`60×160mm`)
+- Layout info: `5 Across × 2 Around`, `on 330mm roll`
+- Die metadata: Die No, RPL, Die Type (from `dieline.die_no`, `.rpl`, `.die_type`) — these are valuable data now buried
+- Substrate: name + width badge + finish badge + glue badge
+- Ink config: displayed as a styled pill with the press speed
+- Orientation: the SVG icon + label, with confirm badge
 
-The Summary card in `LabelOrderModal.tsx` already has Core Size, Qty per Roll, Roll Direction, Delivery Method. We need to add:
+**Row 2: Full-width — Die Cutting & Finishing Card**
 
-- **Output Rolls**: auto-computed from `dieline.columns_across × (order.runs?.length || 1)`, displayed as a read-only badge + editable override input
-- **Labels per Output Roll**: `= total_label_count / output_rolls_count` — shown with a **warning badge** if below a threshold (e.g. < 250 labels/roll = red warning "Very short rolls — consider joining")
-- **ABG Speed**: small editable field (default 30 m/min) — used for finishing time estimation
+This is the centrepiece — it represents the ABG machine pass:
 
-The warning logic for short rolls is the key UX improvement:
-```
-< 100 labels/roll  → 🔴 "Very short — rewinding & joining required"
-100–300 labels/roll → 🟡 "Short rolls — consider joining"  
-> 300 labels/roll  → no warning
-```
+- Header: `✂ Die Cutting & Finishing` with an `ABG Machine` sub-label
+- Two key metrics prominently displayed:
+  - **Output Rolls**: big number, formula shown small (`5 across × 1 run`)
+  - **ABG Speed**: editable inline number field (`30 m/min`)
+- **Labels per Output Roll warning**: full-width alert banner when < 300
+- **Services list**: the current `FinishingServicesCard` content, but embedded inline here (not a separate card below)
+- The `+ Add Service` button stays
 
-### 5. Update the "Die Cutting & Finishing" stage group display in admin
+This unifies the ABG machine concept visually — everything that happens on the machine is in one card.
 
-In `LabelStageManagement.tsx`, change:
-- `GROUP_LABELS.finishing` → `'Die Cutting & Finishing'`
-- Group badge color to something more distinctive (orange/amber)
+**Row 3: Two-column grid**
 
-The "finishing" service type in `AddServiceDialog.tsx` description changes to match.
+**Left — Output & Delivery Specs Card**
+- Core Size (select — existing)
+- Qty per Roll (number input — existing)
+- Roll Direction (select — existing)
+- Delivery Method (select — existing)
+- Delivery notes (small text input, if needed)
 
-### 6. Wire output_rolls_count into the rewinding service
+**Right — Notes Card**
+- Free-text notes for the order (currently buried at the bottom of the creation dialog and not shown in the modal view at all)
+- These notes are also shown in the client portal
 
-When a user adds a "Rewinding" service via `AddServiceDialog`, the `quantity` field should **auto-populate** with the computed `output_rolls_count` from the order (currently you have to type it manually). This makes the flow much smoother.
+### C. Page 2 — Artwork & Production (minimal changes)
 
-Additionally, the "Rewinding" row in `FinishingServicesCard` should display a computed "labels/roll" figure if `qty_per_roll` is set.
-
-### 7. Update `useLabelOrders.ts` create/update to pass new fields
-
-The `useCreateLabelOrder` and `useUpdateLabelOrder` mutations need to pass `output_rolls_count` and `abg_speed_m_per_min` through to Supabase.
-
-Also update `LabelOrder` type in `types/labels.ts` to include these two new fields.
+The existing content (Label Items, Dual Upload Zone, Runs, Stage Instances, Production) moves to tab 2. The layout stays the same — we're just putting it behind the tab. The toolbar buttons (Send Proof, Request Artwork, AI Layout, Bypass Proof) live in the toolbar on page 2.
 
 ---
 
-## Files Changed
+## New Order Creation Dialog Changes
 
-| File | Type | Change |
-|------|------|--------|
-| `supabase/migrations/[new].sql` | New | Add `output_rolls_count` + `abg_speed_m_per_min` to `label_orders`; UPDATE existing stages to rename group |
-| `src/types/labels.ts` | Edit | Add `output_rolls_count`, `abg_speed_m_per_min` to `LabelOrder`; add `LABEL_FINISHING_CONSTANTS`; update `LabelStageGroup` type |
-| `src/hooks/labels/useLabelStages.ts` | Edit | Update `LabelStageGroup` type to include `'die_cutting_finishing'` |
-| `src/hooks/labels/useLabelOrders.ts` | Edit | Pass new fields in create/update mutations |
-| `src/components/labels/admin/LabelStageManagement.tsx` | Edit | Rename group label; update colour |
-| `src/components/labels/order/LabelOrderModal.tsx` | Edit | Add output rolls display + warning, labels/roll, ABG speed field to Summary card |
-| `src/components/labels/order/AddServiceDialog.tsx` | Edit | Auto-populate rewinding quantity from order's output_rolls_count; update finishing description |
-| `src/components/labels/order/FinishingServicesCard.tsx` | Edit | Show labels/roll in rewinding service rows |
+The `NewLabelOrderDialog.tsx` also shows Page 1 specs upfront. Currently it's a vertical scroll. We redesign it to match the same card structure — but since it's a creation form (no saved order yet), we keep it as a clean vertical layout with better visual sections:
+
+- **Section dividers** styled with icons and teal accent lines (not just grey `text-muted-foreground` labels)
+- Dieline card shows a live preview of the dimensions/layout once selected
+- Substrate selector stays (it's already well-designed)
+- Add the finishing/delivery fields here too (Core Size, Qty per Roll, Roll Direction, Delivery Method) so they're captured at creation time, not just in the order modal
 
 ---
 
-## Key Design Decisions
+## Files to Create/Edit
 
-**Why store output_rolls_count on the order?**
-The dieline `columns_across` gives you rolls per print run. But an order may have multiple runs (e.g., 3 runs of a 5-across dieline = 15 output rolls before rewinding). The stored value captures the true total output. It also survives dieline changes mid-order.
+| File | Change |
+|------|--------|
+| `src/components/labels/order/LabelOrderModal.tsx` | Major restructure: add two-tab navigation, rebuild Page 1 with new card layout, move artwork/production to Page 2 |
+| `src/components/labels/order/OrderSpecsPage.tsx` | **New file**: extracts the entire Page 1 content into its own component (keeps modal file manageable) |
+| `src/components/labels/order/FinishingServicesCard.tsx` | Adjust to work embedded within the new Die Cutting & Finishing card (remove outer Card wrapper, accept `embedded` prop) |
+| `src/components/labels/NewLabelOrderDialog.tsx` | Add finishing/delivery fields to creation form; improve section visual styling with icons |
 
-**Why not auto-compute output_rolls_count everywhere?**
-Because the number of runs changes as the layout is optimised. The computed display (shown read-only from `dieline.columns_across × runs.length`) is always shown live, but the operator can override and save a confirmed count to the order.
+---
 
-**The ABG speed field:**
-Stored per-order because some substrates or laminates run slower. 30 m/min is the default. This will feed into the finishing duration estimate in the `StageInstancesSection` in a future phase.
+## Key UX Decisions
 
-**Roll count warning thresholds:**
-These are hardcoded constants initially. The thresholds (< 100 = danger, < 300 = warning) are sensible defaults based on typical label rewinding economics. They can be made configurable later.
+**Why put Finishing inside the modal, not in a separate card below?**
+The ABG machine is the physical link between printing and delivery. Putting lamination, rewinding, and die-cutting in the same visual card as ABG speed and output rolls tells the operator "all of this happens on the same machine in one pass." It also reduces the scroll distance on what is currently a very long page.
+
+**Why move artwork to Page 2?**
+The client portal will show Page 1 data for order confirmation (substrate, dieline, finishing, delivery). The client doesn't need to see the internal artwork management tabs, upload zones, or production run details. The two-tab split naturally separates "client-visible specs" from "internal production workflow."
+
+**Notes field in the modal**
+Currently, notes can be entered during order creation but aren't editable in the modal view. We add an editable notes field to Page 1 since notes often have client-facing importance (e.g., "client wants labels in specific roll order").
+
+**Status editing**
+Currently status is read-only (just a badge). We make it an inline `<Select>` in the header for quick admin updates without needing a separate action.
 
 ---
 
 ## Build Sequence
 
-1. DB migration (add 2 columns + UPDATE stage_group text)
-2. TypeScript: `LabelStageGroup` type + `LabelOrder` fields + `LABEL_FINISHING_CONSTANTS`
-3. Update hooks (`useLabelStages`, `useLabelOrders`)
-4. Admin UI: rename group label in `LabelStageManagement`
-5. Order modal: add output rolls + warning + ABG speed to Summary card
-6. `AddServiceDialog`: auto-fill rewinding quantity
-7. `FinishingServicesCard`: show labels/roll on rewinding rows
+1. Create `OrderSpecsPage.tsx` — the new Page 1 component with the full card layout
+2. Update `LabelOrderModal.tsx` — add tab switcher, wire in `OrderSpecsPage` for tab 1, keep existing artwork/production as tab 2
+3. Update `FinishingServicesCard.tsx` — add `embedded` prop to strip the outer Card when used inside `OrderSpecsPage`
+4. Update `NewLabelOrderDialog.tsx` — add finishing/delivery fields + improve section styling
