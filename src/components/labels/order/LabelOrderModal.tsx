@@ -445,7 +445,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-y-auto p-0">
+      <DialogContent className="w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden p-0">
         <VisuallyHidden>
           <DialogTitle>Label Order Details</DialogTitle>
           <DialogDescription>View and manage label order details, items, and production runs</DialogDescription>
