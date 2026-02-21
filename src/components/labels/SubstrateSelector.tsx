@@ -152,7 +152,7 @@ export function SubstrateSelector({ stock, value, onChange }: SubstrateSelectorP
                 onClick={() => onChange(s.id)}
                 className={cn(
                   "w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-accent transition-colors",
-                  value === s.id && "bg-primary/10"
+                  value === s.id && "bg-primary/15 ring-1 ring-primary/40 font-semibold"
                 )}
               >
                 <div className="flex items-center gap-2 min-w-0">

@@ -152,6 +152,7 @@ export function FinishingServicesCard({ orderId, orderStatus, outputRollsCount, 
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         outputRollsCount={outputRollsCount}
+        existingServices={services || []}
       />
     </>
   );
