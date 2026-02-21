@@ -194,24 +194,21 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-4 w-4" />
+      <DialogContent className="max-w-sm w-[calc(100vw-2rem)] max-h-[85vh] flex flex-col">
+        <DialogHeader className="pb-0">
+          <DialogTitle className="flex items-center gap-1.5 text-sm">
+            <Plus className="h-3.5 w-3.5" />
             Add Services
             {currentStep && (
-              <>
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                <span className="text-base font-normal text-muted-foreground">
-                  Step {currentStepIndex + 1}/{CANONICAL_STEPS.length}
-                </span>
-              </>
+              <span className="text-xs font-normal text-muted-foreground ml-1">
+                — Step {currentStepIndex + 1}/{CANONICAL_STEPS.length}
+              </span>
             )}
           </DialogTitle>
         </DialogHeader>
 
-        {/* Step indicator dots */}
-        <div className="flex items-center gap-1.5 pb-2">
+        {/* Step indicator — compact dots */}
+        <div className="flex items-center gap-1 py-1.5">
           {CANONICAL_STEPS.map((step, idx) => {
             const added = existingTypes.has(step.value);
             const isCurrent = idx === currentStepIndex;
@@ -222,46 +219,44 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
                 onClick={() => !added && goToStep(idx)}
                 disabled={added}
                 className={cn(
-                  "flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium transition-colors border",
-                  isCurrent && "bg-primary text-primary-foreground border-primary",
-                  !isCurrent && added && "bg-primary/10 text-primary border-primary/20",
-                  !isCurrent && !added && "bg-muted text-muted-foreground border-transparent hover:bg-accent",
+                  "h-6 w-6 rounded-full flex items-center justify-center text-xs transition-colors shrink-0",
+                  isCurrent && "bg-primary text-primary-foreground ring-2 ring-primary/30",
+                  !isCurrent && added && "bg-primary/15 text-primary",
+                  !isCurrent && !added && "bg-muted text-muted-foreground hover:bg-accent",
                 )}
                 title={step.label}
               >
-                {added ? <Check className="h-3 w-3" /> : <span>{step.icon}</span>}
-                <span className="hidden sm:inline">{step.label.split(' ')[0]}</span>
+                {added ? <Check className="h-3 w-3" /> : <span className="text-[10px]">{step.icon}</span>}
               </button>
             );
           })}
         </div>
 
         {currentStep && (
-          <div className="space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
             {/* Step header */}
-            <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-              <span className="text-2xl">{currentStep.icon}</span>
-              <div>
+            <div className="flex items-center gap-2.5 p-2.5 rounded-lg border bg-muted/30">
+              <span className="text-xl">{currentStep.icon}</span>
+              <div className="min-w-0">
                 <p className="text-sm font-semibold">{currentStep.label}</p>
-                <p className="text-xs text-muted-foreground">{currentStep.description}</p>
+                <p className="text-[11px] text-muted-foreground">{currentStep.description}</p>
               </div>
               {isAlreadyAdded && (
-                <Badge className="ml-auto bg-primary/10 text-primary">Already added</Badge>
+                <Badge className="ml-auto bg-primary/10 text-primary text-[10px]">Added</Badge>
               )}
             </div>
 
             {isAlreadyAdded ? (
-              <div className="text-center py-4">
-                <p className="text-sm text-muted-foreground mb-3">This service is already configured for this order.</p>
-                <Button size="sm" onClick={handleSkip}>
-                  {isLastAvailableStep ? 'Finish' : 'Continue'} <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              <div className="text-center py-3">
+                <p className="text-xs text-muted-foreground mb-2">Already configured.</p>
+                <Button size="sm" onClick={handleSkip} className="h-8 text-xs">
+                  {isLastAvailableStep ? 'Finish' : 'Continue'} <ChevronRight className="h-3 w-3 ml-1" />
                 </Button>
               </div>
             ) : (
               <>
-                {/* Finishing — pick option */}
                 {currentStep.value === 'finishing' && (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <Label className="text-xs">Finishing Option *</Label>
                     <Select
                       value={finishingOptionId}
@@ -271,11 +266,11 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
                         if (opt) setDisplayName(opt.display_name);
                       }}
                     >
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select…" /></SelectTrigger>
                       <SelectContent>
                         {(finishingOptions || []).filter(o => o.is_active).map(opt => (
                           <SelectItem key={opt.id} value={opt.id}>
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-center gap-1.5">
                               {opt.display_name}
                               <Badge variant="outline" className="text-[9px]">{opt.category.replace('_', ' ')}</Badge>
                             </span>
@@ -286,9 +281,8 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
                   </div>
                 )}
 
-                {/* Delivery — pick method */}
                 {currentStep.value === 'delivery' && (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <Label className="text-xs">Delivery Method *</Label>
                     <Select
                       value={deliveryOption}
@@ -297,7 +291,7 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
                         setDisplayName(v);
                       }}
                     >
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select…" /></SelectTrigger>
                       <SelectContent>
                         {DELIVERY_OPTIONS.map(d => (
                           <SelectItem key={d.value} value={d.value}>{d.value}</SelectItem>
@@ -307,33 +301,31 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
                   </div>
                 )}
 
-                {/* Display name */}
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <Label className="text-xs">Display Name *</Label>
                   <Input
                     value={displayName}
                     onChange={e => setDisplayName(e.target.value)}
                     placeholder="e.g. Rewind to 25mm cores"
-                    className="h-9 text-sm"
+                    className="h-8 text-xs"
                   />
                 </div>
 
-                {/* Quantity */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
                     <Label className="text-xs">Quantity</Label>
                     <Input
                       type="number"
                       value={quantity}
                       onChange={e => setQuantity(e.target.value)}
                       placeholder="e.g. 12"
-                      className="h-9 text-sm"
+                      className="h-8 text-xs"
                     />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <Label className="text-xs">Unit</Label>
                     <Select value={quantityUnit} onValueChange={setQuantityUnit}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select unit" /></SelectTrigger>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Unit" /></SelectTrigger>
                       <SelectContent>
                         {QUANTITY_UNITS[currentStep.value].map(u => (
                           <SelectItem key={u} value={u}>{u}</SelectItem>
@@ -343,35 +335,36 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
                   </div>
                 </div>
 
-                {/* Notes */}
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <Label className="text-xs">Notes (optional)</Label>
                   <Textarea
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
                     placeholder="Any additional instructions…"
-                    className="text-sm min-h-[60px]"
+                    className="text-xs min-h-[50px] resize-none"
                   />
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 pt-1">
-                  <Button variant="outline" size="sm" onClick={handleSkip} className="gap-1">
-                    <SkipForward className="h-3.5 w-3.5" />
-                    Skip
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleAddAndContinue}
-                    disabled={!canSave || saving}
-                    className="flex-1"
-                  >
-                    {saving ? 'Adding…' : isLastAvailableStep ? 'Add & Finish' : 'Add & Continue'}
-                    {!isLastAvailableStep && <ChevronRight className="h-3.5 w-3.5 ml-1" />}
-                  </Button>
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Fixed footer actions */}
+        {currentStep && !isAlreadyAdded && (
+          <div className="flex gap-2 pt-2 border-t">
+            <Button variant="outline" size="sm" onClick={handleSkip} className="gap-1 h-8 text-xs">
+              <SkipForward className="h-3 w-3" />
+              Skip
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleAddAndContinue}
+              disabled={!canSave || saving}
+              className="flex-1 h-8 text-xs"
+            >
+              {saving ? 'Adding…' : isLastAvailableStep ? 'Add & Finish' : 'Add & Continue'}
+              {!isLastAvailableStep && <ChevronRight className="h-3 w-3 ml-1" />}
+            </Button>
           </div>
         )}
       </DialogContent>
