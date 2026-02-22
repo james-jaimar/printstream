@@ -455,15 +455,24 @@ export interface LayoutOption {
   reasoning: string;
 }
 
+export interface RollSplitOption {
+  strategy: 'even' | 'fill_first' | 'custom';
+  rolls: { roll_number: number; label_count: number }[];
+}
+
 export interface ProposedRun {
   run_number: number;
   slot_assignments: SlotAssignment[];
   meters: number;
   frames: number;
   // Roll-awareness metadata
+  actual_labels_per_slot?: number;
   labels_per_output_roll?: number;
   needs_rewinding?: boolean;
   consolidation_suggestion?: string;
+  // User adjustments
+  quantity_override?: number;
+  roll_split?: RollSplitOption;
 }
 
 export interface OptimizationWeights {

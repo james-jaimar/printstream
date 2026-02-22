@@ -7,9 +7,11 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowUp, Layers, Ruler, Clock, AlertTriangle } from 'lucide-react';
-import type { LabelItem, LabelDieline, SlotAssignment, LabelRunStatus } from '@/types/labels';
+import type { LabelItem, LabelDieline, SlotAssignment, LabelRunStatus, RollSplitOption } from '@/types/labels';
 import { cn } from '@/lib/utils';
 import { getSlotConfig } from '@/utils/labels/layoutOptimizer';
+import { RunQuantityAdjuster } from './RunQuantityAdjuster';
+import { RollSplitSelector } from './RollSplitSelector';
 
 // Color palette for items - using semantic tokens where possible
 const ITEM_COLORS = [
@@ -22,6 +24,13 @@ const ITEM_COLORS = [
   { bg: 'bg-orange-500', text: 'text-white', border: 'border-orange-600', light: 'bg-orange-100' },
   { bg: 'bg-teal-500', text: 'text-white', border: 'border-teal-600', light: 'bg-teal-100' },
 ];
+
+function formatQty(n: number): string {
+  if (n >= 1000) {
+    return n % 1000 === 0 ? `${n / 1000}k` : `${(n / 1000).toFixed(1)}k`;
+  }
+  return String(n);
+}
 
 interface RunLayoutDiagramProps {
   runNumber: number;
@@ -39,7 +48,13 @@ interface RunLayoutDiagramProps {
   qtyPerRoll?: number;
   needsRewinding?: boolean;
   labelsPerOutputRoll?: number;
+  actualLabelsPerSlot?: number;
   consolidationSuggestion?: string;
+  // Interactive controls
+  quantityOverride?: number;
+  rollSplit?: RollSplitOption;
+  onQuantityOverride?: (runNumber: number, newQty: number) => void;
+  onRollSplitChange?: (runNumber: number, split: RollSplitOption) => void;
 }
 
 export function RunLayoutDiagram({
@@ -57,7 +72,12 @@ export function RunLayoutDiagram({
   qtyPerRoll,
   needsRewinding,
   labelsPerOutputRoll,
+  actualLabelsPerSlot,
   consolidationSuggestion,
+  quantityOverride,
+  rollSplit,
+  onQuantityOverride,
+  onRollSplitChange,
 }: RunLayoutDiagramProps) {
   // Create item color map
   const itemColorMap = new Map<string, typeof ITEM_COLORS[0]>();
@@ -85,9 +105,17 @@ export function RunLayoutDiagram({
   const slotConfig = getSlotConfig(dieline);
   const labelsPerFrame = slotConfig.labelsPerFrame;
   const totalPrintQty = frames ? frames * labelsPerFrame : null;
+  
+  // Actual output per slot (frames-based, not requested)
+  const effectiveActualPerSlot = actualLabelsPerSlot ?? (frames ? frames * slotConfig.labelsPerSlotPerFrame : null);
 
   // Calculate how many frames to show (max 3 for preview)
   const framesToShow = compact ? 1 : Math.min(3, Math.max(1, frames || 1));
+  
+  // Show interactive controls only in non-compact mode
+  const showControls = !compact && qtyPerRoll && qtyPerRoll > 0;
+  const showAdjuster = showControls && needsRewinding && onQuantityOverride && effectiveActualPerSlot;
+  const showSplitter = showControls && effectiveActualPerSlot && effectiveActualPerSlot > qtyPerRoll && onRollSplitChange;
 
   return (
     <Card className={cn("overflow-hidden", compact && "border-0 shadow-none")}>
@@ -106,12 +134,12 @@ export function RunLayoutDiagram({
               Short rolls — rewind
             </div>
           )}
-          {labelsPerOutputRoll != null && qtyPerRoll && (
+          {effectiveActualPerSlot != null && qtyPerRoll && (
             <div className={cn(
               "text-[10px] font-mono",
-              labelsPerOutputRoll >= qtyPerRoll ? "text-green-600" : "text-destructive"
+              effectiveActualPerSlot >= qtyPerRoll ? "text-green-600" : "text-destructive"
             )}>
-              {labelsPerOutputRoll.toLocaleString()}/roll {qtyPerRoll ? `(need ${qtyPerRoll.toLocaleString()})` : ''}
+              {effectiveActualPerSlot.toLocaleString()}/slot {qtyPerRoll ? `(need ${qtyPerRoll.toLocaleString()})` : ''}
             </div>
           )}
         </div>
@@ -167,12 +195,12 @@ export function RunLayoutDiagram({
                     ~{estimatedMinutes}min
                   </span>
                 )}
-                {labelsPerOutputRoll != null && qtyPerRoll && (
+                {effectiveActualPerSlot != null && qtyPerRoll && (
                   <span className={cn(
                     "flex items-center gap-1 font-medium",
-                    labelsPerOutputRoll >= qtyPerRoll ? "text-green-600" : "text-destructive"
+                    effectiveActualPerSlot >= qtyPerRoll ? "text-green-600" : "text-destructive"
                   )}>
-                    {labelsPerOutputRoll.toLocaleString()}/roll
+                    {effectiveActualPerSlot.toLocaleString()}/slot
                   </span>
                 )}
               </div>
@@ -250,7 +278,7 @@ export function RunLayoutDiagram({
                                     {isFirstRow ? (
                                       isSingleItemRun 
                                         ? item.name.substring(0, 8) 
-                                        : `S${slotNumber + 1}${assignment ? ` x${(assignment.quantity_in_slot / 1000) >= 1 ? `${(assignment.quantity_in_slot / 1000).toFixed(assignment.quantity_in_slot % 1000 === 0 ? 0 : 1)}k` : assignment.quantity_in_slot}` : ''}`
+                                        : `S${slotNumber + 1} x${formatQty(effectiveActualPerSlot ?? assignment?.quantity_in_slot ?? 0)}`
                                     ) : ''}
                                   </span>
                                 ) : (
@@ -262,14 +290,29 @@ export function RunLayoutDiagram({
                             </TooltipTrigger>
                             <TooltipContent side="top" className="max-w-xs">
                               {item && assignment ? (
-                                <div className="text-sm">
+                                <div className="text-sm space-y-1">
                                   <p className="font-medium">{item.name}</p>
-                                  <p className="text-muted-foreground">
-                                    {isSingleItemRun 
-                                      ? `Full roll • ${assignment.quantity_in_slot.toLocaleString()} labels total`
-                                      : `Slot ${slotNumber + 1} • ${assignment.quantity_in_slot.toLocaleString()} labels`
-                                    }
-                                  </p>
+                                  {isSingleItemRun ? (
+                                    <p className="text-muted-foreground">
+                                      Full roll • {(effectiveActualPerSlot ?? assignment.quantity_in_slot).toLocaleString()} labels/slot
+                                    </p>
+                                  ) : (
+                                    <>
+                                      <p className="text-muted-foreground">
+                                        Slot {slotNumber + 1} • Requested: {assignment.quantity_in_slot.toLocaleString()}
+                                      </p>
+                                      {effectiveActualPerSlot != null && effectiveActualPerSlot !== assignment.quantity_in_slot && (
+                                        <p className="text-muted-foreground">
+                                          Actual output: {effectiveActualPerSlot.toLocaleString()}
+                                          {effectiveActualPerSlot > assignment.quantity_in_slot && (
+                                            <span className="text-amber-500">
+                                              {' '}(+{(effectiveActualPerSlot - assignment.quantity_in_slot).toLocaleString()} overrun)
+                                            </span>
+                                          )}
+                                        </p>
+                                      )}
+                                    </>
+                                  )}
                                 </div>
                               ) : (
                                 <p className="text-sm">Slot {slotNumber + 1}: Empty</p>
@@ -315,7 +358,7 @@ export function RunLayoutDiagram({
                   <div className="flex items-center gap-1.5">
                     <div className={cn("w-3 h-3 rounded", itemColorMap.get(singleItem.id)?.bg)} />
                     <span className="text-xs">
-                      {singleItem.name} (Full roll • {singleItemAssignment.quantity_in_slot.toLocaleString()} labels)
+                      {singleItem.name} (Full roll • {(effectiveActualPerSlot ?? singleItemAssignment.quantity_in_slot).toLocaleString()} labels/slot)
                     </span>
                   </div>
                 ) : (
@@ -328,7 +371,11 @@ export function RunLayoutDiagram({
                       <div key={assignment.slot} className="flex items-center gap-1.5">
                         <div className={cn("w-3 h-3 rounded", colors.bg)} />
                         <span className="text-xs">
-                          S{assignment.slot + 1}: {item.name} ({assignment.quantity_in_slot.toLocaleString()})
+                          S{assignment.slot + 1}: {item.name} (req {assignment.quantity_in_slot.toLocaleString()}
+                          {effectiveActualPerSlot != null && effectiveActualPerSlot !== assignment.quantity_in_slot
+                            ? ` → actual ${effectiveActualPerSlot.toLocaleString()}`
+                            : ''
+                          })
                         </span>
                       </div>
                     );
@@ -338,6 +385,31 @@ export function RunLayoutDiagram({
             </div>
           )}
         </TooltipProvider>
+        
+        {/* Interactive Controls */}
+        {showAdjuster && (
+          <div className="mt-3">
+            <RunQuantityAdjuster
+              runNumber={runNumber}
+              actualPerSlot={effectiveActualPerSlot!}
+              qtyPerRoll={qtyPerRoll!}
+              quantityOverride={quantityOverride}
+              onOverride={onQuantityOverride!}
+            />
+          </div>
+        )}
+        
+        {showSplitter && (
+          <div className="mt-3">
+            <RollSplitSelector
+              runNumber={runNumber}
+              actualPerSlot={effectiveActualPerSlot!}
+              qtyPerRoll={qtyPerRoll!}
+              currentSplit={rollSplit}
+              onSplitChange={onRollSplitChange!}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );
