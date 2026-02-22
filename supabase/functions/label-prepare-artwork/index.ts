@@ -5,7 +5,7 @@ const VPS_PDF_API_URL = "https://pdf-api.jaimar.dev";
 
 interface PrepareArtworkRequest {
   item_id: string;
-  action: "crop" | "mark_ready" | "validate" | "use_proof_as_print";
+  action: "crop" | "mark_ready" | "validate" | "use_proof_as_print" | "crop_to_bleed";
   crop_mm?: {
     left: number;
     right: number;
@@ -231,6 +231,170 @@ Deno.serve(async (req) => {
           print_pdf_url: printUrl,
           print_pdf_status: "ready",
           message: "Artwork marked as print-ready",
+        };
+        break;
+      }
+
+      case "crop_to_bleed": {
+        // Crop the PDF from MediaBox down to BleedBox using VPS page-boxes
+        const sourceUrl = item.proof_pdf_url || item.artwork_pdf_url;
+        if (!sourceUrl) {
+          throw new Error("No artwork available to crop");
+        }
+
+        // Update status to processing
+        await supabase
+          .from("label_items")
+          .update({ print_pdf_status: "processing" })
+          .eq("id", request.item_id);
+
+        // Step 1: Get page boxes from VPS
+        const boxResponse = await fetch(`${VPS_PDF_API_URL}/page-boxes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+          },
+          body: JSON.stringify({ pdf_url: sourceUrl }),
+        });
+
+        if (!boxResponse.ok) {
+          await supabase
+            .from("label_items")
+            .update({ print_pdf_status: "needs_crop" })
+            .eq("id", request.item_id);
+          throw new Error(`Failed to get page boxes: ${boxResponse.status}`);
+        }
+
+        const boxData = await boxResponse.json();
+        const mediabox = boxData.dimensions_mm || boxData.mediabox_mm;
+        const bleedbox = boxData.bleedbox_mm || boxData.trimbox_mm;
+
+        if (!mediabox || !bleedbox) {
+          await supabase
+            .from("label_items")
+            .update({ print_pdf_status: "needs_crop" })
+            .eq("id", request.item_id);
+          throw new Error("PDF has no BleedBox or TrimBox metadata — cannot auto-crop");
+        }
+
+        const mediaW = mediabox.width;
+        const mediaH = mediabox.height;
+        const bleedW = bleedbox.width;
+        const bleedH = bleedbox.height;
+
+        // If MediaBox is already close to BleedBox, no crop needed
+        if (Math.abs(mediaW - bleedW) < 0.5 && Math.abs(mediaH - bleedH) < 0.5) {
+          // Just use as-is
+          const { error: updateError } = await supabase
+            .from("label_items")
+            .update({
+              print_pdf_url: sourceUrl,
+              print_pdf_status: "ready",
+              requires_crop: false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", request.item_id);
+
+          if (updateError) throw new Error(`Failed to update item: ${updateError.message}`);
+
+          result = {
+            success: true,
+            item_id: request.item_id,
+            action: request.action,
+            print_pdf_url: sourceUrl,
+            print_pdf_status: "ready",
+            message: "No crop needed — MediaBox matches BleedBox",
+          };
+          break;
+        }
+
+        // Calculate symmetric crop offsets
+        const cropLeft = (mediaW - bleedW) / 2;
+        const cropRight = (mediaW - bleedW) / 2;
+        const cropTop = (mediaH - bleedH) / 2;
+        const cropBottom = (mediaH - bleedH) / 2;
+
+        console.log(`Cropping to bleed: ${mediaW}x${mediaH}mm → ${bleedW}x${bleedH}mm (crop L${cropLeft.toFixed(1)} R${cropRight.toFixed(1)} T${cropTop.toFixed(1)} B${cropBottom.toFixed(1)})`);
+
+        // Step 2: Crop via VPS
+        const cropResponse = await fetch(`${VPS_PDF_API_URL}/manipulate/crop`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+          },
+          body: JSON.stringify({
+            pdf_url: sourceUrl,
+            crop_mm: {
+              left: cropLeft,
+              right: cropRight,
+              top: cropTop,
+              bottom: cropBottom,
+            },
+          }),
+        });
+
+        if (!cropResponse.ok) {
+          const errorText = await cropResponse.text();
+          console.error(`VPS crop_to_bleed error: ${cropResponse.status} - ${errorText}`);
+          await supabase
+            .from("label_items")
+            .update({ print_pdf_status: "needs_crop" })
+            .eq("id", request.item_id);
+          throw new Error(`Crop to bleed failed: ${cropResponse.status}`);
+        }
+
+        const cropResult = await cropResponse.json();
+
+        // Step 3: Upload cropped PDF
+        const timestamp = Date.now();
+        const orderId = item.order_id;
+        const storagePath = `label-items/${orderId}/${request.item_id}/print_bleed_${timestamp}.pdf`;
+
+        const croppedPdfBytes = Uint8Array.from(
+          atob(cropResult.cropped_pdf_base64),
+          (c) => c.charCodeAt(0)
+        );
+
+        const { error: uploadError } = await supabase.storage
+          .from("label-files")
+          .upload(storagePath, croppedPdfBytes, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+
+        if (uploadError) {
+          throw new Error(`Failed to upload cropped PDF: ${uploadError.message}`);
+        }
+
+        const { data: urlData } = supabase.storage
+          .from("label-files")
+          .getPublicUrl(storagePath);
+
+        // Step 4: Update item
+        const { error: updateError } = await supabase
+          .from("label_items")
+          .update({
+            print_pdf_url: urlData.publicUrl,
+            print_pdf_status: "ready",
+            requires_crop: false,
+            crop_amount_mm: { left: cropLeft, right: cropRight, top: cropTop, bottom: cropBottom },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", request.item_id);
+
+        if (updateError) {
+          throw new Error(`Failed to update item: ${updateError.message}`);
+        }
+
+        result = {
+          success: true,
+          item_id: request.item_id,
+          action: request.action,
+          print_pdf_url: urlData.publicUrl,
+          print_pdf_status: "ready",
+          message: `Cropped to bleed: ${mediaW.toFixed(1)}x${mediaH.toFixed(1)}mm → ${bleedW.toFixed(1)}x${bleedH.toFixed(1)}mm`,
         };
         break;
       }

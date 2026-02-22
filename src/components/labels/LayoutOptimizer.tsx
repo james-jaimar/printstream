@@ -146,7 +146,7 @@ export function LayoutOptimizer({
       id: item.id,
       action: (item.requires_crop || item.print_pdf_status === 'needs_crop') 
         ? 'crop' as const 
-        : 'use_proof_as_print' as const,
+        : 'crop_to_bleed' as const,
       cropMm: item.crop_amount_mm || undefined,
     }));
     
