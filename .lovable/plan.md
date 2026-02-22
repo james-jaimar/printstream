@@ -1,66 +1,41 @@
 
 
-# Fix: Bleed Detection Bug + Print-Ready Artwork Matching
+# Fix: Proof Emails Not Sending
 
-## Issue 1: "No Bleed" Badge Shown Incorrectly
+## Root Cause
 
-**Root Cause Found:** In `src/components/labels/items/LabelItemsGrid.tsx`, the `getValidationStatus` function has a logic ordering bug.
+The `label-notify` edge function code exists but was **never deployed** because it's missing from `supabase/config.toml`. When the "Send Proof" flow calls `supabase.functions.invoke('label-notify', ...)`, the function doesn't exist on the server, so the call fails silently (the error is caught and logged but the user just sees a generic failure).
 
-The DB for this order shows the VPS correctly identified TrimBox (100x50mm) and set `preflight_report.has_bleed = true` with `preflight_status = 'passed'`. However, the report also contains a rotation warning: `"Artwork is rotated 90deg -- will be auto-rotated for production"`.
+## Changes Required
 
-The current code checks warnings BEFORE `has_bleed`:
+### 1. Register `label-notify` in `supabase/config.toml`
+Add the function entry with `verify_jwt = false` (it's called server-side with service role context, and the function itself validates the request body).
 
-```text
-Line 45: if (report.warnings && report.warnings.length > 0) {
-Line 46:   ...check for 'no bleed' text...
-Line 47:   ...check for 'crop' text...
-Line 49:   return 'no_bleed';   <-- DEFAULT: any unrecognized warning = "No Bleed"
-Line 50: }
-Line 51: if (report.has_bleed === true) return 'passed';  <-- Never reached!
-```
+### 2. Fix CORS Headers in `label-notify/index.ts`
+Update the `Access-Control-Allow-Headers` to include all required Supabase client headers:
+- `x-supabase-client-platform`
+- `x-supabase-client-platform-version`
+- `x-supabase-client-runtime`
+- `x-supabase-client-runtime-version`
 
-The rotation warning doesn't match any specific pattern, so it falls into the catch-all `return 'no_bleed'` on line 49. The `has_bleed === true` check on line 51 is never reached.
+### 3. Fix Sender Address for Proof Requests
+Change the `from` address for `proof_request` and `artwork_request` emails from:
+- `PrintStream Labels <notifications@printstream.lovable.app>`
 
-**Fix:** Move the `has_bleed` check BEFORE the warnings check, so that if the VPS confirmed bleed exists, we return 'passed' regardless of non-critical warnings like rotation.
+To:
+- `Proofing at Impress Web <proofing@printstream.impressweb.co.za>`
 
-**File:** `src/components/labels/items/LabelItemsGrid.tsx` (lines 36-59)
+This matches the verified Resend sender used by the main proofing system (`handle-proof-approval`).
 
----
+## Technical Details
 
-## Issue 2: Single-Page Print PDFs Not Matching Proof Items
+**File: `supabase/config.toml`**
+- Add `[functions.label-notify]` with `verify_jwt = false`
 
-**Root Cause Found:** When individual print-ready PDFs are uploaded (not as a multi-page PDF), the name-matching logic in `handleDualFilesUploaded` normalizes both the filename and the existing item name, then compares. But:
+**File: `supabase/functions/label-notify/index.ts`**
+- Line 12: Update CORS headers to include all required headers
+- Line 146: Change `from` address for multi-contact emails to use `proofing@printstream.impressweb.co.za`
+- Line 286: Change `from` address for single-recipient emails to use `proofing@printstream.impressweb.co.za`
 
-- Uploaded filename: `"Eazi Tool BLACK.pdf"` -- normalizes to `"eazi tool black"`
-- Existing item name: `"Eazi Tool Black (5000)"` -- normalizes to `"eazi tool black (5000)"`
-
-The parenthetical quantity suffix `(5000)` isn't stripped by the normalizer, so the names don't match. The print file is created as a brand new item with `quantity: 1` instead of being attached to the existing proof item.
-
-The DB confirms: 6 proof items (with correct quantities) and 6 separate print items (quantity=1, no proof URL), completely unlinked.
-
-**Fix (two parts):**
-
-### Part A: Improve auto-matching
-Update the `normalizeItemName` function in `handleDualFilesUploaded` to also strip parenthetical content like `(5000)` from item names. This handles the common pattern where items have quantity in their display name.
-
-**File:** `src/components/labels/order/LabelOrderModal.tsx` (line 146-152)
-
-### Part B: Manual matching UI for unmatched print items
-When auto-matching fails (or has already failed, like in the current order), users need a way to manually assign a print-ready file to an existing proof item. Add a "Link to Proof" dropdown on the `PrintReadyItemCard` for items that have print artwork but no proof artwork -- letting the admin pick which proof item this print file belongs to.
-
-When linked:
-- Copy the print PDF URL and thumbnail to the selected proof item
-- Delete the orphan print-only item
-
-**Files:**
-- `src/components/labels/items/PrintReadyItemCard.tsx` -- add a "Link to Proof Item" selector for unmatched items
-- `src/components/labels/items/LabelItemsGrid.tsx` -- pass the full items list so `PrintReadyItemCard` can show available proof items to link to
-
----
-
-## Implementation Sequence
-
-1. Fix `getValidationStatus` logic ordering (5 min)
-2. Fix `normalizeItemName` to strip quantity suffixes (5 min)
-3. Add manual "Link to Proof" UI on `PrintReadyItemCard` (20 min)
+After these changes the function will be auto-deployed, and "Send Proof for Approval" will successfully send emails via Resend.
 
