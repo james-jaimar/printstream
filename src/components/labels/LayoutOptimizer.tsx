@@ -4,7 +4,7 @@
  * Visual interface for generating and selecting optimal label layouts
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +37,8 @@ import {
 import { useLayoutOptimizer } from '@/hooks/labels/useLayoutOptimizer';
 import { usePrepareArtwork } from '@/hooks/labels/usePrepareArtwork';
 import { RunLayoutDiagram } from './optimizer/RunLayoutDiagram';
-import { type LabelItem, type LabelDieline, type LayoutOption } from '@/types/labels';
+import { type LabelItem, type LabelDieline, type LayoutOption, type RollSplitOption } from '@/types/labels';
+import { getSlotConfig, calculateFramesForSlot, calculateMeters } from '@/utils/labels/layoutOptimizer';
 import { cn } from '@/lib/utils';
 
 interface LayoutOptimizerProps {
@@ -61,6 +62,8 @@ export function LayoutOptimizer({
 }: LayoutOptimizerProps) {
   const [showWeights, setShowWeights] = useState(false);
   const [showPreview, setShowPreview] = useState(!!savedLayout);
+  const [runOverrides, setRunOverrides] = useState<Record<number, number>>({});
+  const [runSplits, setRunSplits] = useState<Record<number, RollSplitOption>>({});
   
   const {
     options,
@@ -137,6 +140,17 @@ export function LayoutOptimizer({
   };
 
   const handleSave = async () => {
+    // Before saving, apply overrides and splits to the selected option
+    if (selectedOption && (Object.keys(runOverrides).length > 0 || Object.keys(runSplits).length > 0)) {
+      const updatedOption = {
+        ...selectedOption,
+        runs: effectiveRuns.map(run => ({
+          ...run,
+          roll_split: runSplits[run.run_number] ?? run.roll_split,
+        })),
+      };
+      selectOption(updatedOption);
+    }
     const success = await saveLayout();
     if (success && onLayoutSaved) {
       onLayoutSaved();
@@ -154,6 +168,49 @@ export function LayoutOptimizer({
     
     await prepareBulk(itemsToPrep);
   };
+
+  const handleQuantityOverride = useCallback((runNumber: number, newQty: number) => {
+    if (newQty <= 0) {
+      // Clear override
+      setRunOverrides(prev => {
+        const next = { ...prev };
+        delete next[runNumber];
+        return next;
+      });
+    } else {
+      setRunOverrides(prev => ({ ...prev, [runNumber]: newQty }));
+    }
+  }, []);
+
+  const handleRollSplitChange = useCallback((runNumber: number, split: RollSplitOption) => {
+    setRunSplits(prev => ({ ...prev, [runNumber]: split }));
+  }, []);
+
+  // Apply overrides to compute effective runs
+  const effectiveRuns = useMemo(() => {
+    if (!selectedOption || !dieline) return selectedOption?.runs ?? [];
+    const config = getSlotConfig(dieline);
+    
+    return selectedOption.runs.map(run => {
+      const override = runOverrides[run.run_number];
+      if (!override) return run;
+      
+      // Recalculate frames/meters for the overridden qty
+      const newFrames = calculateFramesForSlot(override, config);
+      const newMeters = calculateMeters(newFrames, config);
+      const newActualPerSlot = newFrames * config.labelsPerSlotPerFrame;
+      
+      return {
+        ...run,
+        quantity_override: override,
+        frames: newFrames,
+        meters: newMeters,
+        actual_labels_per_slot: newActualPerSlot,
+        labels_per_output_roll: newActualPerSlot,
+        needs_rewinding: qtyPerRoll ? newActualPerSlot < qtyPerRoll : false,
+      };
+    });
+  }, [selectedOption, runOverrides, dieline, qtyPerRoll]);
 
   return (
     <Card>
@@ -326,7 +383,7 @@ export function LayoutOptimizer({
             <CollapsibleContent className="pt-4">
               <ScrollArea className="h-[60vh]">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pr-4">
-                  {selectedOption.runs.map((run, idx) => (
+                  {effectiveRuns.map((run, idx) => (
                     <RunLayoutDiagram
                       key={idx}
                       runNumber={run.run_number}
@@ -340,7 +397,12 @@ export function LayoutOptimizer({
                       qtyPerRoll={qtyPerRoll ?? undefined}
                       needsRewinding={run.needs_rewinding}
                       labelsPerOutputRoll={run.labels_per_output_roll}
+                      actualLabelsPerSlot={run.actual_labels_per_slot}
                       consolidationSuggestion={run.consolidation_suggestion}
+                      quantityOverride={runOverrides[run.run_number]}
+                      rollSplit={runSplits[run.run_number]}
+                      onQuantityOverride={handleQuantityOverride}
+                      onRollSplitChange={handleRollSplitChange}
                     />
                   ))}
                 </div>

@@ -481,16 +481,21 @@ function annotateRunsWithRollInfo(
   config: SlotConfig,
   qtyPerRoll?: number
 ): ProposedRun[] {
-  if (!qtyPerRoll || qtyPerRoll <= 0) return runs;
-  
   return runs.map(run => {
-    // Each slot produces one output roll; labels_per_output_roll = qty in that slot
-    const minSlotQty = Math.min(...run.slot_assignments.map(a => a.quantity_in_slot));
-    const needsRewinding = minSlotQty < qtyPerRoll;
+    // The ACTUAL output per slot = frames * labelsPerSlotPerFrame
+    // In a ganged run, ALL slots print for the same number of frames
+    const actualLabelsPerSlot = run.frames * config.labelsPerSlotPerFrame;
+    
+    if (!qtyPerRoll || qtyPerRoll <= 0) {
+      return { ...run, actual_labels_per_slot: actualLabelsPerSlot };
+    }
+    
+    const needsRewinding = actualLabelsPerSlot < qtyPerRoll;
     
     return {
       ...run,
-      labels_per_output_roll: minSlotQty,
+      actual_labels_per_slot: actualLabelsPerSlot,
+      labels_per_output_roll: actualLabelsPerSlot,
       needs_rewinding: needsRewinding,
     };
   });
@@ -510,8 +515,9 @@ function createRollOptimizedRuns(
   const longRuns: ProposedRun[] = [];
   
   for (const run of baseRuns) {
-    const minSlotQty = Math.min(...run.slot_assignments.map(a => a.quantity_in_slot));
-    if (minSlotQty < qtyPerRoll) {
+    // Use actual output (frames-based) for comparison, not requested qty
+    const actualPerSlot = run.frames * config.labelsPerSlotPerFrame;
+    if (actualPerSlot < qtyPerRoll) {
       shortRuns.push(run);
     } else {
       longRuns.push(run);
