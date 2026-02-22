@@ -29,7 +29,7 @@ interface LabelItemCardProps {
   validationStatus?: ValidationStatus;
   validationIssues?: string[];
   thumbnailUrl?: string;
-  onPrepareArtwork?: (action: 'crop' | 'use_proof_as_print') => void;
+  onPrepareArtwork?: (action: 'crop' | 'use_proof_as_print' | 'crop_to_bleed') => void;
   isProcessing?: boolean;
 }
 
@@ -265,6 +265,22 @@ export function LabelItemCard({
                     <Crop className="h-3 w-3" />
                   )}
                   Auto-Crop
+                </Button>
+              )}
+              {!needsCrop && !isPrintReady && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 h-7 text-xs gap-1"
+                  onClick={() => onPrepareArtwork('crop_to_bleed')}
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Crop className="h-3 w-3" />
+                  )}
+                  Crop to Bleed
                 </Button>
               )}
               <Button

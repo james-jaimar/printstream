@@ -161,12 +161,49 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Use actual PDF size (prefer bleedbox > mediabox for actual size)
-    const actualWidth = dimensions.bleedbox_width_mm || dimensions.mediabox_width_mm;
-    const actualHeight = dimensions.bleedbox_height_mm || dimensions.mediabox_height_mm;
+  // Use actual PDF size (prefer bleedbox > mediabox for actual size)
+  const actualWidth = dimensions.bleedbox_width_mm || dimensions.mediabox_width_mm;
+  const actualHeight = dimensions.bleedbox_height_mm || dimensions.mediabox_height_mm;
 
-    // Validate dimensions
-    const validation = validateDimensions(
+  // Detect crop marks scenario: MediaBox >> BleedBox (or TrimBox)
+  const targetBoxWidth = dimensions.bleedbox_width_mm || dimensions.trimbox_width_mm;
+  const targetBoxHeight = dimensions.bleedbox_height_mm || dimensions.trimbox_height_mm;
+  const hasCropMarks = targetBoxWidth && targetBoxHeight &&
+    (dimensions.mediabox_width_mm - targetBoxWidth > 2) &&
+    (dimensions.mediabox_height_mm - targetBoxHeight > 2);
+
+  if (hasCropMarks) {
+    // PDF has crop marks — flag for auto-crop to bleed
+    const cropLeft = (dimensions.mediabox_width_mm - targetBoxWidth) / 2;
+    const cropRight = cropLeft;
+    const cropTop = (dimensions.mediabox_height_mm - targetBoxHeight) / 2;
+    const cropBottom = cropTop;
+
+    const cropValidation: ValidationResult = {
+      status: 'needs_crop',
+      issues: [
+        `PDF has crop marks — MediaBox is ${dimensions.mediabox_width_mm.toFixed(1)}×${dimensions.mediabox_height_mm.toFixed(1)}mm`,
+        `Will crop to BleedBox: ${targetBoxWidth.toFixed(1)}×${targetBoxHeight.toFixed(1)}mm`,
+        `Removing ${cropLeft.toFixed(1)}mm from each side`,
+      ],
+      can_auto_crop: true,
+      crop_amount_mm: { left: cropLeft, right: cropRight, top: cropTop, bottom: cropBottom },
+    };
+
+    const response: AnalysisResponse = {
+      success: true,
+      dimensions,
+      validation: cropValidation,
+      thumbnail_url: thumbnailUrl,
+    };
+
+    return new Response(JSON.stringify(response), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Validate dimensions
+  const validation = validateDimensions(
       actualWidth,
       actualHeight,
       expected_trim_width_mm,

@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { CropAmountMm } from '@/types/labels';
 
-type PrepareAction = 'crop' | 'mark_ready' | 'validate' | 'use_proof_as_print';
+type PrepareAction = 'crop' | 'mark_ready' | 'validate' | 'use_proof_as_print' | 'crop_to_bleed';
 
 interface PrepareResult {
   success: boolean;
