@@ -194,7 +194,7 @@ export function AddServiceDialog({ orderId, open, onOpenChange, outputRollsCount
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-sm w-[calc(100vw-2rem)] max-h-[85vh] flex flex-col">
+      <DialogContent className="w-[50vw] max-h-[85vh] flex flex-col">
         <DialogHeader className="pb-0">
           <DialogTitle className="flex items-center gap-1.5 text-sm">
             <Plus className="h-3.5 w-3.5" />
