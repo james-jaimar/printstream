@@ -31,6 +31,7 @@ export interface LayoutInput {
   dieline: LabelDieline;
   weights?: OptimizationWeights;
   inkConfig?: LabelInkConfig;
+  qtyPerRoll?: number;
 }
 
 export interface SlotConfig {
@@ -429,7 +430,8 @@ function createLayoutOption(
   runs: ProposedRun[],
   config: SlotConfig,
   theoreticalMinMeters: number,
-  reasoning: string
+  reasoning: string,
+  qtyPerRoll?: number
 ): Omit<LayoutOption, 'overall_score'> {
   const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
   const totalFrames = runs.reduce((sum, r) => sum + r.frames, 0);
@@ -441,8 +443,17 @@ function createLayoutOption(
     : 0;
   // Print efficiency: fewer runs = better
   const printEfficiency = 1 / (1 + runs.length * 0.1);
-  // Labor efficiency: fewer changeovers = better
-  const laborEfficiency = 1 / (1 + runs.length * 0.15);
+  // Labor efficiency: fewer changeovers = better, penalize rewinding
+  let laborEfficiency = 1 / (1 + runs.length * 0.15);
+  
+  if (qtyPerRoll && qtyPerRoll > 0) {
+    const rewindingRuns = runs.filter(r => r.needs_rewinding);
+    if (rewindingRuns.length > 0) {
+      // Penalize proportionally to how many runs need manual rewinding
+      const rewindPenalty = (rewindingRuns.length / runs.length) * 0.4;
+      laborEfficiency = Math.max(0, laborEfficiency - rewindPenalty);
+    }
+  }
   
   return {
     id,
@@ -462,8 +473,120 @@ function createLayoutOption(
 /**
  * Generate layout options using multiple strategies
  */
+/**
+ * Annotate runs with roll-awareness metadata and flag short rolls
+ */
+function annotateRunsWithRollInfo(
+  runs: ProposedRun[],
+  config: SlotConfig,
+  qtyPerRoll?: number
+): ProposedRun[] {
+  if (!qtyPerRoll || qtyPerRoll <= 0) return runs;
+  
+  return runs.map(run => {
+    // Each slot produces one output roll; labels_per_output_roll = qty in that slot
+    const minSlotQty = Math.min(...run.slot_assignments.map(a => a.quantity_in_slot));
+    const needsRewinding = minSlotQty < qtyPerRoll;
+    
+    return {
+      ...run,
+      labels_per_output_roll: minSlotQty,
+      needs_rewinding: needsRewinding,
+    };
+  });
+}
+
+/**
+ * Create a "Roll-Optimized" layout by consolidating short runs into longer ones
+ */
+function createRollOptimizedRuns(
+  baseRuns: ProposedRun[],
+  items: LabelItem[],
+  config: SlotConfig,
+  qtyPerRoll: number
+): { runs: ProposedRun[]; reasoning: string } | null {
+  // Identify short runs (where any slot < qtyPerRoll)
+  const shortRuns: ProposedRun[] = [];
+  const longRuns: ProposedRun[] = [];
+  
+  for (const run of baseRuns) {
+    const minSlotQty = Math.min(...run.slot_assignments.map(a => a.quantity_in_slot));
+    if (minSlotQty < qtyPerRoll) {
+      shortRuns.push(run);
+    } else {
+      longRuns.push(run);
+    }
+  }
+  
+  if (shortRuns.length === 0) return null; // Nothing to consolidate
+  
+  // Try to absorb short runs into long runs
+  const consolidatedLongRuns = longRuns.map(r => ({
+    ...r,
+    slot_assignments: r.slot_assignments.map(a => ({ ...a })),
+  }));
+  const unconsolidated: ProposedRun[] = [];
+  const consolidationNotes: string[] = [];
+  
+  for (const shortRun of shortRuns) {
+    let absorbed = false;
+    
+    // Check each short run's items — can they be found in a long run?
+    const shortItemIds = new Set(shortRun.slot_assignments.map(a => a.item_id));
+    
+    for (const longRun of consolidatedLongRuns) {
+      const longItemIds = new Set(longRun.slot_assignments.map(a => a.item_id));
+      
+      // All short run items must exist in the long run
+      const allItemsPresent = [...shortItemIds].every(id => longItemIds.has(id));
+      if (!allItemsPresent) continue;
+      
+      // Absorb: add short run quantities to matching slots in the long run
+      for (const shortSlot of shortRun.slot_assignments) {
+        const matchingSlot = longRun.slot_assignments.find(a => a.item_id === shortSlot.item_id);
+        if (matchingSlot) {
+          matchingSlot.quantity_in_slot += shortSlot.quantity_in_slot;
+        }
+      }
+      
+      // Recalculate run metrics
+      const maxSlotQty = Math.max(...longRun.slot_assignments.map(a => a.quantity_in_slot));
+      longRun.frames = calculateFramesForSlot(maxSlotQty, config);
+      longRun.meters = calculateMeters(longRun.frames, config);
+      
+      const totalShortLabels = shortRun.slot_assignments.reduce((s, a) => s + a.quantity_in_slot, 0);
+      consolidationNotes.push(
+        `Absorbed Run ${shortRun.run_number} (${totalShortLabels.toLocaleString()} labels) into Run ${longRun.run_number} — eliminates ${shortRun.slot_assignments.length} short rolls`
+      );
+      absorbed = true;
+      break;
+    }
+    
+    if (!absorbed) {
+      // Can't absorb — keep it but add a suggestion
+      const totalLabels = shortRun.slot_assignments.reduce((s, a) => s + a.quantity_in_slot, 0);
+      unconsolidated.push({
+        ...shortRun,
+        consolidation_suggestion: `Cannot auto-consolidate (${totalLabels.toLocaleString()} labels) — items not in other runs. Manual rewind required.`,
+      });
+    }
+  }
+  
+  const finalRuns = [...consolidatedLongRuns, ...unconsolidated]
+    .map((r, i) => ({ ...r, run_number: i + 1 }));
+  
+  if (consolidationNotes.length === 0) return null;
+  
+  const reasoning = `Roll-optimized: ${consolidationNotes.join('. ')}. ` +
+    (unconsolidated.length > 0 
+      ? `${unconsolidated.length} run(s) could not be consolidated.`
+      : 'All short rolls eliminated.');
+  
+  return { runs: finalRuns, reasoning };
+}
+
 export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
-  const { items, dieline, weights = DEFAULT_OPTIMIZATION_WEIGHTS } = input;
+  const { items, dieline, weights = DEFAULT_OPTIMIZATION_WEIGHTS, qtyPerRoll } = input;
   const config = getSlotConfig(dieline);
   const partialOptions: Omit<LayoutOption, 'overall_score'>[] = [];
   
@@ -476,7 +599,8 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
   
   // Option 1: Ganged — all items ganged (balanced, may produce multiple runs)
   if (items.length <= config.totalSlots) {
-    const gangedRuns = createGangedRuns(items, config);
+    let gangedRuns = createGangedRuns(items, config);
+    gangedRuns = annotateRunsWithRollInfo(gangedRuns, config, qtyPerRoll);
     partialOptions.push(createLayoutOption(
       'ganged-all',
       gangedRuns,
@@ -484,33 +608,54 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
       theoreticalMinMeters,
       gangedRuns.length === 1
         ? 'All items ganged in a single balanced run — all slots filled'
-        : `All items ganged, split into ${gangedRuns.length} balanced runs to minimize waste`
+        : `All items ganged, split into ${gangedRuns.length} balanced runs to minimize waste`,
+      qtyPerRoll
     ));
   }
   
   // Option 2: Individual — one dedicated run per item (all slots filled with same item)
-  const individualRuns = items.map((item, idx) => 
+  let individualRuns = items.map((item, idx) => 
     createSingleItemRun(item, idx + 1, config)
   );
+  individualRuns = annotateRunsWithRollInfo(individualRuns, config, qtyPerRoll);
   partialOptions.push(createLayoutOption(
     'individual',
     individualRuns,
     config,
     theoreticalMinMeters,
-    'Each item on its own run — all slots filled, maximum flexibility for quantity control'
+    'Each item on its own run — all slots filled, maximum flexibility for quantity control',
+    qtyPerRoll
   ));
   
   // Option 3: Optimized — balanced ganging with quantity splitting across runs
   if (items.length > 1) {
-    const optimizedRuns = createOptimizedRuns(items, config);
+    let optimizedRuns = createOptimizedRuns(items, config);
+    optimizedRuns = annotateRunsWithRollInfo(optimizedRuns, config, qtyPerRoll);
     if (optimizedRuns.length > 0) {
       partialOptions.push(createLayoutOption(
         'optimized',
         optimizedRuns,
         config,
         theoreticalMinMeters,
-        'Balanced approach — items ganged where possible, quantities split across runs to minimize waste'
+        'Balanced approach — items ganged where possible, quantities split across runs to minimize waste',
+        qtyPerRoll
       ));
+    }
+    
+    // Option 4: Roll-Optimized — consolidate short runs (only when qtyPerRoll is set)
+    if (qtyPerRoll && qtyPerRoll > 0) {
+      const rollOptResult = createRollOptimizedRuns(optimizedRuns, items, config, qtyPerRoll);
+      if (rollOptResult) {
+        const rollOptRuns = annotateRunsWithRollInfo(rollOptResult.runs, config, qtyPerRoll);
+        partialOptions.push(createLayoutOption(
+          'roll-optimized',
+          rollOptRuns,
+          config,
+          theoreticalMinMeters,
+          rollOptResult.reasoning,
+          qtyPerRoll
+        ));
+      }
     }
   }
   

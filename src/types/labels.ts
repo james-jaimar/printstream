@@ -460,6 +460,10 @@ export interface ProposedRun {
   slot_assignments: SlotAssignment[];
   meters: number;
   frames: number;
+  // Roll-awareness metadata
+  labels_per_output_roll?: number;
+  needs_rewinding?: boolean;
+  consolidation_suggestion?: string;
 }
 
 export interface OptimizationWeights {

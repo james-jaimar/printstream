@@ -45,6 +45,7 @@ interface LayoutOptimizerProps {
   items: LabelItem[];
   dieline: LabelDieline | null;
   savedLayout?: Record<string, any> | null;
+  qtyPerRoll?: number | null;
   onLayoutApplied?: () => void;
   onLayoutSaved?: () => void;
 }
@@ -54,6 +55,7 @@ export function LayoutOptimizer({
   items, 
   dieline,
   savedLayout,
+  qtyPerRoll,
   onLayoutApplied,
   onLayoutSaved
 }: LayoutOptimizerProps) {
@@ -77,7 +79,7 @@ export function LayoutOptimizer({
     hasSavedLayout,
     saveLayout,
     clearSavedLayout
-  } = useLayoutOptimizer({ orderId, items, dieline, savedLayout: savedLayout as any });
+  } = useLayoutOptimizer({ orderId, items, dieline, savedLayout: savedLayout as any, qtyPerRoll });
 
   const { prepareBulk, isProcessing: isPreparingArtwork } = usePrepareArtwork(orderId);
 
@@ -161,9 +163,20 @@ export function LayoutOptimizer({
             <Sparkles className="h-5 w-5 text-primary" />
             <CardTitle>AI Layout Optimizer</CardTitle>
           </div>
-          <Badge variant="secondary" className="font-mono">
-            {items.length} items · {dieline?.columns_across || 0} slots
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="font-mono">
+              {items.length} items · {dieline?.columns_across || 0} slots
+            </Badge>
+            {qtyPerRoll ? (
+              <Badge variant="outline" className="font-mono">
+                {qtyPerRoll.toLocaleString()}/roll
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="font-mono text-amber-600 border-amber-300">
+                No qty/roll set
+              </Badge>
+            )}
+          </div>
         </div>
         <CardDescription>
           Automatically arrange labels across slots to minimize waste and optimize production
@@ -324,6 +337,10 @@ export function LayoutOptimizer({
                       frames={run.frames}
                       showStats={true}
                       compact={true}
+                      qtyPerRoll={qtyPerRoll ?? undefined}
+                      needsRewinding={run.needs_rewinding}
+                      labelsPerOutputRoll={run.labels_per_output_roll}
+                      consolidationSuggestion={run.consolidation_suggestion}
                     />
                   ))}
                 </div>

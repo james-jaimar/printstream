@@ -549,6 +549,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                             items={layoutEligibleItems}
                             dieline={order.dieline || null}
                             savedLayout={order.saved_layout as any}
+                            qtyPerRoll={order.qty_per_roll}
                             onLayoutApplied={() => {
                               setLayoutDialogOpen(false);
                               refetch();

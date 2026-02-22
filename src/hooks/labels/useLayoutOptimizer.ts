@@ -34,9 +34,10 @@ interface UseLayoutOptimizerProps {
   items: LabelItem[];
   dieline: LabelDieline | null;
   savedLayout?: LayoutOption | null;
+  qtyPerRoll?: number | null;
 }
 
-export function useLayoutOptimizer({ orderId, items, dieline, savedLayout }: UseLayoutOptimizerProps) {
+export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPerRoll }: UseLayoutOptimizerProps) {
   const [options, setOptions] = useState<LayoutOption[]>([]);
   const [selectedOption, setSelectedOption] = useState<LayoutOption | null>(
     savedLayout ? savedLayout as LayoutOption : null
@@ -78,7 +79,8 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout }: Use
       const generatedOptions = generateOptions({
         items: itemsToUse,
         dieline: dielineToUse,
-        weights: weightsToUse
+        weights: weightsToUse,
+        qtyPerRoll: qtyPerRoll ?? undefined,
       });
       
       setOptions(generatedOptions);
@@ -95,7 +97,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout }: Use
     } finally {
       setIsGenerating(false);
     }
-  }, [items, dieline, weights]);
+  }, [items, dieline, weights, qtyPerRoll]);
 
   /**
    * Fetch AI suggestion for layout optimization
