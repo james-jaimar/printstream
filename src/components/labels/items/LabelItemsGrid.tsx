@@ -20,6 +20,7 @@ interface LabelItemsGridProps {
   orderId: string;
   viewMode?: 'proof' | 'print';
   itemAnalyses?: Record<string, ItemAnalysis>;
+  onLinkPrintToProof?: (printItemId: string, proofItemId: string) => void;
 }
 
 // Map preflight status to validation status
@@ -42,13 +43,15 @@ function getValidationStatus(
       if (errorsJoined.includes('too small')) return 'too_small';
       return 'too_large'; // Default for errors
     }
+    // Check has_bleed BEFORE warnings — non-critical warnings (e.g. rotation)
+    // should not override a confirmed bleed result
+    if (report.has_bleed === true) return 'passed';
     if (report.warnings && report.warnings.length > 0) {
       const warningsJoined = report.warnings.join(' ').toLowerCase();
       if (warningsJoined.includes('no bleed') || warningsJoined.includes('trim size')) return 'no_bleed';
       if (warningsJoined.includes('crop')) return 'needs_crop';
       return 'no_bleed'; // Default for warnings
     }
-    if (report.has_bleed === true) return 'passed';
   }
   
   // Fall back to preflight_status field
@@ -77,7 +80,7 @@ function getValidationIssues(item: LabelItem, analysis?: ItemAnalysis): string[]
   return [];
 }
 
-export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyses = {} }: LabelItemsGridProps) {
+export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyses = {}, onLinkPrintToProof }: LabelItemsGridProps) {
   const updateItem = useUpdateLabelItem();
   const deleteItem = useDeleteLabelItem();
 
@@ -131,11 +134,20 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
     <div className={gridClassName}>
       {sortedItems.map((item) => {
         if (viewMode === 'print') {
+          // Items with proof artwork are potential link targets
+          const proofItems = items.filter(i => 
+            i.id !== item.id && (i.proof_pdf_url || i.artwork_pdf_url) && !i.print_pdf_url
+          );
+          // This item is unmatched if it has print artwork but no proof artwork
+          const isUnmatched = !!item.print_pdf_url && !item.proof_pdf_url && !item.artwork_pdf_url;
           return (
             <PrintReadyItemCard
               key={item.id}
               item={item}
               onDeletePrintFile={handleDeletePrintFile}
+              isUnmatched={isUnmatched}
+              availableProofItems={isUnmatched ? proofItems : undefined}
+              onLinkToProof={onLinkPrintToProof}
             />
           );
         }
