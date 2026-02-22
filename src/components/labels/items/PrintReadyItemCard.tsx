@@ -1,7 +1,8 @@
-import { FileText, CheckCircle, XCircle, Loader2, AlertTriangle, Trash2, Upload } from 'lucide-react';
+import { FileText, CheckCircle, XCircle, Loader2, AlertTriangle, Trash2, Upload, Link2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useThumbnailUrl } from '@/hooks/labels/useThumbnailUrl';
 import type { LabelItem, PrintPdfStatus } from '@/types/labels';
@@ -10,6 +11,9 @@ interface PrintReadyItemCardProps {
   item: LabelItem;
   onDeletePrintFile?: (itemId: string) => void;
   onReplacePrintFile?: (itemId: string) => void;
+  isUnmatched?: boolean;
+  availableProofItems?: LabelItem[];
+  onLinkToProof?: (printItemId: string, proofItemId: string) => void;
 }
 
 const printStatusConfig: Record<PrintPdfStatus, {
@@ -24,7 +28,7 @@ const printStatusConfig: Record<PrintPdfStatus, {
   needs_crop: { icon: AlertTriangle, color: 'text-amber-600', bgColor: 'bg-amber-100', label: 'Needs Crop' },
 };
 
-export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile }: PrintReadyItemCardProps) {
+export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile, isUnmatched, availableProofItems, onLinkToProof }: PrintReadyItemCardProps) {
   // Proof thumbnail: prefer proof_thumbnail_url, fall back to artwork_thumbnail_url
   const proofThumbPath = item.proof_thumbnail_url || item.artwork_thumbnail_url || null;
   const { url: proofThumbUrl, isLoading: proofLoading } = useThumbnailUrl(proofThumbPath);
@@ -134,6 +138,25 @@ export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile
             </div>
           </div>
         </div>
+        {isUnmatched && availableProofItems && availableProofItems.length > 0 && onLinkToProof && (
+          <div className="border-t px-2 py-1.5 bg-amber-50 dark:bg-amber-950/30">
+            <div className="flex items-center gap-1.5">
+              <Link2 className="h-3 w-3 text-amber-600 shrink-0" />
+              <Select onValueChange={(proofId) => onLinkToProof(item.id, proofId)}>
+                <SelectTrigger className="h-6 text-[10px] flex-1">
+                  <SelectValue placeholder="Link to proof item…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableProofItems.map((proofItem) => (
+                    <SelectItem key={proofItem.id} value={proofItem.id} className="text-xs">
+                      {proofItem.name} (Qty: {proofItem.quantity.toLocaleString()})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

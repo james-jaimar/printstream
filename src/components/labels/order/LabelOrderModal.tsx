@@ -31,7 +31,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@/components/ui/visually-hidden';
 import { useLabelOrder, useUpdateLabelOrder } from '@/hooks/labels/useLabelOrders';
-import { useCreateLabelItem, useUpdateLabelItem } from '@/hooks/labels/useLabelItems';
+import { useCreateLabelItem, useUpdateLabelItem, useDeleteLabelItem } from '@/hooks/labels/useLabelItems';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { DualArtworkUploadZone } from '../items/DualArtworkUploadZone';
 import { LabelItemsGrid } from '../items/LabelItemsGrid';
@@ -77,6 +77,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
   const { data: order, isLoading, error, refetch } = useLabelOrder(orderId);
   const createItem = useCreateLabelItem();
   const updateItem = useUpdateLabelItem();
+  const deleteItem = useDeleteLabelItem();
   const updateOrder = useUpdateLabelOrder();
   const [activeTab, setActiveTab] = useState<'specs' | 'artwork'>('specs');
   const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
@@ -148,6 +149,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
         .toLowerCase()
         .replace(/\.(pdf|png|jpg|jpeg)$/i, '')
         .replace(/[\s_-]*(proof|print|final|ready|v\d+)[\s_-]*/gi, '')
+        .replace(/\s*\([^)]*\)\s*/g, '') // Strip parenthetical content like (5000)
         .trim();
     };
 
@@ -699,6 +701,22 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                         orderId={order.id}
                         viewMode={artworkTab}
                         itemAnalyses={itemAnalyses as Record<string, { validation?: { status: string; issues: string[] }; thumbnail_url?: string }>}
+                        onLinkPrintToProof={(printItemId, proofItemId) => {
+                          const printItem = order.items?.find(i => i.id === printItemId);
+                          if (!printItem) return;
+                          updateItem.mutate({
+                            id: proofItemId,
+                            updates: {
+                              print_pdf_url: printItem.print_pdf_url,
+                              print_thumbnail_url: printItem.print_thumbnail_url,
+                              print_pdf_status: printItem.print_pdf_status || 'ready',
+                            } as any,
+                          }, {
+                            onSuccess: () => {
+                              deleteItem.mutate({ id: printItemId, orderId: order.id });
+                            },
+                          });
+                        }}
                       />
                     ) : (
                       <div className="text-center py-8 border-2 border-dashed rounded-lg">
