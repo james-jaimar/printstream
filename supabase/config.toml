@@ -83,3 +83,7 @@ verify_jwt = false
 [functions.label-vps-health]
 verify_jwt = false
 
+# LABELS DIVISION: Email Notifications (proof ready, approval, etc.)
+[functions.label-notify]
+verify_jwt = false
+
