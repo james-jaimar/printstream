@@ -112,8 +112,8 @@ export function RunLayoutDiagram({
   // Calculate how many frames to show (max 3 for preview)
   const framesToShow = compact ? 1 : Math.min(3, Math.max(1, frames || 1));
   
-  // Show interactive controls only in non-compact mode
-  const showControls = !compact && qtyPerRoll && qtyPerRoll > 0;
+  // Show interactive controls even in compact mode when callbacks are provided
+  const showControls = qtyPerRoll && qtyPerRoll > 0;
   const showAdjuster = showControls && needsRewinding && onQuantityOverride && effectiveActualPerSlot;
   const showSplitter = showControls && effectiveActualPerSlot && effectiveActualPerSlot > qtyPerRoll && onRollSplitChange;
 
