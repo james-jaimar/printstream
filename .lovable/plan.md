@@ -1,66 +1,102 @@
 
-# Auto-Crop PDF to BleedBox
 
-## Problem
-When a PDF contains crop marks, the MediaBox is much larger than the actual artwork. The BleedBox (e.g., 104x54mm) and TrimBox (e.g., 100x50mm) are embedded correctly in the PDF metadata, but the system has no way to automatically trim the oversized page down to the BleedBox dimensions. This is critical for imposition -- the VPS needs artwork at exactly the bleed size.
+# Roll-Aware AI Layout Optimizer
 
-## Solution
-Add a new `crop_to_bleed` action to the `label-prepare-artwork` edge function and wire it into the UI so it can be triggered automatically or manually.
+## The Problem
+
+When a run produces a small quantity per slot (e.g., Run 5 with 140 labels across 5 slots = 700 total), the finishing department gets 5 short rolls. They must manually rewind, join, count, and cut these into the customer's requested roll size (e.g., 500 per roll). This is extremely labor-intensive.
+
+The AI layout optimizer currently has no awareness of `qty_per_roll` -- the customer's requested labels-per-output-roll. This value exists in the database (`label_orders.qty_per_roll`) but is buried in the "Output & Delivery Specs" section and is never considered during layout generation.
+
+## The Solution
+
+Make `qty_per_roll` a first-class input to the layout optimizer. The system will:
+
+1. **Flag problematic runs** where labels-per-slot is below `qty_per_roll` (meaning manual rewinding is required)
+2. **Suggest consolidation** -- absorb short runs into longer ones by slightly increasing other runs' quantities
+3. **Show the finishing impact** visually on each run diagram
 
 ## Changes
 
-### 1. Edge Function: `label-prepare-artwork/index.ts`
-Add a new `crop_to_bleed` action that:
-- Fetches the item's PDF page boxes from VPS (`/page-boxes`)
-- Reads the BleedBox dimensions (falls back to TrimBox if no BleedBox)
-- If the MediaBox is larger than the BleedBox, calculates the crop offsets: `(MediaBox - BleedBox) / 2` on each side
-- Calls VPS `/manipulate/crop` with those offsets
-- Uploads the cropped PDF and updates `print_pdf_url` + `print_pdf_status = 'ready'`
+### 1. Promote "Qty per Roll" into the Layout Optimizer UI
 
-### 2. Client Hook: `src/hooks/labels/usePrepareArtwork.ts`
-Add `crop_to_bleed` to the `PrepareAction` type so the client can invoke this action.
+**File: `src/components/labels/LayoutOptimizer.tsx`**
 
-### 3. Validation Logic: `src/utils/pdf/thumbnailUtils.ts`
-Update `validatePdfDimensions` to detect the "has crop marks" scenario:
-- When the TrimBox matches expected trim size AND the PDF has a BleedBox, but the MediaBox is significantly larger than the BleedBox, return a new status `needs_crop` with `can_auto_crop = true` and a message indicating crop marks need trimming.
+- Accept new prop `qtyPerRoll: number | null`
+- Display the current `qty_per_roll` prominently at the top alongside the "items / slots" badge
+- If `qty_per_roll` is not set, show a warning: "Set Qty per Roll in specs to enable roll-aware optimization"
+- Pass `qtyPerRoll` down to the optimizer hook and to `RunLayoutDiagram`
 
-### 4. Proof Item Card: `src/components/labels/items/LabelItemCard.tsx`
-When validation status is `needs_crop` and bleed is confirmed, show a "Crop to Bleed" button that triggers the `crop_to_bleed` action.
+**File: `src/components/labels/order/LabelOrderModal.tsx`**
 
-### 5. Layout Optimizer: `src/components/labels/LayoutOptimizer.tsx`
-Update the bulk "Prepare All" logic to use `crop_to_bleed` for items where the PDF is oversized (has crop marks) but bleed info is present.
+- Pass `order.qty_per_roll` to `LayoutOptimizer`
 
-### 6. Upload Analysis: `supabase/functions/label-pdf-analyze/index.ts`
-Update the validation function to detect the crop-marks scenario: when `mediabox >> bleedbox`, flag as `needs_crop` with crop offsets calculated from the difference between MediaBox and BleedBox.
+### 2. Add Roll-Awareness to the Layout Engine
 
-## Technical Details
+**File: `src/utils/labels/layoutOptimizer.ts`**
 
-**New action in `label-prepare-artwork`:**
-```text
-case "crop_to_bleed":
-  1. Fetch PDF URL from item
-  2. Call VPS /page-boxes to get MediaBox + BleedBox
-  3. Calculate crop offsets = (MediaBox - BleedBox) / 2 per side
-  4. Call VPS /manipulate/crop with those offsets
-  5. Upload result, update item with print_pdf_url + status "ready"
-```
+- Add `qtyPerRoll?: number` to `LayoutInput` interface
+- Add a new **post-processing step** after each strategy generates runs: `consolidateShortRuns(runs, config, qtyPerRoll)`
+- This function:
+  - For each run, calculates labels-per-output-roll = `slot_quantity / 1` (each slot = one output roll)
+  - Identifies "short runs" where any slot's quantity is below `qtyPerRoll`
+  - Attempts to redistribute the short run's items into other runs that contain the same items (increasing their slot quantity)
+  - If redistribution succeeds (the short run is absorbed), remove it
+  - If not possible (unique items in the short run), keep it but flag it
+- Add per-run metadata: `labels_per_output_roll` and `needs_rewinding: boolean`
 
-**Crop offset calculation:**
-```text
-Given:
-  MediaBox  = 130 x 80 mm  (includes crop marks)
-  BleedBox  = 104 x 54 mm  (label + bleed)
+**File: `src/types/labels.ts`**
 
-Crop offsets:
-  left   = (130 - 104) / 2 = 13mm
-  right  = (130 - 104) / 2 = 13mm
-  top    = (80 - 54) / 2   = 13mm
-  bottom = (80 - 54) / 2   = 13mm
-```
+- Extend `ProposedRun` with optional fields:
+  - `labels_per_output_roll?: number` -- how many labels each output roll will have
+  - `needs_rewinding?: boolean` -- true if below qty_per_roll threshold
+  - `consolidation_suggestion?: string` -- AI tip like "Add 300 to Run 1 to eliminate this run"
 
-**Files to modify:**
-- `supabase/functions/label-prepare-artwork/index.ts` -- add `crop_to_bleed` case
-- `supabase/functions/label-pdf-analyze/index.ts` -- detect crop marks scenario
-- `src/hooks/labels/usePrepareArtwork.ts` -- add type
-- `src/components/labels/items/LabelItemCard.tsx` -- add crop button
-- `src/components/labels/LayoutOptimizer.tsx` -- update bulk prepare logic
+### 3. Show Finishing Impact on Run Diagrams
+
+**File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`**
+
+- Accept new optional props: `qtyPerRoll?: number`, `needsRewinding?: boolean`
+- When `needsRewinding` is true, show a red/amber warning badge on the run card: "Short rolls -- manual rewind required"
+- Show "labels/roll" stat alongside existing meters/frames stats
+- Color-code: green if labels/roll >= qty_per_roll, red if below
+
+### 4. Generate Consolidation Suggestions (Strategy 4)
+
+**File: `src/utils/labels/layoutOptimizer.ts`**
+
+- After generating the three existing strategies (ganged, individual, optimized), add a fourth: **"Roll-Optimized"**
+- This strategy starts from the optimized layout and then:
+  1. Identifies runs where per-slot quantity < qty_per_roll
+  2. For each short run, checks if its items exist in other runs
+  3. If yes, merges the short run's quantity into those other runs and removes the short run
+  4. If a short run has unique items not in any other run, keeps it but notes the issue
+- This produces a layout with fewer runs but potentially more overprint on the longer runs
+- The reasoning will explain: "Consolidated Run 5 (700 labels) into Run 1 -- eliminates 5 short rolls requiring manual rewind"
+
+### 5. Score Roll-Awareness in Labor Efficiency
+
+**File: `src/utils/labels/layoutOptimizer.ts`**
+
+- Update `createLayoutOption` to factor rewinding labor into `labor_efficiency_score`
+- If any run needs rewinding (labels/slot < qty_per_roll), penalize labor score proportionally
+- This means the roll-optimized layout will naturally score higher when qty_per_roll is set
+
+### 6. Update the Hook to Pass qty_per_roll
+
+**File: `src/hooks/labels/useLayoutOptimizer.ts`**
+
+- Accept `qtyPerRoll?: number | null` in `UseLayoutOptimizerProps`
+- Pass it to `generateOptions()` as part of the `LayoutInput`
+
+## Summary of File Changes
+
+| File | Change |
+|------|--------|
+| `src/types/labels.ts` | Extend `ProposedRun` with roll metadata fields |
+| `src/utils/labels/layoutOptimizer.ts` | Add `qtyPerRoll` to `LayoutInput`, add consolidation logic, add "roll-optimized" strategy, update labor scoring |
+| `src/hooks/labels/useLayoutOptimizer.ts` | Accept and pass through `qtyPerRoll` |
+| `src/components/labels/LayoutOptimizer.tsx` | Accept `qtyPerRoll` prop, display it, pass to hook and diagrams |
+| `src/components/labels/order/LabelOrderModal.tsx` | Pass `order.qty_per_roll` to `LayoutOptimizer` |
+| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | Show labels/roll stat, rewinding warning badge |
+
