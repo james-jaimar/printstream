@@ -6,7 +6,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { ArrowUp, Layers, Ruler, Clock } from 'lucide-react';
+import { ArrowUp, Layers, Ruler, Clock, AlertTriangle } from 'lucide-react';
 import type { LabelItem, LabelDieline, SlotAssignment, LabelRunStatus } from '@/types/labels';
 import { cn } from '@/lib/utils';
 import { getSlotConfig } from '@/utils/labels/layoutOptimizer';
@@ -35,6 +35,11 @@ interface RunLayoutDiagramProps {
   aiScore?: number | null;
   compact?: boolean;
   showStats?: boolean;
+  // Roll-awareness
+  qtyPerRoll?: number;
+  needsRewinding?: boolean;
+  labelsPerOutputRoll?: number;
+  consolidationSuggestion?: string;
 }
 
 export function RunLayoutDiagram({
@@ -49,6 +54,10 @@ export function RunLayoutDiagram({
   aiScore,
   compact = false,
   showStats = true,
+  qtyPerRoll,
+  needsRewinding,
+  labelsPerOutputRoll,
+  consolidationSuggestion,
 }: RunLayoutDiagramProps) {
   // Create item color map
   const itemColorMap = new Map<string, typeof ITEM_COLORS[0]>();
@@ -84,13 +93,27 @@ export function RunLayoutDiagram({
     <Card className={cn("overflow-hidden", compact && "border-0 shadow-none")}>
       {/* Compact mode header */}
       {compact && (
-        <div className="px-2 pt-2 pb-1 text-center">
+        <div className="px-2 pt-2 pb-1 text-center space-y-1">
           <span className="text-xs font-medium text-muted-foreground">
             Run {runNumber}
             {totalPrintQty && (
               <> — {totalPrintQty.toLocaleString()} labels</>
             )}
           </span>
+          {needsRewinding && (
+            <div className="flex items-center justify-center gap-1 text-[10px] text-destructive font-medium">
+              <AlertTriangle className="h-3 w-3" />
+              Short rolls — rewind
+            </div>
+          )}
+          {labelsPerOutputRoll != null && qtyPerRoll && (
+            <div className={cn(
+              "text-[10px] font-mono",
+              labelsPerOutputRoll >= qtyPerRoll ? "text-green-600" : "text-destructive"
+            )}>
+              {labelsPerOutputRoll.toLocaleString()}/roll {qtyPerRoll ? `(need ${qtyPerRoll.toLocaleString()})` : ''}
+            </div>
+          )}
         </div>
       )}
       {!compact && (
@@ -144,9 +167,26 @@ export function RunLayoutDiagram({
                     ~{estimatedMinutes}min
                   </span>
                 )}
+                {labelsPerOutputRoll != null && qtyPerRoll && (
+                  <span className={cn(
+                    "flex items-center gap-1 font-medium",
+                    labelsPerOutputRoll >= qtyPerRoll ? "text-green-600" : "text-destructive"
+                  )}>
+                    {labelsPerOutputRoll.toLocaleString()}/roll
+                  </span>
+                )}
               </div>
             )}
           </div>
+          {needsRewinding && (
+            <div className="flex items-center gap-1.5 mt-1 text-xs text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span className="font-medium">Short rolls — manual rewind required</span>
+            </div>
+          )}
+          {consolidationSuggestion && (
+            <p className="text-[11px] text-amber-600 mt-1">{consolidationSuggestion}</p>
+          )}
         </CardHeader>
       )}
       
