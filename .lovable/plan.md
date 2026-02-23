@@ -1,96 +1,144 @@
 
-# Replace Algorithmic Optimizer with AI-Computed Layout
 
-## The Problem
+# Schedule Board Redesign: Material Sub-Columns Per Day
 
-The local algorithm (`createOptimizedRuns`) has been rewritten three times and still produces 7 individual runs for an order that should clearly be 2-3 runs. The edge function AI only returns a high-level suggestion ("ganged"/"individual"/"hybrid") but never computes actual slot assignments.
+## Overview
 
-## Solution
+Replace the current flat day columns with a two-level column structure: each day has horizontal sub-columns for each unique material (substrate + glue + width). This gives operators a clear view of what material rolls are needed each day and lets them drag entire material columns between days.
 
-Have the AI return **actual run layouts** with specific slot assignments, item IDs, and quantities. The AI can reason about the math (e.g., "7 items, 5 slots, maxOverrun 250 -- put the 5 most similar quantities together") far more reliably than the buggy bin-packing algorithm.
-
-## Changes
-
-### 1. Edge Function: Return actual runs (not just a suggestion)
-
-**File: `supabase/functions/label-optimize/index.ts`**
-
-Update the tool-call schema so the AI returns structured run data:
+## Visual Structure
 
 ```text
-tools: [{
-  function: {
-    name: "create_layout",
-    parameters: {
-      runs: [{
-        slot_assignments: [{
-          item_id: string,    // actual item ID from the input
-          quantity_in_slot: number  // how many labels this slot prints
-        }],
-        reasoning: string
-      }],
-      overall_reasoning: string,
-      estimated_waste_percent: number
-    }
-  }
-}]
++------ Monday Feb 24 (6h 20m) ------+------ Tuesday Feb 25 (3h) ------+
+| PP HM 333mm | SG Acr 333mm | PP 330 | PP HM 333mm | SG Acr 300mm    |
+| 3h 40m      | 2h 40m       | --     | 1h 30m      | 1h 30m          |
+|-------------|--------------|--------|-------------|-----------------|
+| Order A     | Order D      |        | Order F     | Order G         |
+| Order B     | Order E      |        |             |                 |
+| Order C     |              |        |             |                 |
++-------------+--------------+--------+-------------+-----------------+
 ```
 
-The system prompt will include:
-- All item IDs and quantities (so the AI can reference them in assignments)
-- The dieline config (slots, labelsPerSlotPerFrame calculated server-side)
-- The maxOverrun constraint
-- Clear instructions: "Return exactly which items go in which slots for each run, with quantities. Every run must have exactly N slot assignments. All slots must be filled."
+- Each day expands horizontally to fit however many material types it has
+- Each material sub-column is independently droppable and its header is draggable (to move the whole group to another day)
+- Capacity warning shown in day header when total exceeds 7 hours
+- Horizontal scroll handles weeks with many materials
 
-The edge function will also **validate** the AI's output before returning:
-- Every run has exactly `totalSlots` assignments
-- All item quantities are accounted for (no items dropped, no over-allocation)
-- No slot overrun exceeds maxOverrun
-- If validation fails, return the AI result with a warning flag
+## Data Changes
 
-### 2. Hook: Add AI-computed layout option
+Currently `label_stock` has: `substrate_type`, `glue_type`, `width_mm`. Orders link via `substrate_id`.
 
-**File: `src/hooks/labels/useLayoutOptimizer.ts`**
+There are ~6 unique material combos in production today (PP/Semi Gloss, Hot Melt/Acrylic, 250/300/330/333mm), so this is very manageable horizontally.
 
-Update `fetchAISuggestion` to parse the new structured response and create a proper `LayoutOption` from the AI's runs. This becomes a first-class layout option (alongside the existing algorithmic ones) called "ai-computed".
+## File Changes
 
-The AI-computed option will:
-- Use the slot assignments directly from the AI
-- Calculate frames/meters using existing `calculateFramesForSlot` and `calculateMeters` helpers
-- Score using the existing `scoreLayout` function
-- Appear in the options list alongside algorithmic options
+### 1. `src/hooks/labels/useLabelSchedule.ts` -- Add substrate data
 
-### 3. UI: Single "Generate" button does both
+- Update both queries to join `label_orders.substrate_id` to `label_stock` to fetch `substrate_type`, `glue_type`, `width_mm`
+- Add these fields to `ScheduledOrderGroup` and `UnscheduledOrderGroup` interfaces
+- Add a `material_key` string field (e.g., "PP | Hot Melt | 333mm") to each group
+- Add a helper function `getMaterialKey()`
 
-**File: `src/components/labels/LayoutOptimizer.tsx`**
+### 2. `src/components/labels/schedule/MaterialColumn.tsx` -- New component
 
-When the user clicks "Generate Layout Options":
-1. Fire both the local algorithm AND the AI edge function in parallel
-2. Merge results: algorithmic options + AI-computed option
-3. Auto-select the best-scoring option (which should now be the AI one)
-4. The separate "Get AI Suggestion" button is removed -- AI is always part of generation
+A single material sub-column within a day:
+- Header shows material name (abbreviated), total duration, order count
+- Header is draggable (drag type: `material-group`) to move all orders of this material to another day
+- Body is a droppable zone accepting individual order cards
+- Contains a SortableContext for reordering within the column
+- Color-coded border by substrate type (blue for PP, green for Semi Gloss, etc.)
 
-The AI suggestion card (`AISuggestionCard`) is kept for showing the AI's reasoning/tips, but the main value is now the actual computed layout.
+### 3. `src/components/labels/schedule/DayColumn.tsx` -- Redesign
 
-### 4. Keep algorithmic options as fallback
+- Day header stays (day name, date, total duration, capacity warning)
+- Body now renders `MaterialColumn` sub-columns side-by-side (flex row) instead of a flat list
+- Groups `scheduledOrders` by `material_key`
+- Also has a general droppable zone for orders dropped on the day header directly (assigned to an "Other" material column or creates a new material sub-column)
+- Capacity threshold: amber at 336 min (80%), red at 420 min (7h)
 
-The local algorithm (`createOptimizedRuns`, `createGangedRuns`, etc.) stays as-is. It provides instant results while the AI call is in flight, and serves as a fallback if the AI call fails (rate limit, credits, network). The AI-computed option simply appears alongside the algorithmic ones.
+### 4. `src/components/labels/schedule/ScheduleOrderCard.tsx` -- Add material info
 
-## Expected Result for LBL-2026-0016
+- Add a row showing: substrate type badge (color-coded), glue type, width in mm
+- Keep existing metrics (meters, frames, duration)
 
-The AI receives:
-- Items: Page1=250, Page2=200, Page3-7=150 each (with actual IDs)
-- 5 slots, labelsPerSlotPerFrame=4, maxOverrun=250
+### 5. `src/components/labels/schedule/LabelScheduleBoard.tsx` -- Updated DnD logic
 
-The AI reasons: "250, 200, 150, 150, 150 all fit within 250 of each other. Put 5 items on Run 1 (one per slot). Remaining 150, 150: put both on Run 2 filling all 5 slots round-robin."
+New drag types handled:
+- `order` (existing): drag single order card between columns/days
+- `material-group` (new): drag all orders of a material+day to another day
 
-Returns 2 runs with exact slot assignments. The frontend converts this into a `LayoutOption` and displays it.
+New DnD ID scheme:
+- Material columns: `material-{dateKey}-{materialKey}`
+- When a material group is dropped on a day, reschedule ALL orders in that material group to the target day
+
+Updated `handleDragEnd` to detect when the active item is a material group vs. an individual order and handle accordingly.
+
+### 6. `src/components/labels/schedule/UnscheduledPanel.tsx` -- Group by material
+
+- Group unscheduled orders by `material_key` with collapsible sections
+- Each section header shows material name and order count
+
+### 7. `src/components/labels/schedule/ScheduleOrderDetailModal.tsx` -- New component
+
+Dialog shown when clicking an order card:
+- Order number, customer, due date
+- Full material details (substrate, glue, width, finish)
+- List of individual runs with metrics
+- Status controls (in progress, complete)
+- Link to full order detail page
+
+### 8. `src/components/labels/schedule/index.ts` -- Export new components
+
+Add exports for `MaterialColumn` and `ScheduleOrderDetailModal`.
+
+## Technical Details
+
+### Material Key and Colors
+
+```typescript
+function getMaterialKey(substrateType?: string, glueType?: string, widthMm?: number): string {
+  const parts = [substrateType || 'Unknown'];
+  if (glueType) parts.push(glueType);
+  if (widthMm) parts.push(`${widthMm}mm`);
+  return parts.join(' | ');
+}
+
+const SUBSTRATE_COLORS = {
+  'PP': 'bg-blue-100 text-blue-800 border-blue-300',
+  'Semi Gloss': 'bg-green-100 text-green-800 border-green-300',
+  'PE': 'bg-purple-100 text-purple-800 border-purple-300',
+  'Vinyl': 'bg-red-100 text-red-800 border-red-300',
+};
+```
+
+### Capacity Warning Logic
+
+```typescript
+const DAILY_CAPACITY_MINUTES = 420; // 7 hours
+const WARNING_THRESHOLD = 0.8;      // amber at 80%
+
+// In day header:
+// totalMinutes >= 420 -> red warning "Exceeds capacity by Xh Ym"
+// totalMinutes >= 336 -> amber warning "Near capacity"
+```
+
+### DnD Group Drag
+
+When a `MaterialColumn` header is dragged to a different day:
+1. Find all orders matching that `material_key` on the source day
+2. Call `rescheduleOrder` for each order's schedule entries to the target date
+3. Preserve relative sort order within the group
 
 ## File Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/label-optimize/index.ts` | New tool schema returning actual runs with slot assignments; server-side validation of AI output; calculate labelsPerSlotPerFrame for accurate prompting |
-| `src/hooks/labels/useLayoutOptimizer.ts` | Parse AI runs into LayoutOption; fire AI call during generateOptions; merge AI option into options list |
-| `src/components/labels/LayoutOptimizer.tsx` | Remove separate "Get AI Suggestion" button; generate triggers both algorithm + AI in parallel; show AI option in the list |
-| `src/components/labels/optimizer/AISuggestionCard.tsx` | Minor update to display AI reasoning from the new response format |
+| `src/hooks/labels/useLabelSchedule.ts` | Join substrate data; add material fields to interfaces |
+| `src/components/labels/schedule/MaterialColumn.tsx` | New: draggable/droppable material sub-column |
+| `src/components/labels/schedule/DayColumn.tsx` | Render material sub-columns side-by-side; add capacity warning |
+| `src/components/labels/schedule/ScheduleOrderCard.tsx` | Add material badges to card |
+| `src/components/labels/schedule/LabelScheduleBoard.tsx` | Handle material-group drag type |
+| `src/components/labels/schedule/UnscheduledPanel.tsx` | Group by material |
+| `src/components/labels/schedule/ScheduleOrderDetailModal.tsx` | New: order detail modal |
+| `src/components/labels/schedule/index.ts` | Export new components |
+
