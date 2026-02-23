@@ -254,7 +254,7 @@ export function LabelsOrderDetail() {
           <div>
             <h2 className="text-lg font-semibold">Label Items</h2>
             <p className="text-sm text-muted-foreground">
-              {items.length} artwork{items.length !== 1 ? 's' : ''} in this order
+              {items.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length} artwork{items.filter(i => !(i.page_count > 1 && !i.parent_item_id)).length !== 1 ? 's' : ''} in this order
             </p>
           </div>
         <AddLabelItemDialog orderId={order.id} />

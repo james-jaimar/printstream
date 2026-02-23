@@ -55,14 +55,20 @@ export function SendProofingDialog({
     [contacts]
   );
 
+  // Exclude multi-page parent PDFs (page_count > 1 and no parent_item_id)
+  const visibleItems = useMemo(() =>
+    items.filter(item => !(item.page_count > 1 && !item.parent_item_id)),
+    [items]
+  );
+
   // Items ready for proofing
   const readyItems = useMemo(() => 
-    items.filter(item => 
+    visibleItems.filter(item => 
       item.proofing_status === 'ready_for_proof' || 
       item.proofing_status === 'draft' ||
       (item.proof_pdf_url || item.artwork_pdf_url)
     ),
-    [items]
+    [visibleItems]
   );
 
   const handleToggleContact = (contactId: string, checked: boolean) => {
@@ -87,7 +93,7 @@ export function SendProofingDialog({
       });
 
       // 2. Mark all draft/ready items with artwork as ready_for_proof
-      const itemsToMark = items.filter(item =>
+      const itemsToMark = visibleItems.filter(item =>
         (item.proofing_status === 'draft' || item.proofing_status === 'client_needs_upload') &&
         (item.proof_pdf_url || item.artwork_pdf_url)
       );
@@ -131,7 +137,7 @@ export function SendProofingDialog({
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Items to include in proof:</span>
             <Badge variant={readyItems.length > 0 ? 'default' : 'secondary'}>
-              {readyItems.length} of {items.length}
+              {readyItems.length} of {visibleItems.length}
             </Badge>
           </div>
 

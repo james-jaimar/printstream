@@ -58,6 +58,11 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    // Exclude multi-page parent PDFs from item counts
+    const visibleItems = (order.items || []).filter(
+      (i: any) => !(i.page_count > 1 && !i.parent_item_id)
+    );
+
     // Get portal URL for client
     const portalUrl = `${req.headers.get('origin') || 'https://printstream.lovable.app'}/labels/portal`;
 
@@ -95,7 +100,7 @@ serve(async (req: Request): Promise<Response> => {
             <li><strong>Order Number:</strong> ${order.order_number}</li>
             <li><strong>Customer:</strong> ${order.customer_name}</li>
             <li><strong>Total Labels:</strong> ${order.total_label_count?.toLocaleString() || 'N/A'}</li>
-            <li><strong>Items:</strong> ${order.items?.length || 0} artwork(s)</li>
+            <li><strong>Items:</strong> ${visibleItems.length} artwork(s)</li>
           </ul>
           
           <p style="margin-top: 24px;">
@@ -206,7 +211,7 @@ serve(async (req: Request): Promise<Response> => {
           <ul>
             <li><strong>Order Number:</strong> ${order.order_number}</li>
             <li><strong>Total Labels:</strong> ${order.total_label_count?.toLocaleString() || 'N/A'}</li>
-            <li><strong>Items:</strong> ${order.items?.length || 0} artwork(s)</li>
+            <li><strong>Items:</strong> ${visibleItems.length} artwork(s)</li>
             ${order.due_date ? `<li><strong>Due Date:</strong> ${new Date(order.due_date).toLocaleDateString()}</li>` : ''}
           </ul>
           
