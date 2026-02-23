@@ -115,7 +115,7 @@ export function RunLayoutDiagram({
   // Show interactive controls even in compact mode when callbacks are provided
   const ROLL_TOLERANCE = 50;
   const showControls = qtyPerRoll && qtyPerRoll > 0;
-  const showAdjuster = showControls && needsRewinding && onQuantityOverride && effectiveActualPerSlot;
+  const showAdjuster = showControls && effectiveActualPerSlot && effectiveActualPerSlot < qtyPerRoll && onQuantityOverride;
   const showSplitter = showControls && effectiveActualPerSlot && effectiveActualPerSlot > (qtyPerRoll + ROLL_TOLERANCE) && onRollSplitChange;
 
   return (
@@ -300,9 +300,12 @@ export function RunLayoutDiagram({
                                   ) : (
                                     <>
                                       <p className="text-muted-foreground">
-                                        Slot {slotNumber + 1} • Requested: {assignment.quantity_in_slot.toLocaleString()}
+                                        Client order: {item.quantity.toLocaleString()}
                                       </p>
-                                      {effectiveActualPerSlot != null && effectiveActualPerSlot !== assignment.quantity_in_slot && (
+                                      <p className="text-muted-foreground">
+                                        This slot: {assignment.quantity_in_slot.toLocaleString()}
+                                      </p>
+                                      {effectiveActualPerSlot != null && (
                                         <p className="text-muted-foreground">
                                           Actual output: {effectiveActualPerSlot.toLocaleString()}
                                           {effectiveActualPerSlot > assignment.quantity_in_slot && (
