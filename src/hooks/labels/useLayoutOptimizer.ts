@@ -1,7 +1,9 @@
 /**
  * Hook for AI Layout Optimization
  * 
- * Provides React interface for the layout optimizer service
+ * Provides React interface for the layout optimizer service.
+ * Fires both local algorithm AND AI edge function in parallel,
+ * merging the AI-computed layout as a first-class option.
  */
 
 import { useState, useCallback, useMemo } from 'react';
@@ -9,26 +11,24 @@ import {
   generateLayoutOptions as generateOptions,
   calculateProductionTime,
   calculateRunPrintTime,
+  getSlotConfig,
+  calculateFramesForSlot,
+  calculateMeters,
+  scoreLayout,
   DEFAULT_MAX_OVERRUN
 } from '@/utils/labels/layoutOptimizer';
 import { 
   type LabelItem, 
   type LabelDieline, 
   type LayoutOption,
+  type ProposedRun,
+  type SlotAssignment,
   type OptimizationWeights,
   DEFAULT_OPTIMIZATION_WEIGHTS 
 } from '@/types/labels';
 import { useCreateLabelRun } from './useLabelRuns';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-
-interface AISuggestion {
-  recommendation: 'ganged' | 'individual' | 'hybrid';
-  reasoning: string;
-  estimated_waste_percent: number;
-  suggested_run_count: number;
-  efficiency_tips?: string[];
-}
 
 interface UseLayoutOptimizerProps {
   orderId: string;
@@ -38,6 +38,91 @@ interface UseLayoutOptimizerProps {
   qtyPerRoll?: number | null;
 }
 
+/**
+ * Convert AI response runs into a proper LayoutOption
+ */
+function buildAILayoutOption(
+  aiRuns: Array<{
+    slot_assignments: Array<{ item_id: string; quantity_in_slot: number }>;
+    reasoning: string;
+  }>,
+  aiReasoning: string,
+  aiWastePercent: number,
+  dieline: LabelDieline,
+  items: LabelItem[],
+  weights: OptimizationWeights,
+  qtyPerRoll?: number
+): LayoutOption | null {
+  try {
+    const config = getSlotConfig(dieline);
+    const totalLabelsNeeded = items.reduce((sum, i) => sum + i.quantity, 0);
+    const theoreticalMinFrames = Math.ceil(totalLabelsNeeded / config.labelsPerFrame);
+    const theoreticalMinMeters = calculateMeters(theoreticalMinFrames, config);
+
+    const proposedRuns: ProposedRun[] = aiRuns.map((aiRun, idx) => {
+      const slotAssignments: SlotAssignment[] = aiRun.slot_assignments.map((slot, slotIdx) => ({
+        slot: slotIdx,
+        item_id: slot.item_id,
+        quantity_in_slot: slot.quantity_in_slot,
+        needs_rotation: items.find(i => i.id === slot.item_id)?.needs_rotation || false,
+      }));
+
+      const maxSlotQty = Math.max(...slotAssignments.map(a => a.quantity_in_slot));
+      const frames = calculateFramesForSlot(maxSlotQty, config);
+      const meters = calculateMeters(frames, config);
+      const actualLabelsPerSlot = frames * config.labelsPerSlotPerFrame;
+
+      return {
+        run_number: idx + 1,
+        slot_assignments: slotAssignments,
+        meters,
+        frames,
+        actual_labels_per_slot: actualLabelsPerSlot,
+        labels_per_output_roll: actualLabelsPerSlot,
+        needs_rewinding: qtyPerRoll ? actualLabelsPerSlot < (qtyPerRoll - 50) : false,
+      };
+    });
+
+    const totalMeters = proposedRuns.reduce((sum, r) => sum + r.meters, 0);
+    const totalFrames = proposedRuns.reduce((sum, r) => sum + r.frames, 0);
+    const wasteMeters = Math.max(0, totalMeters - theoreticalMinMeters);
+
+    const materialEfficiency = totalMeters > 0
+      ? Math.max(0, 1 - (wasteMeters / totalMeters))
+      : 0;
+    const printEfficiency = 1 / (1 + proposedRuns.length * 0.1);
+    let laborEfficiency = 1 / (1 + proposedRuns.length * 0.15);
+
+    if (qtyPerRoll && qtyPerRoll > 0) {
+      const rewindingRuns = proposedRuns.filter(r => r.needs_rewinding);
+      if (rewindingRuns.length > 0) {
+        const rewindPenalty = (rewindingRuns.length / proposedRuns.length) * 0.4;
+        laborEfficiency = Math.max(0, laborEfficiency - rewindPenalty);
+      }
+    }
+
+    const partial = {
+      id: 'ai-computed',
+      runs: proposedRuns,
+      total_meters: totalMeters,
+      total_frames: totalFrames,
+      total_waste_meters: Math.round(wasteMeters * 100) / 100,
+      material_efficiency_score: materialEfficiency,
+      print_efficiency_score: printEfficiency,
+      labor_efficiency_score: laborEfficiency,
+      reasoning: `🤖 AI-Computed: ${aiReasoning}`,
+    };
+
+    return {
+      ...partial,
+      overall_score: scoreLayout(partial, weights),
+    };
+  } catch (error) {
+    console.error('Failed to build AI layout option:', error);
+    return null;
+  }
+}
+
 export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPerRoll }: UseLayoutOptimizerProps) {
   const [options, setOptions] = useState<LayoutOption[]>([]);
   const [selectedOption, setSelectedOption] = useState<LayoutOption | null>(
@@ -45,7 +130,6 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
   );
   const [isGenerating, setIsGenerating] = useState(false);
   const [weights, setWeights] = useState<OptimizationWeights>(DEFAULT_OPTIMIZATION_WEIGHTS);
-  const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasSavedLayout, setHasSavedLayout] = useState(!!savedLayout);
@@ -54,7 +138,57 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
   const { mutateAsync: createRun, isPending: isCreating } = useCreateLabelRun();
 
   /**
-   * Generate layout options based on current items and dieline
+   * Fetch AI-computed layout from edge function
+   */
+  const fetchAILayout = useCallback(async (
+    itemsToUse: LabelItem[],
+    dielineToUse: LabelDieline,
+    weightsToUse: OptimizationWeights,
+    currentMaxOverrun: number
+  ): Promise<LayoutOption | null> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('label-optimize', {
+        body: { 
+          items: itemsToUse, 
+          dieline: dielineToUse, 
+          constraints: { max_overrun: currentMaxOverrun } 
+        }
+      });
+
+      if (error) throw error;
+
+      if (data?.layout?.runs) {
+        const aiOption = buildAILayoutOption(
+          data.layout.runs,
+          data.layout.overall_reasoning || 'AI-optimized layout',
+          data.layout.estimated_waste_percent || 0,
+          dielineToUse,
+          itemsToUse,
+          weightsToUse,
+          qtyPerRoll ?? undefined
+        );
+
+        if (data.validation && !data.validation.valid) {
+          console.warn('AI layout validation warnings:', data.validation.warnings);
+        }
+
+        return aiOption;
+      }
+      return null;
+    } catch (error: any) {
+      console.error('AI layout error:', error);
+      if (error.message?.includes('429') || error.status === 429) {
+        toast.error('AI rate limit reached. Using algorithmic layouts only.');
+      } else if (error.message?.includes('402') || error.status === 402) {
+        toast.error('AI credits exhausted. Using algorithmic layouts only.');
+      }
+      // Don't show generic error — algorithmic fallback is fine
+      return null;
+    }
+  }, [qtyPerRoll]);
+
+  /**
+   * Generate layout options — fires algorithm + AI in parallel
    */
   const generateLayoutOptions = useCallback((
     customItems?: LabelItem[],
@@ -76,82 +210,52 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     }
     
     setIsGenerating(true);
+    setIsLoadingAI(true);
     
+    // Fire algorithm immediately
+    let algorithmicOptions: LayoutOption[] = [];
     try {
-      const generatedOptions = generateOptions({
+      algorithmicOptions = generateOptions({
         items: itemsToUse,
         dieline: dielineToUse,
         weights: weightsToUse,
         qtyPerRoll: qtyPerRoll ?? undefined,
         maxOverrun,
       });
-      
-      setOptions(generatedOptions);
-      
-      // Auto-select the best option
-      if (generatedOptions.length > 0) {
-        setSelectedOption(generatedOptions[0]);
-      }
-      
-      toast.success(`Generated ${generatedOptions.length} layout options`);
     } catch (error) {
-      console.error('Layout generation failed:', error);
-      toast.error('Failed to generate layout options');
-    } finally {
-      setIsGenerating(false);
+      console.error('Algorithmic layout generation failed:', error);
     }
-  }, [items, dieline, weights, qtyPerRoll, maxOverrun]);
 
-  /**
-   * Fetch AI suggestion for layout optimization
-   */
-  const fetchAISuggestion = useCallback(async (
-    customItems?: LabelItem[],
-    customDieline?: LabelDieline,
-    constraints?: { rush_job?: boolean; prefer_ganging?: boolean }
-  ) => {
-    const itemsToUse = customItems ?? items;
-    const dielineToUse = customDieline ?? dieline;
-    
-    if (!dielineToUse || itemsToUse.length === 0) {
-      toast.error('Please add items and select a dieline first');
-      return;
+    // Show algorithmic results immediately
+    setOptions(algorithmicOptions);
+    if (algorithmicOptions.length > 0) {
+      setSelectedOption(algorithmicOptions[0]);
     }
-    
-    setIsLoadingAI(true);
-    setAiSuggestion(null);
-    
-    try {
-      const { data, error } = await supabase.functions.invoke('label-optimize', {
-        body: { 
-          items: itemsToUse, 
-          dieline: dielineToUse, 
-          constraints: { ...constraints, max_overrun: maxOverrun } 
+    setIsGenerating(false);
+
+    // Fire AI in parallel — merge when done
+    fetchAILayout(itemsToUse, dielineToUse, weightsToUse, maxOverrun)
+      .then(aiOption => {
+        if (aiOption) {
+          setOptions(prev => {
+            const merged = [aiOption, ...prev.filter(o => o.id !== 'ai-computed')];
+            // Re-sort by score
+            merged.sort((a, b) => b.overall_score - a.overall_score);
+            return merged;
+          });
+          // Auto-select AI option if it scores highest
+          setSelectedOption(current => {
+            if (!current || aiOption.overall_score >= current.overall_score) {
+              return aiOption;
+            }
+            return current;
+          });
+          toast.success('AI layout computed');
         }
-      });
+      })
+      .finally(() => setIsLoadingAI(false));
 
-      if (error) throw error;
-
-      if (data?.suggestion) {
-        setAiSuggestion(data.suggestion);
-        toast.success('AI analysis complete');
-      } else {
-        toast.info('AI could not generate a suggestion');
-      }
-    } catch (error: any) {
-      console.error('AI optimization error:', error);
-      
-      if (error.message?.includes('429') || error.status === 429) {
-        toast.error('AI rate limit reached. Please try again later.');
-      } else if (error.message?.includes('402') || error.status === 402) {
-        toast.error('AI credits exhausted. Please add funds.');
-      } else {
-        toast.error('AI optimization failed');
-      }
-    } finally {
-      setIsLoadingAI(false);
-    }
-  }, [items, dieline]);
+  }, [items, dieline, weights, qtyPerRoll, maxOverrun, fetchAILayout]);
 
   /**
    * Apply selected layout - creates runs in database
@@ -163,14 +267,12 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     }
     
     try {
-      // Create runs sequentially to maintain order
       for (const run of selectedOption.runs) {
         await createRun({
           order_id: orderId,
           slot_assignments: run.slot_assignments,
           meters_to_print: run.meters,
           frames_count: run.frames,
-          // Store per-run print time only (no make-ready; that's order-level)
           estimated_duration_minutes: calculateRunPrintTime(run),
           ai_optimization_score: selectedOption.overall_score,
           ai_reasoning: selectedOption.reasoning,
@@ -277,7 +379,6 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     weights,
     summary,
     canGenerate,
-    aiSuggestion,
     isLoadingAI,
     isSaving,
     hasSavedLayout,
@@ -289,7 +390,6 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     applyLayout,
     updateWeights: setWeights,
     getProductionTime,
-    fetchAISuggestion,
     saveLayout,
     clearSavedLayout,
     setMaxOverrun
