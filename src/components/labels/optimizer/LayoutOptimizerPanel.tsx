@@ -11,6 +11,7 @@ import { LayoutOptionCard } from './LayoutOptionCard';
 import { AISuggestionCard } from './AISuggestionCard';
 import type { LabelItem, LabelDieline, OptimizationWeights, LayoutOption } from '@/types/labels';
 import { DEFAULT_OPTIMIZATION_WEIGHTS } from '@/types/labels';
+import { DEFAULT_MAX_OVERRUN } from '@/utils/labels/layoutOptimizer';
 
 interface LayoutOptimizerPanelProps {
   orderId: string;
@@ -29,6 +30,7 @@ export function LayoutOptimizerPanel({
   const [rushJob, setRushJob] = useState(false);
   const [preferGanging, setPreferGanging] = useState(true);
   const [localWeights, setLocalWeights] = useState<OptimizationWeights>(DEFAULT_OPTIMIZATION_WEIGHTS);
+  const [localMaxOverrun, setLocalMaxOverrun] = useState(DEFAULT_MAX_OVERRUN);
 
   const {
     options,
@@ -122,6 +124,24 @@ export function LayoutOptimizerPanel({
             >
               {showAdvanced ? 'Hide' : 'Show'} Advanced
             </Button>
+          </div>
+
+          {/* Max Overrun Control */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Max Overrun per Slot</Label>
+              <span className="text-sm font-mono text-muted-foreground">{localMaxOverrun} labels</span>
+            </div>
+            <Slider
+              value={[localMaxOverrun]}
+              onValueChange={([v]) => setLocalMaxOverrun(v)}
+              min={50}
+              max={1000}
+              step={50}
+            />
+            <p className="text-xs text-muted-foreground">
+              Controls how many extra labels the optimizer may produce per slot beyond what's ordered
+            </p>
           </div>
 
           {/* Advanced Weights */}

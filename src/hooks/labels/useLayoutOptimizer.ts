@@ -8,7 +8,8 @@ import { useState, useCallback, useMemo } from 'react';
 import { 
   generateLayoutOptions as generateOptions,
   calculateProductionTime,
-  calculateRunPrintTime
+  calculateRunPrintTime,
+  DEFAULT_MAX_OVERRUN
 } from '@/utils/labels/layoutOptimizer';
 import { 
   type LabelItem, 
@@ -48,6 +49,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasSavedLayout, setHasSavedLayout] = useState(!!savedLayout);
+  const [maxOverrun, setMaxOverrun] = useState(DEFAULT_MAX_OVERRUN);
   
   const { mutateAsync: createRun, isPending: isCreating } = useCreateLabelRun();
 
@@ -81,6 +83,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
         dieline: dielineToUse,
         weights: weightsToUse,
         qtyPerRoll: qtyPerRoll ?? undefined,
+        maxOverrun,
       });
       
       setOptions(generatedOptions);
@@ -97,7 +100,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     } finally {
       setIsGenerating(false);
     }
-  }, [items, dieline, weights, qtyPerRoll]);
+  }, [items, dieline, weights, qtyPerRoll, maxOverrun]);
 
   /**
    * Fetch AI suggestion for layout optimization
@@ -274,6 +277,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     isLoadingAI,
     isSaving,
     hasSavedLayout,
+    maxOverrun,
     
     // Actions
     generateOptions: generateLayoutOptions,
@@ -283,6 +287,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     getProductionTime,
     fetchAISuggestion,
     saveLayout,
-    clearSavedLayout
+    clearSavedLayout,
+    setMaxOverrun
   };
 }

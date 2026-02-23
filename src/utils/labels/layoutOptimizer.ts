@@ -29,8 +29,8 @@ const { MAX_FRAME_LENGTH_MM, MAKE_READY_FIRST_MIN, MAKE_READY_SUBSEQUENT_MIN } =
 /** Up to 50 labels at the end of a roll can be ignored (rounding from layout grid) */
 export const ROLL_TOLERANCE = 50;
 
-/** Maximum acceptable overrun per slot (20%) — beyond this, runs should be split */
-export const MAX_OVERRUN_PERCENT = 0.20;
+/** Default absolute max overrun per slot (label count) — beyond this, runs should be split */
+export const DEFAULT_MAX_OVERRUN = 250;
 
 export interface LayoutInput {
   items: LabelItem[];
@@ -38,6 +38,7 @@ export interface LayoutInput {
   weights?: OptimizationWeights;
   inkConfig?: LabelInkConfig;
   qtyPerRoll?: number;
+  maxOverrun?: number;
 }
 
 export interface SlotConfig {
@@ -172,7 +173,8 @@ function fillAllSlots(
 function balanceSlotQuantities(
   assignments: SlotAssignment[],
   config: SlotConfig,
-  startRunNumber: number
+  startRunNumber: number,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
 ): ProposedRun[] {
   // Get unique item quantities (ignore duplicated round-robin slots)
   const uniqueItems = new Map<string, number>();
@@ -187,7 +189,7 @@ function balanceSlotQuantities(
   const maxQty = Math.max(...quantities);
   
   // Already balanced or single-item — return as-is
-  if (minQty <= 0 || maxQty / minQty <= 1.10) {
+  if (minQty <= 0 || (maxQty - minQty) <= maxOverrun) {
     const maxFrames = Math.max(
       ...assignments.map(a => calculateFramesForSlot(a.quantity_in_slot, config))
     );
@@ -229,14 +231,14 @@ function balanceSlotQuantities(
   
   // Recursively balance the remainder
   const remainderAssignments = fillAllSlots(remainderItemSlots, config.totalSlots);
-  const remainderRuns = balanceSlotQuantities(remainderAssignments, config, startRunNumber + 1);
+  const remainderRuns = balanceSlotQuantities(remainderAssignments, config, startRunNumber + 1, maxOverrun);
   
   return [runA, ...remainderRuns];
 }
 
 // ─── STRATEGY 1: GANGED (all items in one run) ──────────────────────
 
-function createGangedRuns(items: LabelItem[], config: SlotConfig): ProposedRun[] {
+function createGangedRuns(items: LabelItem[], config: SlotConfig, maxOverrun: number = DEFAULT_MAX_OVERRUN): ProposedRun[] {
   // Assign each item to a slot; if more items than slots, only take first N
   const itemSlots = items.slice(0, config.totalSlots).map(item => ({
     item_id: item.id,
@@ -247,7 +249,7 @@ function createGangedRuns(items: LabelItem[], config: SlotConfig): ProposedRun[]
   const assignments = fillAllSlots(itemSlots, config.totalSlots);
   
   // Balance the slot quantities — may produce multiple runs
-  return balanceSlotQuantities(assignments, config, 1);
+  return balanceSlotQuantities(assignments, config, 1, maxOverrun);
 }
 
 // ─── STRATEGY 2: INDIVIDUAL (one item per run, fills all slots) ─────
@@ -320,7 +322,7 @@ function findQuantityLevels(quantities: number[]): number[] {
  * 4. Remainders naturally fall to lower levels
  * 5. Any leftover gets its own individual run
  */
-function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRun[] {
+function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun: number = DEFAULT_MAX_OVERRUN): ProposedRun[] {
   const runs: ProposedRun[] = [];
   const remaining = new Map(items.map(i => [i.id, i.quantity]));
   let runNumber = 1;
@@ -352,9 +354,9 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
       const maxSlotQty = Math.max(...slotQtys);
       const minSlotQty = Math.min(...slotQtys);
       
-      if (minSlotQty > 0 && (maxSlotQty - minSlotQty) / minSlotQty > MAX_OVERRUN_PERCENT) {
+      if (minSlotQty > 0 && (maxSlotQty - minSlotQty) > maxOverrun) {
         // Overrun too high — use balanceSlotQuantities to split
-        const balancedRuns = balanceSlotQuantities(assignments, config, runNumber);
+        const balancedRuns = balanceSlotQuantities(assignments, config, runNumber, maxOverrun);
         for (const br of balancedRuns) {
           runs.push(br);
           runNumber = br.run_number + 1;
@@ -498,7 +500,8 @@ function createLayoutOption(
 function annotateRunsWithRollInfo(
   runs: ProposedRun[],
   config: SlotConfig,
-  qtyPerRoll?: number
+  qtyPerRoll?: number,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
 ): ProposedRun[] {
   return runs.map(run => {
     // The ACTUAL output per slot = frames * labelsPerSlotPerFrame
@@ -516,10 +519,10 @@ function annotateRunsWithRollInfo(
     const slotOverrunWarnings: string[] = [];
     for (const assignment of run.slot_assignments) {
       const overrun = actualLabelsPerSlot - assignment.quantity_in_slot;
-      const overrunPercent = assignment.quantity_in_slot > 0 ? overrun / assignment.quantity_in_slot : 0;
-      if (overrunPercent > MAX_OVERRUN_PERCENT) {
+      if (overrun > maxOverrun) {
+        const overrunPercent = assignment.quantity_in_slot > 0 ? Math.round((overrun / assignment.quantity_in_slot) * 100) : 0;
         slotOverrunWarnings.push(
-          `S${assignment.slot + 1}: +${overrun.toLocaleString()} overrun (${Math.round(overrunPercent * 100)}%)`
+          `S${assignment.slot + 1}: +${overrun.toLocaleString()} overrun (${overrunPercent}%)`
         );
       }
     }
@@ -627,7 +630,7 @@ function createRollOptimizedRuns(
 }
 
 export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
-  const { items, dieline, weights = DEFAULT_OPTIMIZATION_WEIGHTS, qtyPerRoll } = input;
+  const { items, dieline, weights = DEFAULT_OPTIMIZATION_WEIGHTS, qtyPerRoll, maxOverrun = DEFAULT_MAX_OVERRUN } = input;
   const config = getSlotConfig(dieline);
   const partialOptions: Omit<LayoutOption, 'overall_score'>[] = [];
   
@@ -640,8 +643,8 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
   
   // Option 1: Ganged — all items ganged (balanced, may produce multiple runs)
   if (items.length <= config.totalSlots) {
-    let gangedRuns = createGangedRuns(items, config);
-    gangedRuns = annotateRunsWithRollInfo(gangedRuns, config, qtyPerRoll);
+    let gangedRuns = createGangedRuns(items, config, maxOverrun);
+    gangedRuns = annotateRunsWithRollInfo(gangedRuns, config, qtyPerRoll, maxOverrun);
     partialOptions.push(createLayoutOption(
       'ganged-all',
       gangedRuns,
@@ -658,7 +661,7 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
   let individualRuns = items.map((item, idx) => 
     createSingleItemRun(item, idx + 1, config)
   );
-  individualRuns = annotateRunsWithRollInfo(individualRuns, config, qtyPerRoll);
+  individualRuns = annotateRunsWithRollInfo(individualRuns, config, qtyPerRoll, maxOverrun);
   partialOptions.push(createLayoutOption(
     'individual',
     individualRuns,
@@ -670,8 +673,8 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
   
   // Option 3: Optimized — balanced ganging with quantity splitting across runs
   if (items.length > 1) {
-    let optimizedRuns = createOptimizedRuns(items, config);
-    optimizedRuns = annotateRunsWithRollInfo(optimizedRuns, config, qtyPerRoll);
+    let optimizedRuns = createOptimizedRuns(items, config, maxOverrun);
+    optimizedRuns = annotateRunsWithRollInfo(optimizedRuns, config, qtyPerRoll, maxOverrun);
     if (optimizedRuns.length > 0) {
       partialOptions.push(createLayoutOption(
         'optimized',
@@ -687,7 +690,7 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
     if (qtyPerRoll && qtyPerRoll > 0) {
       const rollOptResult = createRollOptimizedRuns(optimizedRuns, items, config, qtyPerRoll);
       if (rollOptResult) {
-        const rollOptRuns = annotateRunsWithRollInfo(rollOptResult.runs, config, qtyPerRoll);
+        const rollOptRuns = annotateRunsWithRollInfo(rollOptResult.runs, config, qtyPerRoll, maxOverrun);
         partialOptions.push(createLayoutOption(
           'roll-optimized',
           rollOptRuns,
