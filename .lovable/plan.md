@@ -1,144 +1,79 @@
 
 
-# Schedule Board Redesign: Material Sub-Columns Per Day
+# Schedule Board: Move-to-Date Actions + Collapsible Sidebar
 
-## Overview
+## Problem
 
-Replace the current flat day columns with a two-level column structure: each day has horizontal sub-columns for each unique material (substrate + glue + width). This gives operators a clear view of what material rolls are needed each day and lets them drag entire material columns between days.
+1. Orders stuck in past weeks can't be dragged to the current week since D&D only works within the visible 5-day range. Need a "Move to date" action on individual orders and on material group headers.
+2. The left sidebar takes up 260px permanently -- on the schedule board page you need maximum horizontal space.
 
-## Visual Structure
+## Changes
 
-```text
-+------ Monday Feb 24 (6h 20m) ------+------ Tuesday Feb 25 (3h) ------+
-| PP HM 333mm | SG Acr 333mm | PP 330 | PP HM 333mm | SG Acr 300mm    |
-| 3h 40m      | 2h 40m       | --     | 1h 30m      | 1h 30m          |
-|-------------|--------------|--------|-------------|-----------------|
-| Order A     | Order D      |        | Order F     | Order G         |
-| Order B     | Order E      |        |             |                 |
-| Order C     |              |        |             |                 |
-+-------------+--------------+--------+-------------+-----------------+
-```
+### 1. Add "Move to Date" to the Order Detail Modal
 
-- Each day expands horizontally to fit however many material types it has
-- Each material sub-column is independently droppable and its header is draggable (to move the whole group to another day)
-- Capacity warning shown in day header when total exceeds 7 hours
-- Horizontal scroll handles weeks with many materials
+**File: `src/components/labels/schedule/ScheduleOrderDetailModal.tsx`**
 
-## Data Changes
+- Add a date picker (using `react-day-picker` / the existing `Calendar` + `Popover` UI components) at the bottom of the modal
+- "Move to" button beside it that reschedules all the order's schedule entries to the chosen date
+- Also add an "Unschedule" button to remove from the schedule entirely
+- After moving, close the modal and show a toast confirmation
 
-Currently `label_stock` has: `substrate_type`, `glue_type`, `width_mm`. Orders link via `substrate_id`.
+### 2. Add "Move All" action on MaterialColumn header
 
-There are ~6 unique material combos in production today (PP/Semi Gloss, Hot Melt/Acrylic, 250/300/330/333mm), so this is very manageable horizontally.
+**File: `src/components/labels/schedule/MaterialColumn.tsx`**
 
-## File Changes
+- Add a small calendar icon button in the material column header (next to the grip handle)
+- Clicking it opens a popover with a date picker
+- Selecting a date reschedules ALL orders in that material group to the chosen date
+- This covers the use case: "move these 5 Silver PP orders from last Monday to this Friday"
 
-### 1. `src/hooks/labels/useLabelSchedule.ts` -- Add substrate data
+### 3. Collapsible Sidebar in LabelsLayout
 
-- Update both queries to join `label_orders.substrate_id` to `label_stock` to fetch `substrate_type`, `glue_type`, `width_mm`
-- Add these fields to `ScheduledOrderGroup` and `UnscheduledOrderGroup` interfaces
-- Add a `material_key` string field (e.g., "PP | Hot Melt | 333mm") to each group
-- Add a helper function `getMaterialKey()`
+**File: `src/components/labels/LabelsLayout.tsx`**
 
-### 2. `src/components/labels/schedule/MaterialColumn.tsx` -- New component
+- Add a `collapsed` state (boolean, default `false`)
+- When collapsed: sidebar shrinks to ~56px, showing only icons (no text labels)
+- Add a toggle button (chevron) at the top of the sidebar to collapse/expand
+- The toggle remains visible in both states
+- When on the schedule page specifically, the sidebar could auto-start collapsed (optional enhancement)
+- Transition animated with `transition-all duration-300`
 
-A single material sub-column within a day:
-- Header shows material name (abbreviated), total duration, order count
-- Header is draggable (drag type: `material-group`) to move all orders of this material to another day
-- Body is a droppable zone accepting individual order cards
-- Contains a SortableContext for reordering within the column
-- Color-coded border by substrate type (blue for PP, green for Semi Gloss, etc.)
+### 4. Wire up reschedule mutations in modal and material column
 
-### 3. `src/components/labels/schedule/DayColumn.tsx` -- Redesign
+**File: `src/components/labels/schedule/LabelScheduleBoard.tsx`**
 
-- Day header stays (day name, date, total duration, capacity warning)
-- Body now renders `MaterialColumn` sub-columns side-by-side (flex row) instead of a flat list
-- Groups `scheduledOrders` by `material_key`
-- Also has a general droppable zone for orders dropped on the day header directly (assigned to an "Other" material column or creates a new material sub-column)
-- Capacity threshold: amber at 336 min (80%), red at 420 min (7h)
-
-### 4. `src/components/labels/schedule/ScheduleOrderCard.tsx` -- Add material info
-
-- Add a row showing: substrate type badge (color-coded), glue type, width in mm
-- Keep existing metrics (meters, frames, duration)
-
-### 5. `src/components/labels/schedule/LabelScheduleBoard.tsx` -- Updated DnD logic
-
-New drag types handled:
-- `order` (existing): drag single order card between columns/days
-- `material-group` (new): drag all orders of a material+day to another day
-
-New DnD ID scheme:
-- Material columns: `material-{dateKey}-{materialKey}`
-- When a material group is dropped on a day, reschedule ALL orders in that material group to the target day
-
-Updated `handleDragEnd` to detect when the active item is a material group vs. an individual order and handle accordingly.
-
-### 6. `src/components/labels/schedule/UnscheduledPanel.tsx` -- Group by material
-
-- Group unscheduled orders by `material_key` with collapsible sections
-- Each section header shows material name and order count
-
-### 7. `src/components/labels/schedule/ScheduleOrderDetailModal.tsx` -- New component
-
-Dialog shown when clicking an order card:
-- Order number, customer, due date
-- Full material details (substrate, glue, width, finish)
-- List of individual runs with metrics
-- Status controls (in progress, complete)
-- Link to full order detail page
-
-### 8. `src/components/labels/schedule/index.ts` -- Export new components
-
-Add exports for `MaterialColumn` and `ScheduleOrderDetailModal`.
+- Pass `rescheduleOrder` and `unscheduleOrder` mutation functions down to the modal and material columns (or import hooks directly in those components)
+- The modal's "Move to" triggers `rescheduleOrder.mutate(...)` with the selected date
+- The material column's "Move All" triggers `rescheduleOrder.mutate(...)` for each order in the group
 
 ## Technical Details
 
-### Material Key and Colors
+### Modal date picker
 
-```typescript
-function getMaterialKey(substrateType?: string, glueType?: string, widthMm?: number): string {
-  const parts = [substrateType || 'Unknown'];
-  if (glueType) parts.push(glueType);
-  if (widthMm) parts.push(`${widthMm}mm`);
-  return parts.join(' | ');
-}
+Uses the existing `Popover` + `Calendar` components from shadcn/ui (already installed). The "Move to" section appears as a row at the bottom of the modal:
 
-const SUBSTRATE_COLORS = {
-  'PP': 'bg-blue-100 text-blue-800 border-blue-300',
-  'Semi Gloss': 'bg-green-100 text-green-800 border-green-300',
-  'PE': 'bg-purple-100 text-purple-800 border-purple-300',
-  'Vinyl': 'bg-red-100 text-red-800 border-red-300',
-};
+```
+[Calendar icon] [Selected date display] [Move button]
+[Unschedule button]
 ```
 
-### Capacity Warning Logic
+### Material column "Move All" popover
 
-```typescript
-const DAILY_CAPACITY_MINUTES = 420; // 7 hours
-const WARNING_THRESHOLD = 0.8;      // amber at 80%
+A small `Popover` triggered by a calendar icon button in the material header. Contains just the `Calendar` component. On date select, batch-reschedules all orders.
 
-// In day header:
-// totalMinutes >= 420 -> red warning "Exceeds capacity by Xh Ym"
-// totalMinutes >= 336 -> amber warning "Near capacity"
-```
+### Collapsed sidebar
 
-### DnD Group Drag
+The sidebar transitions between two widths:
+- Expanded: `w-[260px]` -- full nav with text labels
+- Collapsed: `w-[60px]` -- icons only, tooltips on hover
 
-When a `MaterialColumn` header is dragged to a different day:
-1. Find all orders matching that `material_key` on the source day
-2. Call `rescheduleOrder` for each order's schedule entries to the target date
-3. Preserve relative sort order within the group
+The brand area shows just the logo when collapsed. The nav items hide their text labels. The footer "Back to Tracker" shows just the chevron icon.
 
 ## File Summary
 
 | File | Change |
 |------|--------|
-| `src/hooks/labels/useLabelSchedule.ts` | Join substrate data; add material fields to interfaces |
-| `src/components/labels/schedule/MaterialColumn.tsx` | New: draggable/droppable material sub-column |
-| `src/components/labels/schedule/DayColumn.tsx` | Render material sub-columns side-by-side; add capacity warning |
-| `src/components/labels/schedule/ScheduleOrderCard.tsx` | Add material badges to card |
-| `src/components/labels/schedule/LabelScheduleBoard.tsx` | Handle material-group drag type |
-| `src/components/labels/schedule/UnscheduledPanel.tsx` | Group by material |
-| `src/components/labels/schedule/ScheduleOrderDetailModal.tsx` | New: order detail modal |
-| `src/components/labels/schedule/index.ts` | Export new components |
+| `src/components/labels/schedule/ScheduleOrderDetailModal.tsx` | Add date picker + "Move to" and "Unschedule" buttons |
+| `src/components/labels/schedule/MaterialColumn.tsx` | Add calendar popover on header for "Move All to date" |
+| `src/components/labels/LabelsLayout.tsx` | Add collapsible sidebar with icon-only mini state |
 
