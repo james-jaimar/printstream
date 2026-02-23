@@ -11,6 +11,33 @@ import { format } from 'date-fns';
 
 const QUERY_KEY = ['label_schedule'];
 
+/** Helper to generate a material grouping key */
+export function getMaterialKey(substrateType?: string | null, glueType?: string | null, widthMm?: number | null): string {
+  const parts = [substrateType || 'Unknown'];
+  if (glueType) parts.push(glueType);
+  if (widthMm) parts.push(`${widthMm}mm`);
+  return parts.join(' | ');
+}
+
+/** Substrate color map for UI */
+export const SUBSTRATE_COLORS: Record<string, string> = {
+  'PP': 'bg-blue-100 text-blue-800 border-blue-300',
+  'Semi Gloss': 'bg-green-100 text-green-800 border-green-300',
+  'PE': 'bg-purple-100 text-purple-800 border-purple-300',
+  'PET': 'bg-amber-100 text-amber-800 border-amber-300',
+  'Vinyl': 'bg-red-100 text-red-800 border-red-300',
+  'Paper': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+};
+
+export function getSubstrateColor(substrateType?: string | null): string {
+  if (!substrateType) return 'bg-gray-100 text-gray-800 border-gray-300';
+  return SUBSTRATE_COLORS[substrateType] || 'bg-gray-100 text-gray-800 border-gray-300';
+}
+
+/** Capacity constants */
+export const DAILY_CAPACITY_MINUTES = 420; // 7 hours
+export const WARNING_THRESHOLD = 0.8; // amber at 80% = 336 min
+
 /** Lightweight run details for schedule display */
 export interface ScheduleRunDetails {
   id: string;
@@ -25,6 +52,13 @@ export interface ScheduleRunDetails {
     order_number: string;
     customer_name: string;
     substrate_id: string | null;
+    substrate?: {
+      id: string;
+      substrate_type: string;
+      glue_type: string | null;
+      width_mm: number;
+      name: string;
+    } | null;
   };
 }
 
@@ -40,17 +74,21 @@ export interface ScheduledOrderGroup {
   customer_name: string;
   substrate_id: string | null;
   scheduled_date: string;
-  /** The first schedule entry id (used as the draggable id) */
   schedule_id: string;
   sort_order: number;
   runs: ScheduleRunDetails[];
   schedule_entries: ScheduledRunWithDetails[];
-  // Aggregated metrics
   total_meters: number;
   total_frames: number;
   total_duration_minutes: number;
   run_count: number;
   status: string;
+  // Material fields
+  substrate_type: string | null;
+  glue_type: string | null;
+  substrate_width_mm: number | null;
+  substrate_name: string | null;
+  material_key: string;
 }
 
 /** Order-level grouping for unscheduled display */
@@ -64,6 +102,12 @@ export interface UnscheduledOrderGroup {
   total_frames: number;
   total_duration_minutes: number;
   run_count: number;
+  // Material fields
+  substrate_type: string | null;
+  glue_type: string | null;
+  substrate_width_mm: number | null;
+  substrate_name: string | null;
+  material_key: string;
 }
 
 function aggregateRuns(runs: ScheduleRunDetails[]) {
@@ -73,6 +117,16 @@ function aggregateRuns(runs: ScheduleRunDetails[]) {
     total_duration_minutes: runs.reduce((s, r) => s + (r.estimated_duration_minutes || 0), 0),
     run_count: runs.length,
   };
+}
+
+function extractSubstrateInfo(order?: ScheduleRunDetails['order']) {
+  const substrate = order?.substrate;
+  const substrate_type = substrate?.substrate_type || null;
+  const glue_type = substrate?.glue_type || null;
+  const substrate_width_mm = substrate?.width_mm || null;
+  const substrate_name = substrate?.name || null;
+  const material_key = getMaterialKey(substrate_type, glue_type, substrate_width_mm);
+  return { substrate_type, glue_type, substrate_width_mm, substrate_name, material_key };
 }
 
 /**
@@ -98,7 +152,14 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
               id,
               order_number,
               customer_name,
-              substrate_id
+              substrate_id,
+              substrate:label_stock(
+                id,
+                substrate_type,
+                glue_type,
+                width_mm,
+                name
+              )
             )
           )
         `)
@@ -115,7 +176,6 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
       const { data, error } = await query;
       if (error) throw error;
 
-      // Flatten run data
       const entries: ScheduledRunWithDetails[] = (data || []).map(schedule => ({
         ...schedule,
         run: Array.isArray(schedule.run) ? schedule.run[0] : schedule.run,
@@ -128,6 +188,11 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
         const key = `${entry.run.order_id}::${entry.scheduled_date}`;
         if (!groupMap.has(key)) {
           const order = entry.run.order;
+          // Handle nested substrate - Supabase returns arrays for joins
+          if (order?.substrate && Array.isArray(order.substrate)) {
+            (order as any).substrate = order.substrate[0] || null;
+          }
+          const substrateInfo = extractSubstrateInfo(order);
           groupMap.set(key, {
             order_id: entry.run.order_id,
             order_number: order?.order_number || '',
@@ -139,6 +204,7 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
             runs: [],
             schedule_entries: [],
             status: entry.status,
+            ...substrateInfo,
             ...aggregateRuns([]),
           });
         }
@@ -147,7 +213,6 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
         group.schedule_entries.push(entry);
       }
 
-      // Recalculate aggregates
       for (const group of groupMap.values()) {
         Object.assign(group, aggregateRuns(group.runs));
       }
@@ -164,7 +229,6 @@ export function useUnscheduledRuns() {
   return useQuery({
     queryKey: [...QUERY_KEY, 'unscheduled'],
     queryFn: async (): Promise<UnscheduledOrderGroup[]> => {
-      // Get runs that are already scheduled
       const { data: scheduledRunIds } = await supabase
         .from('label_schedule')
         .select('run_id');
@@ -185,7 +249,14 @@ export function useUnscheduledRuns() {
             id,
             order_number,
             customer_name,
-            substrate_id
+            substrate_id,
+            substrate:label_stock(
+              id,
+              substrate_type,
+              glue_type,
+              width_mm,
+              name
+            )
           )
         `)
         .in('status', ['planned', 'approved', 'printing'])
@@ -203,24 +274,31 @@ export function useUnscheduledRuns() {
         order: Array.isArray(run.order) ? run.order[0] : run.order,
       }));
 
-      // Group by order_id
+      // Unwrap nested substrate arrays
+      for (const run of runs) {
+        if (run.order?.substrate && Array.isArray(run.order.substrate)) {
+          (run.order as any).substrate = run.order.substrate[0] || null;
+        }
+      }
+
       const groupMap = new Map<string, UnscheduledOrderGroup>();
       for (const run of runs) {
         if (!groupMap.has(run.order_id)) {
           const order = run.order;
+          const substrateInfo = extractSubstrateInfo(order);
           groupMap.set(run.order_id, {
             order_id: run.order_id,
             order_number: order?.order_number || '',
             customer_name: order?.customer_name || '',
             substrate_id: order?.substrate_id || null,
             runs: [],
+            ...substrateInfo,
             ...aggregateRuns([]),
           });
         }
         groupMap.get(run.order_id)!.runs.push(run);
       }
 
-      // Recalculate aggregates
       for (const group of groupMap.values()) {
         Object.assign(group, aggregateRuns(group.runs));
       }
@@ -242,7 +320,6 @@ export function useScheduleOrder() {
       run_ids: string[];
       scheduled_date: string;
     }) => {
-      // Get max sort order for this date
       const { data: existing } = await supabase
         .from('label_schedule')
         .select('sort_order')
@@ -252,7 +329,6 @@ export function useScheduleOrder() {
 
       const baseSortOrder = (existing?.[0]?.sort_order || 0) + 1;
 
-      // Insert schedule entries for all runs
       const inserts = run_ids.map((run_id, i) => ({
         run_id,
         scheduled_date,
