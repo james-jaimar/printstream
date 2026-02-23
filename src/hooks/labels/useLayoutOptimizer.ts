@@ -123,7 +123,11 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     
     try {
       const { data, error } = await supabase.functions.invoke('label-optimize', {
-        body: { items: itemsToUse, dieline: dielineToUse, constraints }
+        body: { 
+          items: itemsToUse, 
+          dieline: dielineToUse, 
+          constraints: { ...constraints, max_overrun: maxOverrun } 
+        }
       });
 
       if (error) throw error;
