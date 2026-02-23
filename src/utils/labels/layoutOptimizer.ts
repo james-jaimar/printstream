@@ -26,6 +26,12 @@ import type {
 
 const { MAX_FRAME_LENGTH_MM, MAKE_READY_FIRST_MIN, MAKE_READY_SUBSEQUENT_MIN } = LABEL_PRINT_CONSTANTS;
 
+/** Up to 50 labels at the end of a roll can be ignored (rounding from layout grid) */
+export const ROLL_TOLERANCE = 50;
+
+/** Maximum acceptable overrun per slot (20%) — beyond this, runs should be split */
+export const MAX_OVERRUN_PERCENT = 0.20;
+
 export interface LayoutInput {
   items: LabelItem[];
   dieline: LabelDieline;
@@ -341,14 +347,27 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig): ProposedRu
       // Fill all slots (round-robin if fewer items than slots)
       const assignments = fillAllSlots(itemSlots, config.totalSlots);
       
-      const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
-      const frames = calculateFramesForSlot(maxSlotQty, config);
-      runs.push({
-        run_number: runNumber++,
-        slot_assignments: assignments,
-        meters: calculateMeters(frames, config),
-        frames,
-      });
+      // Check for excessive overrun before committing
+      const slotQtys = assignments.map(a => a.quantity_in_slot);
+      const maxSlotQty = Math.max(...slotQtys);
+      const minSlotQty = Math.min(...slotQtys);
+      
+      if (minSlotQty > 0 && (maxSlotQty - minSlotQty) / minSlotQty > MAX_OVERRUN_PERCENT) {
+        // Overrun too high — use balanceSlotQuantities to split
+        const balancedRuns = balanceSlotQuantities(assignments, config, runNumber);
+        for (const br of balancedRuns) {
+          runs.push(br);
+          runNumber = br.run_number + 1;
+        }
+      } else {
+        const frames = calculateFramesForSlot(maxSlotQty, config);
+        runs.push({
+          run_number: runNumber++,
+          slot_assignments: assignments,
+          meters: calculateMeters(frames, config),
+          frames,
+        });
+      }
       
       // Deduct level from each batch item's remaining
       for (const item of batch) {
@@ -490,13 +509,29 @@ function annotateRunsWithRollInfo(
       return { ...run, actual_labels_per_slot: actualLabelsPerSlot };
     }
     
-    const needsRewinding = actualLabelsPerSlot < qtyPerRoll;
+    // Only flag as short if genuinely under by more than tolerance
+    const needsRewinding = actualLabelsPerSlot < (qtyPerRoll - ROLL_TOLERANCE);
+    
+    // Per-slot overrun warning
+    const slotOverrunWarnings: string[] = [];
+    for (const assignment of run.slot_assignments) {
+      const overrun = actualLabelsPerSlot - assignment.quantity_in_slot;
+      const overrunPercent = assignment.quantity_in_slot > 0 ? overrun / assignment.quantity_in_slot : 0;
+      if (overrunPercent > MAX_OVERRUN_PERCENT) {
+        slotOverrunWarnings.push(
+          `S${assignment.slot + 1}: +${overrun.toLocaleString()} overrun (${Math.round(overrunPercent * 100)}%)`
+        );
+      }
+    }
     
     return {
       ...run,
       actual_labels_per_slot: actualLabelsPerSlot,
       labels_per_output_roll: actualLabelsPerSlot,
       needs_rewinding: needsRewinding,
+      consolidation_suggestion: slotOverrunWarnings.length > 0 
+        ? `High overrun: ${slotOverrunWarnings.join(', ')}`
+        : run.consolidation_suggestion,
     };
   });
 }
@@ -515,9 +550,9 @@ function createRollOptimizedRuns(
   const longRuns: ProposedRun[] = [];
   
   for (const run of baseRuns) {
-    // Use actual output (frames-based) for comparison, not requested qty
+    // Use actual output (frames-based) for comparison, with tolerance
     const actualPerSlot = run.frames * config.labelsPerSlotPerFrame;
-    if (actualPerSlot < qtyPerRoll) {
+    if (actualPerSlot < (qtyPerRoll - ROLL_TOLERANCE)) {
       shortRuns.push(run);
     } else {
       longRuns.push(run);

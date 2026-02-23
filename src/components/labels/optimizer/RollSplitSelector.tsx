@@ -1,13 +1,11 @@
 /**
  * Roll Split Selector
- * Shows splitting options when actual output per slot > qty_per_roll
+ * Shows splitting options when actual output per slot > qty_per_roll + tolerance
  */
 
 import { useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Scissors, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { RollSplitOption } from '@/types/labels';
@@ -18,6 +16,27 @@ interface RollSplitSelectorProps {
   qtyPerRoll: number;
   currentSplit?: RollSplitOption;
   onSplitChange: (runNumber: number, split: RollSplitOption) => void;
+}
+
+/**
+ * Format roll counts compactly: "8 x 500 + 5" instead of listing all individually
+ */
+function formatRollLabel(rolls: { roll_number: number; label_count: number }[]): string {
+  if (rolls.length <= 4) {
+    return rolls.map(r => r.label_count.toLocaleString()).join(' + ');
+  }
+  
+  // Group by count
+  const countMap = new Map<number, number>();
+  for (const r of rolls) {
+    countMap.set(r.label_count, (countMap.get(r.label_count) || 0) + 1);
+  }
+  
+  const parts: string[] = [];
+  for (const [count, qty] of countMap) {
+    parts.push(qty > 1 ? `${qty} x ${count.toLocaleString()}` : count.toLocaleString());
+  }
+  return parts.join(' + ');
 }
 
 export function RollSplitSelector({
@@ -47,7 +66,7 @@ export function RollSplitSelector({
     }
     options.push({
       strategy: 'fill_first',
-      label: `Fill first: ${fillFirstRolls.map(r => r.label_count.toLocaleString()).join(' + ')}`,
+      label: `Fill first: ${formatRollLabel(fillFirstRolls)}`,
       rolls: fillFirstRolls,
     });
 
@@ -62,11 +81,10 @@ export function RollSplitSelector({
       });
     }
     // Only show even if different from fill_first
-    const evenLabel = `Even split: ${evenRolls.map(r => r.label_count.toLocaleString()).join(' + ')}`;
     if (evenRolls[0].label_count !== fillFirstRolls[0].label_count) {
       options.push({
         strategy: 'even',
-        label: evenLabel,
+        label: `Even split: ${formatRollLabel(evenRolls)}`,
         rolls: evenRolls,
       });
     }
@@ -77,53 +95,66 @@ export function RollSplitSelector({
   if (splitOptions.length === 0) return null;
 
   const selectedStrategy = currentSplit?.strategy;
+  const MAX_BADGES = 4;
 
   return (
     <div className="space-y-2 p-2 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
       <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-        <Scissors className="h-3.5 w-3.5" />
-        Roll splitting — {actualPerSlot.toLocaleString()} labels/slot exceeds {qtyPerRoll.toLocaleString()}/roll
+        <Scissors className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">
+          Roll splitting — {actualPerSlot.toLocaleString()}/slot exceeds {qtyPerRoll.toLocaleString()}/roll
+        </span>
       </div>
       
       <div className="space-y-1.5">
-        {splitOptions.map((option) => (
-          <button
-            key={option.strategy}
-            onClick={() => onSplitChange(runNumber, { strategy: option.strategy, rolls: option.rolls })}
-            className={cn(
-              "w-full flex items-center gap-2 p-2 rounded text-xs transition-colors text-left",
-              selectedStrategy === option.strategy
-                ? "bg-primary/10 border border-primary/30 text-foreground"
-                : "bg-background border border-border hover:border-primary/30"
-            )}
-          >
-            {selectedStrategy === option.strategy && (
-              <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-            )}
-            <span className={cn(
-              "font-medium",
-              selectedStrategy !== option.strategy && "ml-5"
-            )}>
-              {option.label}
-            </span>
-            <div className="ml-auto flex gap-1">
-              {option.rolls.map((roll) => (
-                <Badge
-                  key={roll.roll_number}
-                  variant="secondary"
-                  className="text-[10px] px-1.5 py-0"
-                >
-                  R{roll.roll_number}: {roll.label_count.toLocaleString()}
-                </Badge>
-              ))}
-            </div>
-          </button>
-        ))}
+        {splitOptions.map((option) => {
+          const manyRolls = option.rolls.length > MAX_BADGES;
+          return (
+            <button
+              key={option.strategy}
+              onClick={() => onSplitChange(runNumber, { strategy: option.strategy, rolls: option.rolls })}
+              className={cn(
+                "w-full p-2 rounded text-xs transition-colors text-left",
+                manyRolls ? "space-y-1" : "flex items-center gap-2",
+                selectedStrategy === option.strategy
+                  ? "bg-primary/10 border border-primary/30 text-foreground"
+                  : "bg-background border border-border hover:border-primary/30"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                {selectedStrategy === option.strategy && (
+                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                )}
+                <span className={cn(
+                  "font-medium truncate",
+                  selectedStrategy !== option.strategy && "ml-5"
+                )}>
+                  {option.label}
+                </span>
+              </div>
+              <div className={cn("flex gap-1 flex-wrap", manyRolls && "ml-5 mt-1")}>
+                {option.rolls.slice(0, MAX_BADGES).map((roll) => (
+                  <Badge
+                    key={roll.roll_number}
+                    variant="secondary"
+                    className="text-[10px] px-1.5 py-0"
+                  >
+                    R{roll.roll_number}: {roll.label_count.toLocaleString()}
+                  </Badge>
+                ))}
+                {option.rolls.length > MAX_BADGES && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                    +{option.rolls.length - MAX_BADGES} more
+                  </Badge>
+                )}
+              </div>
+            </button>
+          );
+        })}
         
         {/* Custom option */}
         <button
           onClick={() => {
-            // Initialize custom with fill_first values
             const fillFirst = splitOptions.find(o => o.strategy === 'fill_first');
             if (fillFirst) {
               setCustomValues(fillFirst.rolls.map(r => r.label_count));
@@ -149,7 +180,7 @@ export function RollSplitSelector({
         </button>
         
         {selectedStrategy === 'custom' && customValues.length > 0 && (
-          <div className="flex items-center gap-2 pl-5">
+          <div className="flex items-center gap-2 pl-5 flex-wrap">
             {customValues.map((val, idx) => (
               <Input
                 key={idx}

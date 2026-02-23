@@ -207,7 +207,7 @@ export function LayoutOptimizer({
         meters: newMeters,
         actual_labels_per_slot: newActualPerSlot,
         labels_per_output_roll: newActualPerSlot,
-        needs_rewinding: qtyPerRoll ? newActualPerSlot < qtyPerRoll : false,
+        needs_rewinding: qtyPerRoll ? newActualPerSlot < (qtyPerRoll - 50) : false,
       };
     });
   }, [selectedOption, runOverrides, dieline, qtyPerRoll]);
