@@ -1,14 +1,20 @@
 /**
  * Material Column - A draggable/droppable sub-column within a day
  * Groups orders by material type (substrate + glue + width)
+ * Includes "Move All" calendar popover on header
  */
 
+import { useState } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { cn } from '@/lib/utils';
-import { GripVertical, Clock } from 'lucide-react';
+import { GripVertical, Clock, CalendarIcon } from 'lucide-react';
+import { format } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DraggableOrderCard } from './ScheduleOrderCard';
-import { getSubstrateColor } from '@/hooks/labels/useLabelSchedule';
+import { getSubstrateColor, useRescheduleOrder } from '@/hooks/labels/useLabelSchedule';
 import type { ScheduledOrderGroup } from '@/hooks/labels/useLabelSchedule';
 
 interface MaterialColumnProps {
@@ -21,6 +27,8 @@ interface MaterialColumnProps {
 
 export function MaterialColumn({ dateKey, materialKey, orders, substrateType, onOrderClick }: MaterialColumnProps) {
   const columnId = `material-${dateKey}-${materialKey}`;
+  const [moveAllOpen, setMoveAllOpen] = useState(false);
+  const rescheduleOrder = useRescheduleOrder();
 
   // The header is draggable (to move entire material group to another day)
   const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
@@ -47,6 +55,23 @@ export function MaterialColumn({ dateKey, materialKey, orders, substrateType, on
     .replace('Acrylic', 'Acr')
     .replace('Semi Gloss', 'SG');
 
+  const handleMoveAll = (date: Date | undefined) => {
+    if (!date) return;
+    const newDateStr = format(date, 'yyyy-MM-dd');
+    if (newDateStr === dateKey) return;
+
+    let baseSortOrder = 1;
+    for (const order of orders) {
+      rescheduleOrder.mutate({
+        schedule_entry_ids: order.schedule_entries.map(e => e.id),
+        newDate: newDateStr,
+        newBaseSortOrder: baseSortOrder,
+      });
+      baseSortOrder += order.schedule_entries.length;
+    }
+    setMoveAllOpen(false);
+  };
+
   return (
     <div className={cn(
       'flex flex-col min-w-[180px] w-[180px] rounded-lg border',
@@ -54,16 +79,18 @@ export function MaterialColumn({ dateKey, materialKey, orders, substrateType, on
       colorClass.split(' ').find(c => c.startsWith('border-')) || 'border-gray-200'
     )}>
       {/* Draggable header */}
-      <div
-        ref={setDragRef}
-        {...attributes}
-        {...listeners}
-        className={cn(
-          'flex items-center gap-1 px-2 py-2 rounded-t-lg cursor-grab active:cursor-grabbing border-b',
-          colorClass
-        )}
-      >
-        <GripVertical className="h-3 w-3 flex-shrink-0 opacity-50" />
+      <div className={cn(
+        'flex items-center gap-1 px-2 py-2 rounded-t-lg border-b',
+        colorClass
+      )}>
+        <div
+          ref={setDragRef}
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing"
+        >
+          <GripVertical className="h-3 w-3 flex-shrink-0 opacity-50" />
+        </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold truncate">{abbreviatedKey}</p>
           <div className="flex items-center gap-1 text-[10px] opacity-75">
@@ -76,6 +103,25 @@ export function MaterialColumn({ dateKey, materialKey, orders, substrateType, on
             <span>· {orders.length} order{orders.length !== 1 ? 's' : ''}</span>
           </div>
         </div>
+        {/* Move All calendar button */}
+        <Popover open={moveAllOpen} onOpenChange={setMoveAllOpen}>
+          <PopoverTrigger asChild>
+            <button
+              className="p-0.5 rounded hover:bg-black/10 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+              title="Move all to date"
+            >
+              <CalendarIcon className="h-3 w-3 opacity-60" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              onSelect={handleMoveAll}
+              className={cn('p-3 pointer-events-auto')}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
 
       {/* Droppable body */}
