@@ -1,13 +1,21 @@
 /**
  * Order Detail Modal for Schedule Board
- * Shows full order info when clicking a card
+ * Shows full order info when clicking a card, with Move-to-Date and Unschedule actions
  */
 
+import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Clock, Ruler, Layers, Package } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Clock, Ruler, Layers, Package, CalendarIcon, ArrowRight, X } from 'lucide-react';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import { getSubstrateColor } from '@/hooks/labels/useLabelSchedule';
+import { useRescheduleOrder, useUnscheduleOrder } from '@/hooks/labels/useLabelSchedule';
 import type { ScheduledOrderGroup, UnscheduledOrderGroup } from '@/hooks/labels/useLabelSchedule';
 
 type OrderDetail = ScheduledOrderGroup | UnscheduledOrderGroup;
@@ -23,11 +31,43 @@ function isScheduled(order: OrderDetail): order is ScheduledOrderGroup {
 }
 
 export function ScheduleOrderDetailModal({ order, open, onOpenChange }: ScheduleOrderDetailModalProps) {
+  const [moveDate, setMoveDate] = useState<Date | undefined>();
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const rescheduleOrder = useRescheduleOrder();
+  const unscheduleOrder = useUnscheduleOrder();
+
   if (!order) return null;
 
   const hours = Math.floor(order.total_duration_minutes / 60);
   const mins = order.total_duration_minutes % 60;
   const colorClass = getSubstrateColor(order.substrate_type);
+
+  const handleMoveTo = () => {
+    if (!moveDate || !isScheduled(order)) return;
+    const newDateStr = format(moveDate, 'yyyy-MM-dd');
+    rescheduleOrder.mutate(
+      {
+        schedule_entry_ids: order.schedule_entries.map(e => e.id),
+        newDate: newDateStr,
+        newBaseSortOrder: 1,
+      },
+      {
+        onSuccess: () => {
+          onOpenChange(false);
+          setMoveDate(undefined);
+        },
+      }
+    );
+  };
+
+  const handleUnschedule = () => {
+    if (!isScheduled(order)) return;
+    unscheduleOrder.mutate(order.schedule_entries.map(e => e.id), {
+      onSuccess: () => {
+        onOpenChange(false);
+      },
+    });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -120,6 +160,62 @@ export function ScheduleOrderDetailModal({ order, open, onOpenChange }: Schedule
               ))}
             </div>
           </div>
+
+          {/* Move to Date / Unschedule actions — only for scheduled orders */}
+          {isScheduled(order) && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Actions</p>
+                <div className="flex items-center gap-2">
+                  <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={cn(
+                          'flex-1 justify-start text-left font-normal',
+                          !moveDate && 'text-muted-foreground'
+                        )}
+                      >
+                        <CalendarIcon className="h-3.5 w-3.5 mr-2" />
+                        {moveDate ? format(moveDate, 'EEE, MMM d') : 'Pick a date'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={moveDate}
+                        onSelect={(date) => {
+                          setMoveDate(date);
+                          setDatePickerOpen(false);
+                        }}
+                        className={cn('p-3 pointer-events-auto')}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <Button
+                    size="sm"
+                    onClick={handleMoveTo}
+                    disabled={!moveDate || rescheduleOrder.isPending}
+                  >
+                    <ArrowRight className="h-3.5 w-3.5 mr-1" />
+                    Move
+                  </Button>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleUnschedule}
+                  disabled={unscheduleOrder.isPending}
+                >
+                  <X className="h-3.5 w-3.5 mr-1" />
+                  Unschedule
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
