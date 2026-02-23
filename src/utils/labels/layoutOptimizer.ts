@@ -239,17 +239,46 @@ function balanceSlotQuantities(
 // ─── STRATEGY 1: GANGED (all items in one run) ──────────────────────
 
 function createGangedRuns(items: LabelItem[], config: SlotConfig, maxOverrun: number = DEFAULT_MAX_OVERRUN): ProposedRun[] {
-  // Assign each item to a slot; if more items than slots, only take first N
-  const itemSlots = items.slice(0, config.totalSlots).map(item => ({
-    item_id: item.id,
-    quantity: item.quantity,
-    needs_rotation: item.needs_rotation || false,
-  }));
+  if (items.length <= config.totalSlots) {
+    // All items fit in one run
+    const itemSlots = items.map(item => ({
+      item_id: item.id,
+      quantity: item.quantity,
+      needs_rotation: item.needs_rotation || false,
+    }));
+    
+    const assignments = fillAllSlots(itemSlots, config.totalSlots);
+    
+    // Validate actual output doesn't exceed maxOverrun for any slot
+    if (!validateRunOverrun(assignments, config, maxOverrun)) {
+      // Round-robin created too much imbalance — fall back to balanced splitting
+      return balanceSlotQuantities(assignments, config, 1, maxOverrun);
+    }
+    
+    // Also check slot-to-slot balance
+    return balanceSlotQuantities(assignments, config, 1, maxOverrun);
+  }
   
-  const assignments = fillAllSlots(itemSlots, config.totalSlots);
+  // More items than slots — group by quantity similarity and create multiple ganged runs
+  const sorted = [...items].sort((a, b) => b.quantity - a.quantity);
+  const runs: ProposedRun[] = [];
+  let runNumber = 1;
   
-  // Balance the slot quantities — may produce multiple runs
-  return balanceSlotQuantities(assignments, config, 1, maxOverrun);
+  for (let i = 0; i < sorted.length; i += config.totalSlots) {
+    const batch = sorted.slice(i, i + config.totalSlots);
+    const itemSlots = batch.map(item => ({
+      item_id: item.id,
+      quantity: item.quantity,
+      needs_rotation: item.needs_rotation || false,
+    }));
+    
+    const assignments = fillAllSlots(itemSlots, config.totalSlots);
+    const batchRuns = balanceSlotQuantities(assignments, config, runNumber, maxOverrun);
+    runs.push(...batchRuns);
+    runNumber = runs.length + 1;
+  }
+  
+  return runs;
 }
 
 // ─── STRATEGY 2: INDIVIDUAL (one item per run, fills all slots) ─────
@@ -291,19 +320,20 @@ function createSingleItemRun(
 
 /**
  * Cluster quantities into natural levels.
- * Quantities within 10% of each other are merged into a single level
- * (using the most common value in the cluster as representative).
+ * Quantities within maxOverrun of each other are merged into a single level.
+ * Uses absolute difference instead of percentage to prevent large-quantity items
+ * from being incorrectly clustered (e.g. 4000 and 3300 differ by 700, not 10%).
  */
-function findQuantityLevels(quantities: number[]): number[] {
+function findQuantityLevels(quantities: number[], maxOverrun: number = DEFAULT_MAX_OVERRUN): number[] {
   if (quantities.length === 0) return [];
   
   const sorted = [...new Set(quantities)].sort((a, b) => b - a); // descending
   const levels: number[] = [];
   
   for (const qty of sorted) {
-    // Check if this qty fits into an existing level (within 10%)
+    // Check if this qty fits into an existing level (within maxOverrun absolute difference)
     const existingLevel = levels.find(l => 
-      l > 0 && qty > 0 && Math.max(l, qty) / Math.min(l, qty) <= 1.10
+      l > 0 && qty > 0 && Math.abs(l - qty) <= maxOverrun
     );
     if (!existingLevel) {
       levels.push(qty);
@@ -311,6 +341,29 @@ function findQuantityLevels(quantities: number[]): number[] {
   }
   
   return levels.sort((a, b) => b - a); // highest first
+}
+
+/**
+ * Validate that a run's actual output doesn't exceed any slot's requested
+ * quantity by more than maxOverrun. This catches the round-robin imbalance
+ * problem where e.g. 2 items across 5 slots creates a 3/2 split that
+ * drives frames way above what the minority slots need.
+ */
+function validateRunOverrun(
+  assignments: SlotAssignment[],
+  config: SlotConfig,
+  maxOverrun: number
+): boolean {
+  const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+  const frames = calculateFramesForSlot(maxSlotQty, config);
+  const actualPerSlot = frames * config.labelsPerSlotPerFrame;
+
+  for (const a of assignments) {
+    if (a.quantity_in_slot > 0 && (actualPerSlot - a.quantity_in_slot) > maxOverrun) {
+      return false; // This slot has too much waste
+    }
+  }
+  return true;
 }
 
 /**
@@ -327,9 +380,9 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
   const remaining = new Map(items.map(i => [i.id, i.quantity]));
   let runNumber = 1;
   
-  // 1. Find natural quantity levels
+  // 1. Find natural quantity levels using absolute maxOverrun clustering
   const allQuantities = items.map(i => i.quantity);
-  const levels = findQuantityLevels(allQuantities);
+  const levels = findQuantityLevels(allQuantities, maxOverrun);
   
   // 2. Process each level, highest first
   for (const level of levels) {
@@ -349,12 +402,15 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
       // Fill all slots (round-robin if fewer items than slots)
       const assignments = fillAllSlots(itemSlots, config.totalSlots);
       
-      // Check for excessive overrun before committing
+      // Check for excessive overrun — both slot-to-slot AND actual output
       const slotQtys = assignments.map(a => a.quantity_in_slot);
       const maxSlotQty = Math.max(...slotQtys);
       const minSlotQty = Math.min(...slotQtys);
       
-      if (minSlotQty > 0 && (maxSlotQty - minSlotQty) > maxOverrun) {
+      const slotImbalance = minSlotQty > 0 && (maxSlotQty - minSlotQty) > maxOverrun;
+      const actualOutputExcessive = !validateRunOverrun(assignments, config, maxOverrun);
+      
+      if (slotImbalance || actualOutputExcessive) {
         // Overrun too high — use balanceSlotQuantities to split
         const balancedRuns = balanceSlotQuantities(assignments, config, runNumber, maxOverrun);
         for (const br of balancedRuns) {
@@ -385,8 +441,8 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
   const leftovers = items.filter(i => (remaining.get(i.id) || 0) > 0);
   
   if (leftovers.length > 0) {
-    // Try to gang leftovers together if they're similar
-    const leftoverLevels = findQuantityLevels(leftovers.map(i => remaining.get(i.id) || 0));
+    // Try to gang leftovers together if they're similar (using maxOverrun for clustering)
+    const leftoverLevels = findQuantityLevels(leftovers.map(i => remaining.get(i.id) || 0), maxOverrun);
     
     for (const level of leftoverLevels) {
       let candidates = leftovers.filter(i => (remaining.get(i.id) || 0) >= level);
@@ -402,15 +458,24 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
         }));
         
         const assignments = fillAllSlots(itemSlots, config.totalSlots);
-        const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
-        const frames = calculateFramesForSlot(maxSlotQty, config);
         
-        runs.push({
-          run_number: runNumber++,
-          slot_assignments: assignments,
-          meters: calculateMeters(frames, config),
-          frames,
-        });
+        // Validate actual output for leftovers too
+        if (!validateRunOverrun(assignments, config, maxOverrun)) {
+          const balancedRuns = balanceSlotQuantities(assignments, config, runNumber, maxOverrun);
+          for (const br of balancedRuns) {
+            runs.push(br);
+            runNumber = br.run_number + 1;
+          }
+        } else {
+          const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+          const frames = calculateFramesForSlot(maxSlotQty, config);
+          runs.push({
+            run_number: runNumber++,
+            slot_assignments: assignments,
+            meters: calculateMeters(frames, config),
+            frames,
+          });
+        }
         
         for (const item of batch) {
           remaining.set(item.id, Math.max(0, (remaining.get(item.id) || 0) - qty));

@@ -28,6 +28,7 @@ interface OptimizeRequest {
     max_runs?: number;
     prefer_ganging?: boolean;
     rush_job?: boolean;
+    max_overrun?: number;
   };
 }
 
@@ -58,6 +59,7 @@ serve(async (req) => {
     const totalSlots = dieline.columns_across;
     const labelsPerFrame = dieline.columns_across * dieline.rows_around;
     const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0);
+    const maxOverrun = constraints?.max_overrun ?? 250;
 
     const systemPrompt = `You are an expert print production optimizer for HP Indigo digital label printing on rolls.
 
@@ -72,6 +74,18 @@ CRITICAL PRODUCTION RULES:
 4. There is NO default batch size. Use the actual requested quantities.
 5. Gang items with SIMILAR quantities together to minimize waste from mismatched run lengths.
 
+OVERRUN CONSTRAINT (CRITICAL):
+- Maximum acceptable overrun per slot: ${maxOverrun} labels
+- Never suggest ganging items whose quantities differ by more than ${maxOverrun} labels
+- If items cannot be ganged within this limit, they MUST go on separate runs
+- When N items are ganged across ${totalSlots} slots, items are distributed round-robin.
+  If ${totalSlots} is not evenly divisible by N, some items get more slots than others,
+  causing the minority item's slots to have much higher per-slot quantities.
+  ALWAYS check: does the actual frame output minus the requested quantity exceed ${maxOverrun}?
+  Example: 2 items across 5 slots = 3+2 split. Item with 2 slots needs ceil(qty/2) per slot,
+  item with 3 slots needs ceil(qty/3). The run prints at the HIGHER value, so the 3-slot item
+  gets massive overrun. This is NOT acceptable if overrun > ${maxOverrun}.
+
 MACHINE SPECIFICATIONS:
 - Roll width: ${dieline.roll_width_mm}mm
 - Available slots (columns across): ${totalSlots}
@@ -81,9 +95,10 @@ MACHINE SPECIFICATIONS:
 
 OPTIMIZATION PRIORITIES:
 1. Fill all slots (mandatory — never leave a slot empty)
-2. Minimize substrate waste (match quantities in ganged runs)
-3. Reduce number of production runs (fewer changeovers)
-4. Split quantities across runs when it improves ganging efficiency`;
+2. Keep every slot's overrun within ${maxOverrun} labels (mandatory)
+3. Minimize substrate waste (match quantities in ganged runs)
+4. Reduce number of production runs (fewer changeovers)
+5. Split quantities across runs when it improves ganging efficiency`;
 
     const userPrompt = `Analyze this label order and suggest the optimal production layout:
 
