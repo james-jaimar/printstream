@@ -1,12 +1,13 @@
 /**
  * Order Card for Label Schedule Board
- * Displays an order (with aggregated run metrics) in a draggable card
+ * Displays an order with material info and aggregated run metrics
  */
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
 import { Clock, Layers, Ruler, Package } from 'lucide-react';
+import { getSubstrateColor } from '@/hooks/labels/useLabelSchedule';
 import type { ScheduledOrderGroup, UnscheduledOrderGroup } from '@/hooks/labels/useLabelSchedule';
 
 interface OrderCardData {
@@ -17,6 +18,9 @@ interface OrderCardData {
   total_frames: number;
   total_duration_minutes: number;
   status?: string;
+  substrate_type?: string | null;
+  glue_type?: string | null;
+  substrate_width_mm?: number | null;
 }
 
 interface ScheduleOrderCardProps {
@@ -41,41 +45,35 @@ export function ScheduleOrderCard({ order, isDragging, onClick }: ScheduleOrderC
     <div
       onClick={onClick}
       className={cn(
-        'p-3 rounded-lg border-l-4 shadow-sm cursor-pointer',
+        'p-2.5 rounded-lg border-l-4 shadow-sm cursor-pointer',
         'hover:shadow-md transition-shadow',
         statusColors[order.status || ''] || 'border-l-gray-300 bg-background',
         isDragging && 'opacity-50 shadow-lg ring-2 ring-primary'
       )}
     >
       {/* Header */}
-      <div className="flex items-start justify-between gap-2 mb-2">
+      <div className="flex items-start justify-between gap-1 mb-1.5">
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-sm truncate">{order.order_number}</p>
-          <p className="text-xs text-muted-foreground truncate">{order.customer_name}</p>
+          <p className="font-medium text-xs truncate">{order.order_number}</p>
+          <p className="text-[10px] text-muted-foreground truncate">{order.customer_name}</p>
         </div>
-        <span className="text-xs font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex items-center gap-1">
-          <Package className="h-3 w-3" />
-          {order.run_count} run{order.run_count !== 1 ? 's' : ''}
+        <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1 py-0.5 rounded flex items-center gap-0.5">
+          <Package className="h-2.5 w-2.5" />
+          {order.run_count}
         </span>
       </div>
 
-      {/* Aggregated Metrics */}
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+      {/* Metrics */}
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
         {order.total_meters > 0 && (
-          <div className="flex items-center gap-1">
-            <Ruler className="h-3 w-3" />
-            <span>{order.total_meters.toFixed(1)}m</span>
-          </div>
-        )}
-        {order.total_frames > 0 && (
-          <div className="flex items-center gap-1">
-            <Layers className="h-3 w-3" />
-            <span>{order.total_frames} frames</span>
+          <div className="flex items-center gap-0.5">
+            <Ruler className="h-2.5 w-2.5" />
+            <span>{order.total_meters.toFixed(0)}m</span>
           </div>
         )}
         {order.total_duration_minutes > 0 && (
-          <div className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
+          <div className="flex items-center gap-0.5">
+            <Clock className="h-2.5 w-2.5" />
             <span>{hours > 0 ? `${hours}h` : ''}{mins > 0 ? `${mins}m` : ''}</span>
           </div>
         )}
