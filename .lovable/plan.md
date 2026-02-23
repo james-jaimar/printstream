@@ -1,115 +1,96 @@
 
+# Replace Algorithmic Optimizer with AI-Computed Layout
 
-# Fix Optimizer: Replace Level-Matching with Greedy Grouping
+## The Problem
 
-## Root Cause
+The local algorithm (`createOptimizedRuns`) has been rewritten three times and still produces 7 individual runs for an order that should clearly be 2-3 runs. The edge function AI only returns a high-level suggestion ("ganged"/"individual"/"hybrid") but never computes actual slot assignments.
 
-`findQuantityLevels` merges all quantities into a single cluster when `maxOverrun` is large enough. With maxOverrun=250, the quantities 250, 200, 150, and 1 all fall within 250 of each other, producing ONE level. Then `createOptimizedRuns` requires `remaining >= level` (250), so only the 250-qty item qualifies. The rest cascade through leftover handling into individual runs.
+## Solution
 
-The level-matching paradigm cannot work because:
-- Levels represent a single target quantity, not a range
-- Items below the level are excluded from candidates even though they're "close enough"
-- Increasing maxOverrun makes levels MORE inclusive, reducing the number of levels, which paradoxically creates MORE individual runs
-
-## Solution: Greedy Grouping Algorithm
-
-Replace `createOptimizedRuns` with a simple greedy approach:
-
-1. Sort items by quantity descending
-2. Pick the first unassigned item as an "anchor"
-3. Find all unassigned items whose quantity is within maxOverrun of the anchor
-4. Take up to totalSlots of these compatible items (anchor included)
-5. Build a run using `fillAllSlots`, validate with `validateRunOverrun`
-6. If valid, commit the run and remove those items from the pool
-7. If invalid (round-robin creates too much overrun), reduce the group or make individual runs
-8. Repeat until all items are assigned
-
-## Expected Result for LBL-2026-0016
-
-Items: 250x1, 200x1, 150x5, 1x1. Slots=5, maxOverrun=250.
-
-**Step 1**: Anchor = 250. Compatible (within 250): 200 (diff 50), all 150s (diff 100), and 1 (diff 249). Take first 5: [250, 200, 150, 150, 150]. Build run: 5 items in 5 slots, one per slot. Max slot = 250, min slot = 150, diff = 100 <= 250. Validate actual output: frames = ceil(250/2) = 125, actual = 125*2 = 250. Overrun for 150 slots = 250-150 = 100 <= 250. VALID. **Run 1: 5 items ganged.**
-
-**Step 2**: Remaining: [150, 150, 1]. Anchor = 150. Compatible: other 150 (diff 0), 1 (diff 149 <= 250). Take all 3: [150, 150, 1]. Build run across 5 slots: round-robin A,B,C,A,B. A gets 2 slots (75/slot), B gets 2 slots (75/slot), C gets 1 slot (1/slot). Max slot = 75, frames = ceil(75/2) = 38, actual = 76. Overrun for C = 76-1 = 75 <= 250. VALID. **Run 2: 3 items ganged.**
-
-**Total: 2 runs** (possibly 3 if the qty=1 item is excluded from ganging for practical reasons).
-
-With the user's simplified expectation of "3 runs" (250 alone, 5x150 together, remaining together), this is also achievable depending on how the greedy grouping orders candidates. The key point: it will NOT create 7-8 individual runs.
+Have the AI return **actual run layouts** with specific slot assignments, item IDs, and quantities. The AI can reason about the math (e.g., "7 items, 5 slots, maxOverrun 250 -- put the 5 most similar quantities together") far more reliably than the buggy bin-packing algorithm.
 
 ## Changes
 
-### File: `src/utils/labels/layoutOptimizer.ts`
+### 1. Edge Function: Return actual runs (not just a suggestion)
 
-**1. Replace `createOptimizedRuns` entirely (lines 378-510)**
+**File: `supabase/functions/label-optimize/index.ts`**
 
-Remove the level-matching logic. Replace with greedy grouping:
+Update the tool-call schema so the AI returns structured run data:
 
 ```text
-function createOptimizedRuns(items, config, maxOverrun):
-  sort items by quantity descending
-  unassigned = [...items]
-  runs = []
-  
-  while unassigned.length > 0:
-    anchor = unassigned[0]  // highest remaining qty
-    
-    // Find items compatible with anchor (qty within maxOverrun)
-    compatible = unassigned.filter(i => 
-      Math.abs(i.quantity - anchor.quantity) <= maxOverrun
-    )
-    
-    // Take up to totalSlots items from compatible list
-    batch = compatible.slice(0, config.totalSlots)
-    
-    // Build slot assignments
-    itemSlots = batch.map(i => ({ item_id, quantity, needs_rotation }))
-    assignments = fillAllSlots(itemSlots, config.totalSlots)
-    
-    // Validate actual output overrun
-    if (validateRunOverrun(assignments, config, maxOverrun)):
-      // Good — create the run
-      add run to runs
-      remove batch items from unassigned
-    else:
-      // Round-robin created too much overrun
-      // Try reducing batch size (remove the most different item)
-      // If even a single item fails, create individual run for anchor
-      <reduce batch or fall back to individual>
+tools: [{
+  function: {
+    name: "create_layout",
+    parameters: {
+      runs: [{
+        slot_assignments: [{
+          item_id: string,    // actual item ID from the input
+          quantity_in_slot: number  // how many labels this slot prints
+        }],
+        reasoning: string
+      }],
+      overall_reasoning: string,
+      estimated_waste_percent: number
+    }
+  }
+}]
 ```
 
-**2. Remove `findQuantityLevels` (lines 327-344)**
+The system prompt will include:
+- All item IDs and quantities (so the AI can reference them in assignments)
+- The dieline config (slots, labelsPerSlotPerFrame calculated server-side)
+- The maxOverrun constraint
+- Clear instructions: "Return exactly which items go in which slots for each run, with quantities. Every run must have exactly N slot assignments. All slots must be filled."
 
-No longer needed. The greedy grouping handles clustering implicitly.
+The edge function will also **validate** the AI's output before returning:
+- Every run has exactly `totalSlots` assignments
+- All item quantities are accounted for (no items dropped, no over-allocation)
+- No slot overrun exceeds maxOverrun
+- If validation fails, return the AI result with a warning flag
 
-**3. Keep `createGangedRuns` as-is**
+### 2. Hook: Add AI-computed layout option
 
-It's used for the "ganged-all" option and works independently. No change needed.
+**File: `src/hooks/labels/useLayoutOptimizer.ts`**
 
-**4. Keep `balanceSlotQuantities`, `validateRunOverrun`, `fillAllSlots` as-is**
+Update `fetchAISuggestion` to parse the new structured response and create a proper `LayoutOption` from the AI's runs. This becomes a first-class layout option (alongside the existing algorithmic ones) called "ai-computed".
 
-These helper functions are still valid and used by the new algorithm.
+The AI-computed option will:
+- Use the slot assignments directly from the AI
+- Calculate frames/meters using existing `calculateFramesForSlot` and `calculateMeters` helpers
+- Score using the existing `scoreLayout` function
+- Appear in the options list alongside algorithmic options
 
-**5. Clean up leftover handling**
+### 3. UI: Single "Generate" button does both
 
-The new algorithm handles ALL items in a single pass -- no separate leftover phase needed. The "final safety net" for individual runs remains as a fallback but should rarely be hit.
+**File: `src/components/labels/LayoutOptimizer.tsx`**
 
-### File: `supabase/functions/label-optimize/index.ts`
+When the user clicks "Generate Layout Options":
+1. Fire both the local algorithm AND the AI edge function in parallel
+2. Merge results: algorithmic options + AI-computed option
+3. Auto-select the best-scoring option (which should now be the AI one)
+4. The separate "Get AI Suggestion" button is removed -- AI is always part of generation
 
-No changes needed -- the AI prompt already has the maxOverrun constraint from the previous update.
+The AI suggestion card (`AISuggestionCard`) is kept for showing the AI's reasoning/tips, but the main value is now the actual computed layout.
 
-## Why This Fixes the "More Runs with Higher maxOverrun" Bug
+### 4. Keep algorithmic options as fallback
 
-With the old level-matching:
-- Higher maxOverrun = fewer levels = fewer candidates per level = more leftovers = more individual runs
+The local algorithm (`createOptimizedRuns`, `createGangedRuns`, etc.) stays as-is. It provides instant results while the AI call is in flight, and serves as a fallback if the AI call fails (rate limit, credits, network). The AI-computed option simply appears alongside the algorithmic ones.
 
-With greedy grouping:
-- Higher maxOverrun = more items compatible with each anchor = larger groups = FEWER runs
+## Expected Result for LBL-2026-0016
 
-This is the correct, intuitive behavior: loosening the waste tolerance should consolidate runs, not fragment them.
+The AI receives:
+- Items: Page1=250, Page2=200, Page3-7=150 each (with actual IDs)
+- 5 slots, labelsPerSlotPerFrame=4, maxOverrun=250
+
+The AI reasons: "250, 200, 150, 150, 150 all fit within 250 of each other. Put 5 items on Run 1 (one per slot). Remaining 150, 150: put both on Run 2 filling all 5 slots round-robin."
+
+Returns 2 runs with exact slot assignments. The frontend converts this into a `LayoutOption` and displays it.
 
 ## File Summary
 
 | File | Change |
 |------|--------|
-| `src/utils/labels/layoutOptimizer.ts` | Replace `createOptimizedRuns` level-matching with greedy grouping; remove `findQuantityLevels`; eliminate separate leftover phase |
-
+| `supabase/functions/label-optimize/index.ts` | New tool schema returning actual runs with slot assignments; server-side validation of AI output; calculate labelsPerSlotPerFrame for accurate prompting |
+| `src/hooks/labels/useLayoutOptimizer.ts` | Parse AI runs into LayoutOption; fire AI call during generateOptions; merge AI option into options list |
+| `src/components/labels/LayoutOptimizer.tsx` | Remove separate "Get AI Suggestion" button; generate triggers both algorithm + AI in parallel; show AI option in the list |
+| `src/components/labels/optimizer/AISuggestionCard.tsx` | Minor update to display AI reasoning from the new response format |
