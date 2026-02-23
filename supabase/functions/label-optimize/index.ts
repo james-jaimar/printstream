@@ -100,9 +100,16 @@ function validateAILayout(
     if (assigned === 0) {
       warnings.push(`Item "${item.name}" (${item.id}) not assigned to any run`);
     }
-    // Allow some tolerance for rounding but flag large discrepancies
-    if (assigned > 0 && Math.abs(assigned - item.quantity) > maxOverrun) {
-      warnings.push(`Item "${item.name}": assigned ${assigned} vs requested ${item.quantity} (diff ${assigned - item.quantity})`);
+    // Items can be split across runs — total assigned should be >= ordered qty
+    // Allow under-assignment up to maxOverrun (rounding), flag over-assignment beyond maxOverrun
+    if (assigned > 0 && assigned < item.quantity) {
+      const shortfall = item.quantity - assigned;
+      if (shortfall > maxOverrun) {
+        warnings.push(`Item "${item.name}": only assigned ${assigned} of ${item.quantity} (short by ${shortfall})`);
+      }
+    }
+    if (assigned > item.quantity + maxOverrun * totalSlots) {
+      warnings.push(`Item "${item.name}": over-assigned ${assigned} vs requested ${item.quantity}`);
     }
   }
 
@@ -166,6 +173,18 @@ CRITICAL PRODUCTION RULES:
 4. Gang items with SIMILAR quantities together to minimize waste.
 5. When items are duplicated across slots via round-robin, divide their quantity by the number of slots they occupy.
 
+QUANTITY SPLITTING (IMPORTANT):
+- You MAY split a single item's total quantity across multiple runs.
+- Example: A client orders 3000 of item "A". You can assign 2500 to Run 1 and 500 to Run 2 if that creates better groupings and less waste.
+- The total quantity_in_slot for each item across ALL runs must equal or slightly exceed the ordered quantity (within overrun tolerance).
+- Splitting is especially useful when an item's quantity is much larger than others — split it to match quantities in different runs.
+- The finishing department will combine rolls from different runs, so splitting is operationally fine.
+
+EMPTY SLOTS:
+- You MAY leave a slot effectively empty by assigning quantity_in_slot = 0 if it genuinely reduces waste.
+- Use the same item_id as another slot in that run (the artwork must be present, it just prints 0 needed labels).
+- This is useful when you have fewer items than slots and rounding would create excessive overrun.
+
 OVERRUN CONSTRAINT (CRITICAL):
 - Maximum acceptable overrun per slot: ${maxOverrun} labels
 - Overrun = (frames × ${labelsPerSlotPerFrame}) − quantity_in_slot
@@ -182,6 +201,7 @@ Each run must have EXACTLY ${totalSlots} slot_assignments.
 Use the actual item IDs provided below.
 The quantity_in_slot is how many labels that slot needs to print (before frame rounding).
 If an item appears in multiple slots (round-robin), divide its total quantity by the number of slots it occupies.
+If an item's quantity is split across runs, make sure the sum of all its slot quantities across all runs >= the ordered quantity.
 
 ITEMS TO ASSIGN (use these exact IDs):
 ${items.map(i => `- ID: "${i.id}" | Name: "${i.name}" | Quantity: ${i.quantity}`).join('\n')}`;
