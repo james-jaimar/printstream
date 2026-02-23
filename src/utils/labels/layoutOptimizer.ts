@@ -316,32 +316,7 @@ function createSingleItemRun(
   };
 }
 
-// ─── STRATEGY 3: OPTIMIZED (level-matching with quantity splitting) ──
-
-/**
- * Cluster quantities into natural levels.
- * Quantities within maxOverrun of each other are merged into a single level.
- * Uses absolute difference instead of percentage to prevent large-quantity items
- * from being incorrectly clustered (e.g. 4000 and 3300 differ by 700, not 10%).
- */
-function findQuantityLevels(quantities: number[], maxOverrun: number = DEFAULT_MAX_OVERRUN): number[] {
-  if (quantities.length === 0) return [];
-  
-  const sorted = [...new Set(quantities)].sort((a, b) => b - a); // descending
-  const levels: number[] = [];
-  
-  for (const qty of sorted) {
-    // Check if this qty fits into an existing level (within maxOverrun absolute difference)
-    const existingLevel = levels.find(l => 
-      l > 0 && qty > 0 && Math.abs(l - qty) <= maxOverrun
-    );
-    if (!existingLevel) {
-      levels.push(qty);
-    }
-  }
-  
-  return levels.sort((a, b) => b - a); // highest first
-}
+// ─── STRATEGY 3: OPTIMIZED (greedy grouping) ───────────────────────
 
 /**
  * Validate that a run's actual output doesn't exceed any slot's requested
@@ -360,64 +335,80 @@ function validateRunOverrun(
 
   for (const a of assignments) {
     if (a.quantity_in_slot > 0 && (actualPerSlot - a.quantity_in_slot) > maxOverrun) {
-      return false; // This slot has too much waste
+      return false;
     }
   }
   return true;
 }
 
 /**
- * Smart level-matching optimizer.
+ * Greedy grouping optimizer.
  * 
- * 1. Identify natural quantity levels from all items
- * 2. For each level (highest first), collect items with >= level remaining
- * 3. Assign them to runs at that level quantity, deducting from remaining
- * 4. Remainders naturally fall to lower levels
- * 5. Any leftover gets its own individual run
+ * 1. Sort items by quantity descending
+ * 2. Pick highest unassigned item as "anchor"
+ * 3. Find all unassigned items within maxOverrun of anchor's quantity
+ * 4. Take up to totalSlots compatible items, build a run
+ * 5. Validate with validateRunOverrun; if invalid, shrink batch
+ * 6. Repeat until all items assigned
+ * 
+ * Higher maxOverrun = more items compatible per anchor = fewer runs.
+ * This is the correct intuitive behavior.
  */
 function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun: number = DEFAULT_MAX_OVERRUN): ProposedRun[] {
   const runs: ProposedRun[] = [];
-  const remaining = new Map(items.map(i => [i.id, i.quantity]));
   let runNumber = 1;
   
-  // 1. Find natural quantity levels using absolute maxOverrun clustering
-  const allQuantities = items.map(i => i.quantity);
-  const levels = findQuantityLevels(allQuantities, maxOverrun);
+  // Sort items by quantity descending
+  const sorted = [...items].sort((a, b) => b.quantity - a.quantity);
+  const unassigned = new Set(sorted.map((_, i) => i)); // indices into sorted
   
-  // 2. Process each level, highest first
-  for (const level of levels) {
-    // Collect items that have enough remaining to contribute at this level
-    let candidates = items.filter(i => (remaining.get(i.id) || 0) >= level);
+  while (unassigned.size > 0) {
+    // Pick highest remaining as anchor
+    let anchorIdx = -1;
+    for (const idx of unassigned) {
+      if (anchorIdx === -1 || sorted[idx].quantity > sorted[anchorIdx].quantity) {
+        anchorIdx = idx;
+      }
+    }
     
-    while (candidates.length > 0) {
-      // Take up to totalSlots candidates for this run
-      const batch = candidates.slice(0, config.totalSlots);
+    const anchor = sorted[anchorIdx];
+    
+    // Find all unassigned items within maxOverrun of anchor
+    const compatible: number[] = [];
+    for (const idx of unassigned) {
+      if (Math.abs(sorted[idx].quantity - anchor.quantity) <= maxOverrun) {
+        compatible.push(idx);
+      }
+    }
+    
+    // Sort compatible by quantity descending (closest to anchor first)
+    compatible.sort((a, b) => sorted[b].quantity - sorted[a].quantity);
+    
+    // Try batch sizes from totalSlots down to 1
+    let placed = false;
+    
+    for (let batchSize = Math.min(compatible.length, config.totalSlots); batchSize >= 1; batchSize--) {
+      const batch = compatible.slice(0, batchSize);
       
-      const itemSlots = batch.map(item => ({
-        item_id: item.id,
-        quantity: level,
-        needs_rotation: item.needs_rotation || false,
+      const itemSlots = batch.map(idx => ({
+        item_id: sorted[idx].id,
+        quantity: sorted[idx].quantity,
+        needs_rotation: sorted[idx].needs_rotation || false,
       }));
       
-      // Fill all slots (round-robin if fewer items than slots)
       const assignments = fillAllSlots(itemSlots, config.totalSlots);
       
-      // Check for excessive overrun — both slot-to-slot AND actual output
+      // Check slot-to-slot balance
       const slotQtys = assignments.map(a => a.quantity_in_slot);
       const maxSlotQty = Math.max(...slotQtys);
-      const minSlotQty = Math.min(...slotQtys);
-      
+      const minSlotQty = Math.min(...slotQtys.filter(q => q > 0));
       const slotImbalance = minSlotQty > 0 && (maxSlotQty - minSlotQty) > maxOverrun;
-      const actualOutputExcessive = !validateRunOverrun(assignments, config, maxOverrun);
       
-      if (slotImbalance || actualOutputExcessive) {
-        // Overrun too high — use balanceSlotQuantities to split
-        const balancedRuns = balanceSlotQuantities(assignments, config, runNumber, maxOverrun);
-        for (const br of balancedRuns) {
-          runs.push(br);
-          runNumber = br.run_number + 1;
-        }
-      } else {
+      // Check actual output overrun
+      const actualOutputOk = validateRunOverrun(assignments, config, maxOverrun);
+      
+      if (!slotImbalance && actualOutputOk) {
+        // Valid run — commit it
         const frames = calculateFramesForSlot(maxSlotQty, config);
         runs.push({
           run_number: runNumber++,
@@ -425,84 +416,22 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
           meters: calculateMeters(frames, config),
           frames,
         });
+        
+        // Remove batch items from unassigned
+        for (const idx of batch) {
+          unassigned.delete(idx);
+        }
+        placed = true;
+        break;
       }
       
-      // Deduct level from each batch item's remaining
-      for (const item of batch) {
-        remaining.set(item.id, Math.max(0, (remaining.get(item.id) || 0) - level));
-      }
-      
-      // Re-check candidates for this level
-      candidates = items.filter(i => (remaining.get(i.id) || 0) >= level);
+      // If batch of 1 still fails (shouldn't happen for single item), fall through
     }
-  }
-  
-  // 3. Handle any leftover remainders (quantities that didn't match any level)
-  const leftovers = items.filter(i => (remaining.get(i.id) || 0) > 0);
-  
-  if (leftovers.length > 0) {
-    // Try to gang leftovers together if they're similar (using maxOverrun for clustering)
-    const leftoverLevels = findQuantityLevels(leftovers.map(i => remaining.get(i.id) || 0), maxOverrun);
     
-    for (const level of leftoverLevels) {
-      let candidates = leftovers.filter(i => (remaining.get(i.id) || 0) >= level);
-      
-      while (candidates.length > 0) {
-        const batch = candidates.slice(0, config.totalSlots);
-        const qty = Math.min(...batch.map(i => remaining.get(i.id) || 0));
-        
-        const itemSlots = batch.map(item => ({
-          item_id: item.id,
-          quantity: qty,
-          needs_rotation: item.needs_rotation || false,
-        }));
-        
-        const assignments = fillAllSlots(itemSlots, config.totalSlots);
-        
-        // Validate actual output for leftovers too
-        if (!validateRunOverrun(assignments, config, maxOverrun)) {
-          const balancedRuns = balanceSlotQuantities(assignments, config, runNumber, maxOverrun);
-          for (const br of balancedRuns) {
-            runs.push(br);
-            runNumber = br.run_number + 1;
-          }
-        } else {
-          const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
-          const frames = calculateFramesForSlot(maxSlotQty, config);
-          runs.push({
-            run_number: runNumber++,
-            slot_assignments: assignments,
-            meters: calculateMeters(frames, config),
-            frames,
-          });
-        }
-        
-        for (const item of batch) {
-          remaining.set(item.id, Math.max(0, (remaining.get(item.id) || 0) - qty));
-        }
-        
-        candidates = leftovers.filter(i => (remaining.get(i.id) || 0) >= level);
-      }
-    }
-  }
-  
-  // 4. Final safety net: any still-remaining items get individual runs
-  for (const item of items) {
-    const rem = remaining.get(item.id) || 0;
-    if (rem > 0) {
-      const itemSlots = [{ item_id: item.id, quantity: rem, needs_rotation: item.needs_rotation || false }];
-      const assignments = fillAllSlots(itemSlots, config.totalSlots);
-      const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
-      const frames = calculateFramesForSlot(maxSlotQty, config);
-      
-      runs.push({
-        run_number: runNumber++,
-        slot_assignments: assignments,
-        meters: calculateMeters(frames, config),
-        frames,
-      });
-      
-      remaining.set(item.id, 0);
+    if (!placed) {
+      // Fallback: create individual run for anchor
+      runs.push(createSingleItemRun(anchor, runNumber++, config));
+      unassigned.delete(anchorIdx);
     }
   }
   
