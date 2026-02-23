@@ -37,6 +37,7 @@ import {
 import { useLayoutOptimizer } from '@/hooks/labels/useLayoutOptimizer';
 import { usePrepareArtwork } from '@/hooks/labels/usePrepareArtwork';
 import { RunLayoutDiagram } from './optimizer/RunLayoutDiagram';
+import { Label } from '@/components/ui/label';
 import { type LabelItem, type LabelDieline, type LayoutOption, type RollSplitOption } from '@/types/labels';
 import { getSlotConfig, calculateFramesForSlot, calculateMeters } from '@/utils/labels/layoutOptimizer';
 import { cn } from '@/lib/utils';
@@ -81,7 +82,9 @@ export function LayoutOptimizer({
     isSaving,
     hasSavedLayout,
     saveLayout,
-    clearSavedLayout
+    clearSavedLayout,
+    maxOverrun,
+    setMaxOverrun
   } = useLayoutOptimizer({ orderId, items, dieline, savedLayout: savedLayout as any, qtyPerRoll });
 
   const { prepareBulk, isProcessing: isPreparingArtwork } = usePrepareArtwork(orderId);
@@ -273,6 +276,24 @@ export function LayoutOptimizer({
             />
           </CollapsibleContent>
         </Collapsible>
+
+        {/* Max Overrun Control */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Max Overrun per Slot</Label>
+            <span className="text-sm font-mono text-muted-foreground">{maxOverrun} labels</span>
+          </div>
+          <Slider
+            value={[maxOverrun]}
+            onValueChange={([v]) => setMaxOverrun(v)}
+            min={50}
+            max={1000}
+            step={50}
+          />
+          <p className="text-xs text-muted-foreground">
+            Controls how many extra labels the optimizer may produce per slot beyond what's ordered
+          </p>
+        </div>
 
         {/* Placeholder Items Info */}
         {artworkReadiness.hasPlaceholders && (
