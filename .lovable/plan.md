@@ -1,69 +1,63 @@
 
 
-# Fix Roll-Awareness: Tolerance, Responsiveness, and Overrun Limits
+# Fix Roll Splitting, Adjuster Visibility, and Tooltip Clarity
 
-## Three Issues to Fix
+## 4 Issues to Fix
 
-### 1. Add ~50 Label Tolerance to Roll Splitting
+### 1. Roll Splitting Creates Tiny Remainder Rolls (8 labels)
 
-**Problem**: Run 4 shows 504/slot with "Roll splitting -- 504 labels/slot exceeds 500/roll", offering splits of "500 + 4" and "252 + 252". A 4-label overage is trivial -- up to 50 labels at the end of a roll can be ignored.
+**Problem**: When actual output is 1,008 and qty_per_roll is 500, the `RollSplitSelector` creates 3 rolls: 500 + 500 + 8. An 8-label roll is absurd -- we said up to 50 labels at the end of a roll can be ignored.
 
-**Fix**: Add a `ROLL_TOLERANCE = 50` constant. Both `needs_rewinding` and `showSplitter` checks use this tolerance:
-- `needs_rewinding` = `actualPerSlot < (qtyPerRoll - ROLL_TOLERANCE)` (only flag if genuinely short)
-- Roll splitting only triggers when `actualPerSlot > qtyPerRoll + ROLL_TOLERANCE`
+**Fix in `RollSplitSelector.tsx`**: When calculating the "fill first" splits, if the final roll has <= `ROLL_TOLERANCE` (50) labels, merge it into the previous roll instead of creating a separate roll. So 1,008 becomes 500 + 508 (2 rolls), not 500 + 500 + 8 (3 rolls). Similarly for "even split", recalculate based on the corrected roll count.
 
-**Files**:
-- `src/utils/labels/layoutOptimizer.ts` -- add `ROLL_TOLERANCE = 50`, use in `annotateRunsWithRollInfo`
-- `src/components/labels/optimizer/RunLayoutDiagram.tsx` -- apply tolerance to `showSplitter` condition
-- `src/components/labels/LayoutOptimizer.tsx` -- apply tolerance in `effectiveRuns` recalculation
+### 2. Roll Splitting "+5 more" Instead of Responsive Display
 
-### 2. Fix Roll Split UI Responsiveness
+**Problem**: When there are 9 rolls, the UI shows 4 badges then "+5 more" which hides critical info. The user wants ALL roll info visible, just laid out responsively.
 
-**Problem**: When a slot produces many rolls (e.g., 4,005 labels / 500/roll = 9 rolls), the badge row overflows and text wraps badly on laptop screens.
+**Fix in `RollSplitSelector.tsx`**: Remove the MAX_BADGES cap entirely. Instead, show all badges using `flex-wrap` so they flow naturally. The compact label formatting ("8 x 500 + 5") already summarises the strategy name -- the badges should show all rolls. On smaller screens the badges will simply wrap to new lines.
 
-**Fix in `RollSplitSelector.tsx`**:
-- Cap the inline badge display to max 4 badges. If more rolls, show a summary like "9 rolls x 500 (+5 remainder)" instead of 9 individual badges
-- Use `flex-wrap` on the badge container
-- Truncate the "Fill first" label text: instead of "500 + 500 + 500 + 500 + 500 + 500 + 500 + 500 + 5", show "8 x 500 + 5"
-- Make the option buttons stack vertically (label on top, badges below) when roll count exceeds 4
+### 3. Run 4 Has No "Bump to 500" Option
 
-### 3. Add Maximum Overrun Threshold to Optimizer
+**Problem**: Run 4 shows 468/slot (need 500) but the `RunQuantityAdjuster` does not appear. Root cause: `showAdjuster` requires `needsRewinding`, which is `actualPerSlot < (qtyPerRoll - 50) = 450`. Since 468 > 450, `needsRewinding` is false, so the adjuster is hidden.
 
-**Problem**: Run 3 gangs items where one needs 4,000/slot and others need 1,650/slot. Because all slots print the same number of frames (driven by the max), the 1,650 items get 4,005 labels each -- a 2,355 overrun (143% waste). This is unacceptable.
+The adjuster should show whenever the actual output is BELOW `qtyPerRoll` (even within tolerance), because the user may still want to bump it. The tolerance only controls warnings and automated flags -- manual adjustment should always be available.
 
-**Root cause**: The `createOptimizedRuns` function does NOT call `balanceSlotQuantities`. It groups items by quantity level but doesn't check if the resulting run has excessive per-slot overrun.
+**Fix in `RunLayoutDiagram.tsx`**: Change `showAdjuster` condition from `needsRewinding` to `effectiveActualPerSlot < qtyPerRoll`. This way 468 < 500 shows the adjuster, but 504 >= 500 does not (since 504 is fine).
 
-**Fix in `src/utils/labels/layoutOptimizer.ts`**:
-- Add a `MAX_OVERRUN_PERCENT = 0.20` constant (20% max acceptable overrun per slot)
-- After each run is created in `createOptimizedRuns`, check: if any slot's requested quantity is less than `maxSlotQty * (1 - MAX_OVERRUN_PERCENT)`, that run has too much overrun
-- When detected, use `balanceSlotQuantities` to split the run (cap at the min qty, then handle the remainder separately)
-- This ensures no slot ever has more than ~20% overrun relative to its requested quantity
+### 4. Tooltip Shows Slot Qty Instead of Client's Original Order Qty
 
-Additionally, in `annotateRunsWithRollInfo`, add a per-slot overrun warning when `(actual - requested) / requested > 0.20` so the UI can flag it.
+**Problem**: When hovering over a slot, the tooltip says "Requested: 1,000" which is `quantity_in_slot` -- what the optimizer assigned to that slot. But the user needs to see the CLIENT's original order quantity (e.g., 5,000 total) to understand context. Without it, they can't tell what the client actually ordered.
+
+**Fix in `RunLayoutDiagram.tsx`**: Change the tooltip to show:
+- Line 1: Item name
+- Line 2: "Client order: 5,000" (from `item.quantity`)
+- Line 3: "This slot: 1,000" (from `assignment.quantity_in_slot`)
+- Line 4: "Actual output: 1,008 (+8 overrun)" (from `effectiveActualPerSlot`)
+
+This gives complete context: what the client ordered, what the optimizer proposed for this slot, and what will actually print.
 
 ## Technical Details
 
-**New constants** (in `layoutOptimizer.ts`):
+### File: `src/components/labels/optimizer/RollSplitSelector.tsx`
+
+**Tiny remainder fix**: In the `splitOptions` `useMemo`, after building `fillFirstRolls`, check if the last roll has <= 50 labels. If so, add those labels to the second-to-last roll and remove the last roll. Recalculate `rollCount` for even split similarly.
+
+**Remove badge cap**: Remove the `MAX_BADGES` constant and the `.slice(0, MAX_BADGES)` logic. Render all badges with `flex-wrap` (already present).
+
+### File: `src/components/labels/optimizer/RunLayoutDiagram.tsx`
+
+**Adjuster condition** (line ~118):
 ```
-const ROLL_TOLERANCE = 50;         // labels at end of roll that can be ignored
-const MAX_OVERRUN_PERCENT = 0.20;  // 20% max acceptable overrun per slot
+// Before: showAdjuster = showControls && needsRewinding && ...
+// After:  showAdjuster = showControls && effectiveActualPerSlot < qtyPerRoll && ...
 ```
 
-**Smarter roll split label formatting** (in `RollSplitSelector.tsx`):
-```
-// Instead of "500 + 500 + 500 + 500 + 500 + 500 + 500 + 500 + 5"
-// Show "8 x 500 + 5" when rollCount > 4
-```
+**Tooltip** (lines ~293-315): Restructure to show `item.quantity` as "Client order" and `assignment.quantity_in_slot` as "This slot".
 
-**Overrun protection in `createOptimizedRuns`**:
-After creating assignments for a run at a given level, check if the `maxSlotQty / minSlotQty` ratio exceeds the threshold. If so, call `balanceSlotQuantities` to split the unbalanced run into balanced sub-runs, just like the ganged strategy does.
-
-## Summary of File Changes
+## Summary
 
 | File | Change |
 |------|--------|
-| `src/utils/labels/layoutOptimizer.ts` | Add `ROLL_TOLERANCE` and `MAX_OVERRUN_PERCENT` constants; apply tolerance in `annotateRunsWithRollInfo`; add overrun protection in `createOptimizedRuns` by calling `balanceSlotQuantities` when overrun exceeds threshold |
-| `src/components/labels/optimizer/RollSplitSelector.tsx` | Compact label formatting for many rolls (e.g., "8 x 500 + 5"); cap badge display to 4; use `flex-wrap` for responsiveness |
-| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | Apply `ROLL_TOLERANCE` to `showSplitter` condition |
-| `src/components/labels/LayoutOptimizer.tsx` | Apply tolerance in `effectiveRuns` `needs_rewinding` check |
+| `src/components/labels/optimizer/RollSplitSelector.tsx` | Merge tiny remainders (<=50) into previous roll; remove badge cap; show all badges responsively |
+| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | Show adjuster when actual < qtyPerRoll (not just needsRewinding); restructure tooltip to show client order qty |
 
