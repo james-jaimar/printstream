@@ -8,7 +8,6 @@ import { Separator } from '@/components/ui/separator';
 import { Loader2, Sparkles, Settings, Play } from 'lucide-react';
 import { useLayoutOptimizer } from '@/hooks/labels/useLayoutOptimizer';
 import { LayoutOptionCard } from './LayoutOptionCard';
-import { AISuggestionCard } from './AISuggestionCard';
 import type { LabelItem, LabelDieline, OptimizationWeights, LayoutOption } from '@/types/labels';
 import { DEFAULT_OPTIMIZATION_WEIGHTS } from '@/types/labels';
 import { DEFAULT_MAX_OVERRUN } from '@/utils/labels/layoutOptimizer';
@@ -27,29 +26,21 @@ export function LayoutOptimizerPanel({
   onLayoutSelected 
 }: LayoutOptimizerPanelProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [rushJob, setRushJob] = useState(false);
-  const [preferGanging, setPreferGanging] = useState(true);
   const [localWeights, setLocalWeights] = useState<OptimizationWeights>(DEFAULT_OPTIMIZATION_WEIGHTS);
   const [localMaxOverrun, setLocalMaxOverrun] = useState(DEFAULT_MAX_OVERRUN);
 
   const {
     options,
     selectedOption,
-    aiSuggestion,
     isGenerating,
     isLoadingAI,
     canGenerate,
     generateOptions,
-    fetchAISuggestion,
     selectOption
   } = useLayoutOptimizer({ orderId, items, dieline });
 
   const handleGenerate = () => {
     generateOptions(items, dieline!, localWeights);
-  };
-
-  const handleFetchAI = () => {
-    fetchAISuggestion(items, dieline!, { rush_job: rushJob, prefer_ganging: preferGanging });
   };
 
   const handleSelectOption = (option: LayoutOption) => {
@@ -58,7 +49,6 @@ export function LayoutOptimizerPanel({
   };
 
   const updateWeight = (key: keyof OptimizationWeights, value: number) => {
-    // Normalize weights to sum to 1
     const remaining = 1 - value;
     const otherKeys = Object.keys(localWeights).filter(k => k !== key) as (keyof OptimizationWeights)[];
     const currentOtherSum = otherKeys.reduce((sum, k) => sum + localWeights[k], 0);
@@ -79,12 +69,6 @@ export function LayoutOptimizerPanel({
     }
   };
 
-  const recommendedOptionId = aiSuggestion?.recommendation === 'ganged' 
-    ? 'ganged-all' 
-    : aiSuggestion?.recommendation === 'individual'
-    ? 'individual'
-    : 'optimized';
-
   return (
     <div className="space-y-6">
       {/* Header & Controls */}
@@ -101,22 +85,6 @@ export function LayoutOptimizerPanel({
         <CardContent className="space-y-4">
           {/* Quick Settings */}
           <div className="flex flex-wrap items-center gap-6">
-            <div className="flex items-center gap-2">
-              <Switch 
-                id="rush-job"
-                checked={rushJob}
-                onCheckedChange={setRushJob}
-              />
-              <Label htmlFor="rush-job">Rush Job</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch 
-                id="prefer-ganging"
-                checked={preferGanging}
-                onCheckedChange={setPreferGanging}
-              />
-              <Label htmlFor="prefer-ganging">Prefer Ganging</Label>
-            </div>
             <Button
               variant="ghost"
               size="sm"
@@ -192,32 +160,21 @@ export function LayoutOptimizerPanel({
             </>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex gap-3">
-            <Button 
-              onClick={handleGenerate}
-              disabled={!canGenerate || isGenerating}
-            >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4 mr-2" />
-              )}
-              Generate Options
-            </Button>
-            <Button 
-              variant="outline"
-              onClick={handleFetchAI}
-              disabled={!canGenerate || isLoadingAI}
-            >
-              {isLoadingAI ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Sparkles className="h-4 w-4 mr-2" />
-              )}
-              Get AI Suggestion
-            </Button>
-          </div>
+          {/* Single Generate Button — fires algorithm + AI in parallel */}
+          <Button 
+            onClick={handleGenerate}
+            disabled={!canGenerate || isGenerating}
+            className="w-full"
+          >
+            {isGenerating ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : isLoadingAI ? (
+              <Sparkles className="h-4 w-4 mr-2 animate-pulse" />
+            ) : (
+              <Play className="h-4 w-4 mr-2" />
+            )}
+            {isGenerating ? 'Generating...' : isLoadingAI ? 'AI Computing Layout...' : 'Generate Layout Options'}
+          </Button>
 
           {!canGenerate && (
             <p className="text-sm text-muted-foreground">
@@ -226,11 +183,6 @@ export function LayoutOptimizerPanel({
           )}
         </CardContent>
       </Card>
-
-      {/* AI Suggestion */}
-      {aiSuggestion && (
-        <AISuggestionCard suggestion={aiSuggestion} />
-      )}
 
       {/* Layout Options */}
       {options.length > 0 && (
@@ -242,7 +194,7 @@ export function LayoutOptimizerPanel({
                 key={option.id}
                 option={option}
                 isSelected={selectedOption?.id === option.id}
-                isRecommended={option.id === recommendedOptionId}
+                isRecommended={option.id === 'ai-computed'}
                 onSelect={handleSelectOption}
               />
             ))}

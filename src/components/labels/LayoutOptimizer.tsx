@@ -79,6 +79,7 @@ export function LayoutOptimizer({
     applyLayout,
     updateWeights,
     getProductionTime,
+    isLoadingAI,
     isSaving,
     hasSavedLayout,
     saveLayout,
@@ -351,7 +352,7 @@ export function LayoutOptimizer({
           </Alert>
         )}
 
-        {/* Generate Button */}
+        {/* Generate Button — fires algorithm + AI in parallel */}
         <Button 
           onClick={() => generateOptions()} 
           disabled={!canGenerate || isGenerating}
@@ -362,6 +363,11 @@ export function LayoutOptimizer({
             <>
               <Zap className="h-4 w-4 mr-2 animate-pulse" />
               Generating Options...
+            </>
+          ) : isLoadingAI ? (
+            <>
+              <Sparkles className="h-4 w-4 mr-2 animate-pulse" />
+              AI Computing Layout...
             </>
           ) : (
             <>
