@@ -113,9 +113,10 @@ export function RunLayoutDiagram({
   const framesToShow = compact ? 1 : Math.min(3, Math.max(1, frames || 1));
   
   // Show interactive controls even in compact mode when callbacks are provided
+  const ROLL_TOLERANCE = 50;
   const showControls = qtyPerRoll && qtyPerRoll > 0;
   const showAdjuster = showControls && needsRewinding && onQuantityOverride && effectiveActualPerSlot;
-  const showSplitter = showControls && effectiveActualPerSlot && effectiveActualPerSlot > qtyPerRoll && onRollSplitChange;
+  const showSplitter = showControls && effectiveActualPerSlot && effectiveActualPerSlot > (qtyPerRoll + ROLL_TOLERANCE) && onRollSplitChange;
 
   return (
     <Card className={cn("overflow-hidden", compact && "border-0 shadow-none")}>
