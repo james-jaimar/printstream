@@ -10,6 +10,8 @@ import { Scissors, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { RollSplitOption } from '@/types/labels';
 
+const ROLL_TOLERANCE = 50;
+
 interface RollSplitSelectorProps {
   runNumber: number;
   actualPerSlot: number;
@@ -52,10 +54,9 @@ export function RollSplitSelector({
     const totalLabels = actualPerSlot;
     if (totalLabels <= qtyPerRoll) return [];
 
-    const rollCount = Math.ceil(totalLabels / qtyPerRoll);
     const options: { strategy: RollSplitOption['strategy']; label: string; rolls: RollSplitOption['rolls'] }[] = [];
 
-    // Fill first: 500 + 360
+    // Fill first: 500 + 508 (merge tiny remainder into previous roll)
     const fillFirstRolls: RollSplitOption['rolls'] = [];
     let remaining = totalLabels;
     let rollNum = 1;
@@ -64,20 +65,29 @@ export function RollSplitSelector({
       fillFirstRolls.push({ roll_number: rollNum++, label_count: count });
       remaining -= count;
     }
+    // Merge tiny last roll (<=ROLL_TOLERANCE) into the previous one
+    if (fillFirstRolls.length >= 2) {
+      const last = fillFirstRolls[fillFirstRolls.length - 1];
+      if (last.label_count <= ROLL_TOLERANCE) {
+        fillFirstRolls[fillFirstRolls.length - 2].label_count += last.label_count;
+        fillFirstRolls.pop();
+      }
+    }
     options.push({
       strategy: 'fill_first',
       label: `Fill first: ${formatRollLabel(fillFirstRolls)}`,
       rolls: fillFirstRolls,
     });
 
-    // Even split: 430 + 430
-    const evenCount = Math.floor(totalLabels / rollCount);
-    const remainder = totalLabels - evenCount * rollCount;
+    // Even split using corrected roll count
+    const effectiveRollCount = fillFirstRolls.length;
+    const evenCount = Math.floor(totalLabels / effectiveRollCount);
+    const evenRemainder = totalLabels - evenCount * effectiveRollCount;
     const evenRolls: RollSplitOption['rolls'] = [];
-    for (let i = 0; i < rollCount; i++) {
+    for (let i = 0; i < effectiveRollCount; i++) {
       evenRolls.push({
         roll_number: i + 1,
-        label_count: evenCount + (i < remainder ? 1 : 0),
+        label_count: evenCount + (i < evenRemainder ? 1 : 0),
       });
     }
     // Only show even if different from fill_first
@@ -107,15 +117,12 @@ export function RollSplitSelector({
       </div>
       
       <div className="space-y-1.5">
-        {splitOptions.map((option) => {
-          const manyRolls = option.rolls.length > MAX_BADGES;
-          return (
+        {splitOptions.map((option) => (
             <button
               key={option.strategy}
               onClick={() => onSplitChange(runNumber, { strategy: option.strategy, rolls: option.rolls })}
               className={cn(
-                "w-full p-2 rounded text-xs transition-colors text-left",
-                manyRolls ? "space-y-1" : "flex items-center gap-2",
+                "w-full p-2 rounded text-xs transition-colors text-left space-y-1",
                 selectedStrategy === option.strategy
                   ? "bg-primary/10 border border-primary/30 text-foreground"
                   : "bg-background border border-border hover:border-primary/30"
@@ -132,8 +139,8 @@ export function RollSplitSelector({
                   {option.label}
                 </span>
               </div>
-              <div className={cn("flex gap-1 flex-wrap", manyRolls && "ml-5 mt-1")}>
-                {option.rolls.slice(0, MAX_BADGES).map((roll) => (
+              <div className="flex gap-1 flex-wrap ml-5">
+                {option.rolls.map((roll) => (
                   <Badge
                     key={roll.roll_number}
                     variant="secondary"
@@ -142,15 +149,9 @@ export function RollSplitSelector({
                     R{roll.roll_number}: {roll.label_count.toLocaleString()}
                   </Badge>
                 ))}
-                {option.rolls.length > MAX_BADGES && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                    +{option.rolls.length - MAX_BADGES} more
-                  </Badge>
-                )}
               </div>
             </button>
-          );
-        })}
+          ))}
         
         {/* Custom option */}
         <button
