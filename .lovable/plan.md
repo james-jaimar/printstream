@@ -1,76 +1,127 @@
 
 
-# Add Max Overrun Slider Control
+# Fix Layout Optimizer: Overrun-Aware Clustering and Actual Output Validation
 
-## Problem
+## Root Cause
 
-The current overrun protection uses a percentage-based threshold (`MAX_OVERRUN_PERCENT = 0.20`), which fails for large quantities. For example, 20% of 4,000 = 800 labels of overrun -- far too wasteful. The user wants an **absolute label count** cap on overrun, controllable via a slider.
+Three bugs work together to produce excessive overruns:
+
+1. **`findQuantityLevels` ignores `maxOverrun`** -- it clusters quantities within a 10% ratio. With large numbers, 10% can be hundreds of labels (e.g., 10% of 4000 = 400), far exceeding the user's slider setting of 150.
+
+2. **Overrun check compares slot-to-slot, not actual-output-to-requested** -- the check `maxSlotQty - minSlotQty > maxOverrun` only catches when SLOTS differ. It misses the case where ALL slots have the same requested qty but actual output (frames x labels-per-frame) exceeds the request. For example, 2 items round-robined across 5 slots creates 3+2 slot distribution -- even with identical quantities, the uneven distribution means the 3-slot item gets ceil(3300/3)=1100/slot while the 2-slot item gets ceil(3300/2)=1650/slot. The run prints at 1650 frames, so the 1100-slots get 550 overrun.
+
+3. **No check on whether items divide evenly into slots** -- ganging 2 items across 5 slots always creates waste because 5 is not divisible by 2. The optimizer should prefer ganging combinations where items divide evenly (or nearly evenly) into the slot count.
 
 ## Solution
 
-Replace the percentage-based overrun check with an **absolute max overrun** value (default 250 labels). Add a slider (range 50-1000) to the Layout Optimizer UI so the account exec can tune how much waste the optimizer is allowed to create per slot. When the slider changes and the user re-generates, the optimizer respects the new cap.
+### 1. Use `maxOverrun` in `findQuantityLevels`
 
-## Changes
+**File: `src/utils/labels/layoutOptimizer.ts`** (lines 297-314)
 
-### 1. Replace percentage constant with absolute cap
+Change the function signature to accept `maxOverrun` and replace the ratio check:
+
+```
+// BEFORE: Math.max(l, qty) / Math.min(l, qty) <= 1.10
+// AFTER:  Math.abs(l - qty) <= maxOverrun
+```
+
+Pass `maxOverrun` from `createOptimizedRuns` and leftover handling.
+
+### 2. Add actual-output validation after every run
 
 **File: `src/utils/labels/layoutOptimizer.ts`**
 
-- Remove `MAX_OVERRUN_PERCENT = 0.20`
-- Add `DEFAULT_MAX_OVERRUN = 250` as the default absolute cap
-- Add `maxOverrun?: number` to the `LayoutInput` interface
-- Thread `maxOverrun` through to `createOptimizedRuns`, `createGangedRuns`, `balanceSlotQuantities`, and `annotateRunsWithRollInfo`
-- Change the overrun check in `createOptimizedRuns` (line ~355) from:
-  ```
-  (maxSlotQty - minSlotQty) / minSlotQty > MAX_OVERRUN_PERCENT
-  ```
-  to:
-  ```
-  (maxSlotQty - minSlotQty) > maxOverrun
-  ```
-- Change the per-slot warning in `annotateRunsWithRollInfo` (line ~520) from percentage to absolute:
-  ```
-  if (overrun > maxOverrun) { ... }
-  ```
-- Similarly update `balanceSlotQuantities` ratio check (line ~190) from `maxQty / minQty <= 1.10` to `(maxQty - minQty) <= maxOverrun`
+Add a `validateRunOverrun` helper that:
+1. Calculates `actualPerSlot = frames * config.labelsPerSlotPerFrame`
+2. For each slot, checks if `actualPerSlot - slot.quantity_in_slot > maxOverrun`
+3. Returns false if ANY slot exceeds the cap
 
-### 2. Thread maxOverrun through the hook
+Call this after every run creation in `createOptimizedRuns` (lines 364-371). If validation fails, fall back to `balanceSlotQuantities` to split the run. This catches the round-robin imbalance problem.
 
-**File: `src/hooks/labels/useLayoutOptimizer.ts`**
+### 3. Fix ganged strategy to handle more items than slots
 
-- Add `maxOverrun` to the hook's state (default `DEFAULT_MAX_OVERRUN`)
-- Pass it into `generateOptions()` call as part of `LayoutInput`
-- Expose `maxOverrun` and `setMaxOverrun` from the hook return
+**File: `src/utils/labels/layoutOptimizer.ts`** (lines 241-253)
 
-### 3. Add slider to LayoutOptimizer UI
+Currently `items.slice(0, config.totalSlots)` silently drops items when there are more items than slots. Fix: sort items by quantity similarity, then create multiple ganged runs of up to `totalSlots` items each, grouped by closest quantities.
 
-**File: `src/components/labels/LayoutOptimizer.tsx`**
+### 4. Update AI edge function prompt with maxOverrun constraint
 
-- Add a "Max Overrun per Slot" slider (range 50-1000, step 50, default 250) in the controls area, visible without needing "Advanced" toggle
-- Show the current value as a label: e.g., "Max overrun: 250 labels/slot"
-- When the slider changes, update `maxOverrun` in the hook
-- The user then clicks "Generate Options" to regenerate with the new constraint
-- Brief helper text: "Controls how many extra labels the optimizer may produce per slot beyond what's ordered"
+**File: `supabase/functions/label-optimize/index.ts`**
 
-### 4. Also add to LayoutOptimizerPanel
+Accept `maxOverrun` in the request body and add it to the system prompt:
 
-**File: `src/components/labels/optimizer/LayoutOptimizerPanel.tsx`**
+```
+OVERRUN CONSTRAINT:
+- Maximum acceptable overrun per slot: ${maxOverrun} labels
+- Never suggest ganging items whose quantities differ by more than ${maxOverrun}
+- If items cannot be ganged within this limit, suggest separate runs
+```
 
-- Add the same slider in the quick settings area so it's available in both UIs
+Also accept `maxOverrun` in the `constraints` interface so the frontend can pass the slider value to the AI.
 
-## Technical Detail
+## Expected Outcome
 
-The key insight is switching from **relative** (percentage) to **absolute** (label count) overrun control. This means:
+With items Black=5000, BLUE=4300, GREEN=4000, BROWN=3300, YELLOW=3300, PEACH=2300 and maxOverrun=150:
 
-- An item requesting 100 with max overrun 250 could still get up to 350 (250% overrun) -- but that's fine because 250 extra labels is physically cheap
-- An item requesting 4,000 with max overrun 250 can only get up to 4,250 -- which prevents the current 2,355 overrun disaster
-- The slider lets the account exec tighten (50) or loosen (1,000) based on the job
+`findQuantityLevels(maxOverrun=150)` produces:
+- Level 5000 (only Black -- 4300 is 700 away)
+- Level 4300 (only BLUE -- 4000 is 300 away)
+- Level 4000 (only GREEN)
+- Level 3300 (BROWN + YELLOW -- identical)
+- Level 2300 (only PEACH)
+
+For each level, `createOptimizedRuns` assigns items to slots and validates actual output. For BROWN+YELLOW at level 3300:
+- `fillAllSlots` gives B,Y,B,Y,B (1100 and 1650 per slot)
+- `validateRunOverrun`: actual = frames for 1650 = ~1650/slot, BROWN slots want 1100, overrun = 550 > 150 -- FAILS
+- Falls back to `balanceSlotQuantities` which caps at 1100 and creates remainder runs
+- OR better: since both have identical qty (3300), put each on its own individual run filling all 5 slots with 660/slot -- zero overrun
+
+The validator ensures no layout ever exceeds the user's maxOverrun slider, regardless of how items distribute across slots.
+
+## Technical Details
+
+### New function: `validateRunOverrun`
+
+```text
+function validateRunOverrun(
+  assignments: SlotAssignment[],
+  config: SlotConfig,
+  maxOverrun: number
+): boolean {
+  const maxSlotQty = Math.max(...assignments.map(a => a.quantity_in_slot));
+  const frames = calculateFramesForSlot(maxSlotQty, config);
+  const actualPerSlot = frames * config.labelsPerSlotPerFrame;
+
+  for (const a of assignments) {
+    if (actualPerSlot - a.quantity_in_slot > maxOverrun) {
+      return false; // This slot has too much waste
+    }
+  }
+  return true;
+}
+```
+
+### Updated `findQuantityLevels` signature
+
+```text
+function findQuantityLevels(quantities: number[], maxOverrun: number): number[]
+```
+
+### Updated `createOptimizedRuns` flow (lines 352-372)
+
+After building assignments for a run:
+1. First check slot-to-slot: `maxSlotQty - minSlotQty > maxOverrun` (existing)
+2. Then check actual output: `validateRunOverrun(assignments, config, maxOverrun)` (new)
+3. If either fails, split via `balanceSlotQuantities`
+
+### Edge function changes
+
+Add `maxOverrun` to the `OptimizeRequest.constraints` interface and include it in the system prompt so AI text suggestions respect the same limit the optimizer uses.
 
 ## File Summary
 
 | File | Change |
 |------|--------|
-| `src/utils/labels/layoutOptimizer.ts` | Replace `MAX_OVERRUN_PERCENT` with `DEFAULT_MAX_OVERRUN = 250`; switch all overrun checks to absolute; add `maxOverrun` to `LayoutInput` and thread through |
-| `src/hooks/labels/useLayoutOptimizer.ts` | Add `maxOverrun` state; pass to `generateOptions`; expose in return |
-| `src/components/labels/LayoutOptimizer.tsx` | Add "Max Overrun" slider (50-1000) in controls |
-| `src/components/labels/optimizer/LayoutOptimizerPanel.tsx` | Add matching slider in quick settings |
+| `src/utils/labels/layoutOptimizer.ts` | Add `validateRunOverrun`; change `findQuantityLevels` to use absolute `maxOverrun`; validate actual output after every run; fix ganged strategy for > totalSlots items |
+| `supabase/functions/label-optimize/index.ts` | Accept `maxOverrun` in constraints; add overrun limit to AI system prompt |
+
