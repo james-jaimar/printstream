@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2, Crop, FileCheck, ImageOff } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { FileText, Trash2, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp, Loader2, Crop, FileCheck, ImageOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,9 @@ interface LabelItemCardProps {
   thumbnailUrl?: string;
   onPrepareArtwork?: (action: 'crop' | 'use_proof_as_print' | 'crop_to_bleed') => void;
   isProcessing?: boolean;
+  isFlagged?: boolean;
+  artworkIssue?: string;
+  onReplaceArtwork?: (file: File) => void;
 }
 
 const statusConfig: Record<ValidationStatus, {
@@ -67,8 +70,12 @@ export function LabelItemCard({
   thumbnailUrl: thumbnailPath,
   onPrepareArtwork,
   isProcessing = false,
+  isFlagged = false,
+  artworkIssue,
+  onReplaceArtwork,
 }: LabelItemCardProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const [editName, setEditName] = useState(item.name);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [localQuantity, setLocalQuantity] = useState(item.quantity);
@@ -105,7 +112,11 @@ export function LabelItemCard({
   };
 
   return (
-    <Card className={cn("overflow-hidden", isPlaceholder && "border-2 border-dashed border-muted-foreground/30")}>
+    <Card className={cn(
+      "overflow-hidden",
+      isPlaceholder && "border-2 border-dashed border-muted-foreground/30",
+      isFlagged && "border-2 border-destructive/50 ring-1 ring-destructive/20"
+    )}>
       <CardContent className="p-0">
         {/* Thumbnail / Preview */}
         <div className={cn(
@@ -151,16 +162,51 @@ export function LabelItemCard({
             </Badge>
           )}
 
-          {/* Delete Button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute top-2 left-2 h-7 w-7 bg-background/80 hover:bg-destructive hover:text-destructive-foreground"
-            onClick={onDelete}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {/* Action Buttons (top-left) */}
+          <div className="absolute top-2 left-2 flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 bg-background/80 hover:bg-destructive hover:text-destructive-foreground"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            {isFlagged && onReplaceArtwork && (
+              <>
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) onReplaceArtwork(file);
+                    if (replaceInputRef.current) replaceInputRef.current.value = '';
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 bg-background/80 hover:bg-primary hover:text-primary-foreground"
+                  onClick={() => replaceInputRef.current?.click()}
+                  title="Replace artwork"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Artwork Issue Banner */}
+        {isFlagged && artworkIssue && (
+          <div className="px-3 py-1.5 bg-destructive/10 border-b border-destructive/20">
+            <p className="text-xs text-destructive font-medium truncate" title={artworkIssue}>
+              {artworkIssue}
+            </p>
+          </div>
+        )}
 
         {/* Content */}
         <div className="p-3 space-y-3">

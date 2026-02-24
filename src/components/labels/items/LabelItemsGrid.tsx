@@ -21,6 +21,7 @@ interface LabelItemsGridProps {
   viewMode?: 'proof' | 'print';
   itemAnalyses?: Record<string, ItemAnalysis>;
   onLinkPrintToProof?: (printItemId: string, proofItemId: string) => void;
+  onReplaceArtwork?: (itemId: string, file: File) => void;
 }
 
 // Map preflight status to validation status
@@ -80,7 +81,7 @@ function getValidationIssues(item: LabelItem, analysis?: ItemAnalysis): string[]
   return [];
 }
 
-export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyses = {}, onLinkPrintToProof }: LabelItemsGridProps) {
+export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyses = {}, onLinkPrintToProof, onReplaceArtwork }: LabelItemsGridProps) {
   const updateItem = useUpdateLabelItem();
   const deleteItem = useDeleteLabelItem();
 
@@ -158,6 +159,8 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
         
         const thumbnailUrl = analysis?.thumbnail_url || item.proof_thumbnail_url || item.artwork_thumbnail_url || undefined;
         
+        const isFlagged = item.proofing_status === 'client_needs_upload' || !!item.artwork_issue;
+        
         return (
           <LabelItemCard
             key={item.id}
@@ -168,6 +171,9 @@ export function LabelItemsGrid({ items, orderId, viewMode = 'proof', itemAnalyse
             validationStatus={validationStatus}
             validationIssues={validationIssues}
             thumbnailUrl={thumbnailUrl}
+            isFlagged={isFlagged}
+            artworkIssue={item.artwork_issue || undefined}
+            onReplaceArtwork={onReplaceArtwork ? (file) => onReplaceArtwork(item.id, file) : undefined}
           />
         );
       })}

@@ -445,6 +445,73 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     }
   }, [order, createItem, updateItem, refetch]);
 
+  // Replace artwork handler for flagged items
+  const handleReplaceArtwork = useCallback(async (itemId: string, file: File) => {
+    if (!order) return;
+    const item = order.items?.find(i => i.id === itemId);
+    if (!item) return;
+
+    try {
+      toast.info('Uploading replacement artwork...');
+
+      // 1. Upload to storage
+      const storagePath = `label-artwork/orders/${order.id}/proof/${itemId}-v${(order.proof_version ?? 0) + 1}.pdf`;
+      const { error: uploadError } = await supabase.storage
+        .from('label-files')
+        .upload(storagePath, file, { contentType: 'application/pdf', upsert: true });
+      
+      if (uploadError) throw uploadError;
+
+      // 2. Generate thumbnail
+      let thumbnailPath: string | undefined;
+      try {
+        const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
+        const { data: signedData } = await supabase.storage
+          .from('label-files')
+          .createSignedUrl(storagePath, 300);
+        if (signedData?.signedUrl) {
+          const dataUrl = await generatePdfThumbnailFromUrl(signedData.signedUrl, 300);
+          const blob = dataUrlToBlob(dataUrl);
+          const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${itemId}.png`;
+          const { error: thumbErr } = await supabase.storage
+            .from('label-files')
+            .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
+          if (!thumbErr) thumbnailPath = thumbPath;
+        }
+      } catch (thumbErr) {
+        console.warn('Thumbnail generation failed for replacement:', thumbErr);
+      }
+
+      // 3. Update item record
+      updateItem.mutate({
+        id: itemId,
+        updates: {
+          proof_pdf_url: storagePath,
+          artwork_pdf_url: storagePath,
+          ...(thumbnailPath ? { proof_thumbnail_url: thumbnailPath, artwork_thumbnail_url: thumbnailPath } : {}),
+          proofing_status: 'ready_for_proof',
+          artwork_issue: null,
+          preflight_status: 'pending',
+        } as any,
+      });
+
+      // 4. Run VPS preflight async
+      const { data: signedForVps } = await supabase.storage
+        .from('label-files')
+        .createSignedUrl(storagePath, 300);
+      if (signedForVps?.signedUrl) {
+        getPageBoxes(signedForVps.signedUrl, itemId).catch(() => {});
+        runPreflight({ pdf_url: signedForVps.signedUrl, item_id: itemId }).catch(() => {});
+      }
+
+      toast.success(`Replaced artwork for "${item.name}"`);
+      refetch();
+    } catch (err) {
+      console.error('Replace artwork failed:', err);
+      toast.error('Failed to replace artwork');
+    }
+  }, [order, updateItem, refetch]);
+
   if (!open) return null;
 
   return (
@@ -694,6 +761,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                         orderId={order.id}
                         viewMode={artworkTab}
                         itemAnalyses={itemAnalyses as Record<string, { validation?: { status: string; issues: string[] }; thumbnail_url?: string }>}
+                        onReplaceArtwork={handleReplaceArtwork}
                         onLinkPrintToProof={(printItemId, proofItemId) => {
                           const printItem = order.items?.find(i => i.id === printItemId);
                           if (!printItem) return;
