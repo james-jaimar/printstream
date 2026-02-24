@@ -1,68 +1,54 @@
 
 
-# Add "Replace Artwork" to Flagged Item Cards
+# Fix: Add Barcode Scanning to Finishing Dashboard
 
 ## Problem
-When a client requests changes on specific items, the admin sees the banner listing which items need updating, but:
-1. The individual item cards show no visual indicator that they're flagged
-2. There's no way to replace artwork on a specific card -- only delete and re-upload
 
-## Changes
+The **FinishingKanbanDashboard** (used by saddle stitch, binding, handwork operators) is missing barcode scanning entirely. Other dashboards (DTP, Scoring, Packaging) all have:
+- A `GlobalBarcodeListener` component
+- `scanCompleted` state tracking
+- A `handleBarcodeDetected` function with flexible WO matching
 
-### 1. LabelItemCard -- Add replace button and flagged state (`src/components/labels/items/LabelItemCard.tsx`)
+The Finishing dashboard has none of these, so when an operator scans barcode `429593` (for job `D429593`), nothing happens.
 
-- Add new props: `onReplaceArtwork?: (file: File) => void`, `artworkIssue?: string`, `isFlagged?: boolean`
-- When `isFlagged` is true:
-  - Show a red/orange border or highlight on the card
-  - Display the `artworkIssue` text below the thumbnail (same style as the portal)
-  - Show a "Replace" button (file input trigger) alongside the delete button
-- The Replace button opens a hidden file input (`accept=".pdf"`), and on selection calls `onReplaceArtwork(file)`
-- The replace button appears in the top-left area of the thumbnail (next to trash), using a `RefreshCw` or `Upload` icon
+## The Scan Itself
 
-### 2. LabelItemsGrid -- Wire replace handler (`src/components/labels/items/LabelItemsGrid.tsx`)
+The barcode value `429593` is correct -- it's the numeric portion of WO `D429593`. The flexible matching logic (`woMatchesBarcode`) used in other dashboards already handles stripping the `D` prefix. The issue is purely that this dashboard never receives the scan event.
 
-- Add `onReplaceArtwork?: (itemId: string, file: File) => void` prop
-- Pass `isFlagged`, `artworkIssue`, and `onReplaceArtwork` down to each `LabelItemCard`
-- An item is flagged when `item.proofing_status === 'client_needs_upload'` or `item.artwork_issue` is set
+## Changes Required
 
-### 3. LabelOrderModal -- Implement replace logic (`src/components/labels/order/LabelOrderModal.tsx`)
+### File: `src/components/tracker/factory/FinishingKanbanDashboard.tsx`
 
-- Add a `handleReplaceArtwork` callback that:
-  1. Uploads the new PDF to storage at the item's existing path (upsert)
-  2. Generates a new thumbnail
-  3. Updates the item's `proof_pdf_url`, `proof_thumbnail_url` (or `artwork_*` fields)
-  4. Resets `proofing_status` to `ready_for_proof` and clears `artwork_issue`
-  5. Runs VPS preflight on the new file
-- Pass `onReplaceArtwork` to `LabelItemsGrid`
+1. **Add `scanCompleted` state** -- `useState(false)`, reset on modal open/close
+2. **Add `GlobalBarcodeListener`** -- import and render it in the JSX
+3. **Add `handleBarcodeDetected` handler** with the same flexible matching logic used in other dashboards:
+   - If modal is open: verify barcode matches selected job, set `scanCompleted = true` on match
+   - If modal is closed: search all jobs for a match, auto-open that job's modal with `scanCompleted = true`
+4. **Pass `scanCompleted` to `EnhancedJobDetailsModal`** -- currently missing this prop, so the modal always shows "Scan Required"
 
-## Technical Details
+### Technical Details
 
-### Replace upload flow
+The implementation follows the exact same pattern already established in:
+- `DtpKanbanDashboard.tsx` (lines 250-273)
+- `ScoringKanbanDashboard.tsx`
+- `PackagingShippingKanbanDashboard.tsx`
+- `SchedulerAwareOperatorDashboard.tsx`
+
+The matching helper:
+
 ```text
-User clicks Replace on flagged card
-  -> hidden file input opens
-  -> user selects PDF
-  -> upload to storage (same path, upsert: true)
-  -> generate thumbnail
-  -> update item record:
-       proof_pdf_url = new URL
-       proof_thumbnail_url = new thumb path
-       proofing_status = 'ready_for_proof'
-       artwork_issue = null
-  -> run VPS preflight async
-  -> toast confirmation
+woMatchesBarcode(woNo, barcodeData):
+  - Normalize both strings (uppercase, strip non-alphanumeric)
+  - Strip leading letters to get numeric portion
+  - Match if either exact match or numeric portions match
+  - e.g. "429593" matches "D429593"
 ```
 
-### Flagged card visual
-- Card gets `border-destructive/50` border class
-- Artwork issue text shown in a small red banner below the thumbnail
-- Replace button uses `RefreshCw` icon, positioned in the top-left alongside the delete button
+No database changes needed. Single file edit.
 
 ## File Summary
 
 | File | Change |
 |------|--------|
-| `src/components/labels/items/LabelItemCard.tsx` | Add `onReplaceArtwork`, `artworkIssue`, `isFlagged` props; show flagged state and replace button |
-| `src/components/labels/items/LabelItemsGrid.tsx` | Pass flagged state and replace handler to cards |
-| `src/components/labels/order/LabelOrderModal.tsx` | Implement `handleReplaceArtwork` with upload, thumbnail gen, and status reset |
+| `src/components/tracker/factory/FinishingKanbanDashboard.tsx` | Add GlobalBarcodeListener, scanCompleted state, barcode handler, pass scanCompleted to modal |
 
