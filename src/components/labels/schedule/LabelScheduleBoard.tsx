@@ -192,20 +192,33 @@ export function LabelScheduleBoard() {
       if (order) {
         unscheduleOrder.mutate(order.schedule_entries.map(e => e.id));
       }
-    } else if (!isFromUnscheduled && targetDate) {
-      const order = scheduledOrders.find(o => o.schedule_id === activeIdStr);
-      if (order && order.scheduled_date !== targetDate) {
+    } else if (!isFromUnscheduled) {
+      const activeOrder = scheduledOrders.find(o => o.schedule_id === activeIdStr);
+      if (!activeOrder) return;
+
+      // If no targetDate from day/material droppable, check if dropped on another order card
+      if (!targetDate) {
+        const overOrder = scheduledOrders.find(o => o.schedule_id === overIdStr);
+        if (overOrder) {
+          targetDate = overOrder.scheduled_date;
+        }
+      }
+
+      if (!targetDate) return;
+
+      if (activeOrder.scheduled_date !== targetDate) {
+        // Move to different day
         const dayOrders = ordersByDate[targetDate] || [];
         rescheduleOrder.mutate({
-          schedule_entry_ids: order.schedule_entries.map(e => e.id),
+          schedule_entry_ids: activeOrder.schedule_entries.map(e => e.id),
           newDate: targetDate,
           newBaseSortOrder: (dayOrders.length + 1),
         });
-      } else if (order && order.scheduled_date === targetDate) {
-        // Reorder within same day — check if dropped on another order
+      } else {
+        // Reorder within same day
         const overOrder = scheduledOrders.find(o => o.schedule_id === overIdStr);
-        if (overOrder && overOrder.scheduled_date === order.scheduled_date) {
-          const dayOrders = ordersByDate[order.scheduled_date] || [];
+        if (overOrder && overOrder.scheduled_date === activeOrder.scheduled_date) {
+          const dayOrders = ordersByDate[activeOrder.scheduled_date] || [];
           const oldIndex = dayOrders.findIndex(o => o.schedule_id === activeIdStr);
           const newIndex = dayOrders.findIndex(o => o.schedule_id === overIdStr);
 
