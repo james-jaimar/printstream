@@ -44,6 +44,7 @@ const STATUS_OPTIONS: { value: LabelOrderStatus; label: string }[] = [
   { value: 'pending_approval', label: 'Pending Approval' },
   { value: 'approved', label: 'Approved' },
   { value: 'in_production', label: 'In Production' },
+  { value: 'changes_requested', label: 'Changes Requested' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
@@ -51,6 +52,7 @@ const STATUS_OPTIONS: { value: LabelOrderStatus; label: string }[] = [
 const STATUS_COLORS: Record<LabelOrderStatus, string> = {
   quote: 'bg-muted text-muted-foreground border-border',
   pending_approval: 'bg-amber-500/10 text-amber-700 border-amber-300',
+  changes_requested: 'bg-orange-500/10 text-orange-700 border-orange-300',
   approved: 'bg-emerald-500/10 text-emerald-700 border-emerald-300',
   in_production: 'bg-blue-500/10 text-blue-700 border-blue-300',
   completed: 'bg-primary/10 text-primary border-primary/30',

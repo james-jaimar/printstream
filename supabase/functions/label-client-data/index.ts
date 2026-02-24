@@ -149,7 +149,7 @@ Deno.serve(async (req) => {
       (path === "/orders" || path === "" || path === "/")
     ) {
       // Only show orders that are client-visible (not internal quotes/drafts)
-      const clientVisibleStatuses = ['pending_approval', 'approved', 'in_production', 'completed'];
+      const clientVisibleStatuses = ['pending_approval', 'changes_requested', 'approved', 'in_production', 'completed'];
       const { data, error } = await supabase
         .from("label_orders")
         .select(
@@ -403,6 +403,18 @@ Deno.serve(async (req) => {
         .in("id", item_ids);
 
       if (itemErr) throw itemErr;
+
+      // If client rejected items, set order status to changes_requested
+      if (action === "rejected") {
+        const { error: orderStatusErr } = await supabase
+          .from("label_orders")
+          .update({ status: "changes_requested" })
+          .eq("id", order_id);
+
+        if (orderStatusErr) {
+          console.error("Failed to update order status to changes_requested:", orderStatusErr);
+        }
+      }
 
       // Insert approval record
       const { error: approvalErr } = await supabase

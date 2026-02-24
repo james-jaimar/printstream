@@ -114,11 +114,13 @@ export function useSendProofNotification() {
       if (notifError) throw notifError;
 
       // Update item statuses to awaiting_client
+      // When resending after changes_requested, also reset client_needs_upload items
+      const statusesToUpdate = ['ready_for_proof', 'client_needs_upload'];
       const { error: itemError } = await supabase
         .from('label_items')
-        .update({ proofing_status: 'awaiting_client' })
+        .update({ proofing_status: 'awaiting_client', artwork_issue: null })
         .eq('order_id', orderId)
-        .eq('proofing_status', 'ready_for_proof');
+        .in('proofing_status', statusesToUpdate);
 
       if (itemError) {
         console.warn('Failed to update item statuses:', itemError);

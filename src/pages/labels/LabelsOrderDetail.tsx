@@ -35,6 +35,7 @@ const statusConfig: Record<LabelOrderStatus, {
 }> = {
   quote: { label: 'Quote', variant: 'secondary', icon: FileText },
   pending_approval: { label: 'Pending Approval', variant: 'outline', icon: Clock },
+  changes_requested: { label: 'Changes Requested', variant: 'destructive', icon: AlertCircle },
   approved: { label: 'Approved', variant: 'default', icon: CheckCircle2 },
   in_production: { label: 'In Production', variant: 'default', icon: Settings },
   completed: { label: 'Completed', variant: 'default', icon: CheckCircle2 },
