@@ -87,7 +87,7 @@ export default function LabelsLayout() {
               {/* Teal accent bar */}
               <div className="h-[3px] w-full bg-gradient-to-r from-[#00B8D4] to-[#0097A7]" />
               
-              {/* Brand + collapse toggle */}
+              {/* Brand */}
               <div className={cn('flex items-center gap-2 pt-5 pb-4', collapsed ? 'px-2 justify-center' : 'px-4')}>
                 {!collapsed && (
                   <>
@@ -99,13 +99,6 @@ export default function LabelsLayout() {
                     </div>
                   </>
                 )}
-                <button
-                  onClick={() => setCollapsed(c => !c)}
-                  className="p-1 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-                  title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                >
-                  {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-                </button>
               </div>
 
               {/* Navigation */}
@@ -119,6 +112,22 @@ export default function LabelsLayout() {
                 <nav className="space-y-0.5">
                   {adminItems.map(renderNavItem)}
                 </nav>
+
+                <div className="my-4 border-t border-slate-200/60" />
+
+                {/* Collapse toggle */}
+                <button
+                  onClick={() => setCollapsed(c => !c)}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg text-sm font-medium transition-colors w-full',
+                    collapsed ? 'justify-center px-2 py-2.5' : 'px-4 py-2.5',
+                    'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+                  )}
+                  title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                >
+                  {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                  {!collapsed && 'Collapse Menu'}
+                </button>
               </ScrollArea>
 
               {/* Footer */}

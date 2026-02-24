@@ -52,6 +52,7 @@ export interface ScheduleRunDetails {
     order_number: string;
     customer_name: string;
     substrate_id: string | null;
+    reference: string | null;
     substrate?: {
       id: string;
       substrate_type: string;
@@ -73,6 +74,7 @@ export interface ScheduledOrderGroup {
   order_number: string;
   customer_name: string;
   substrate_id: string | null;
+  reference: string | null;
   scheduled_date: string;
   schedule_id: string;
   sort_order: number;
@@ -97,6 +99,7 @@ export interface UnscheduledOrderGroup {
   order_number: string;
   customer_name: string;
   substrate_id: string | null;
+  reference: string | null;
   runs: ScheduleRunDetails[];
   total_meters: number;
   total_frames: number;
@@ -153,6 +156,7 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
               order_number,
               customer_name,
               substrate_id,
+              reference,
               substrate:label_stock(
                 id,
                 substrate_type,
@@ -198,6 +202,7 @@ export function useLabelSchedule(startDate?: Date, endDate?: Date) {
             order_number: order?.order_number || '',
             customer_name: order?.customer_name || '',
             substrate_id: order?.substrate_id || null,
+            reference: (order as any)?.reference || null,
             scheduled_date: entry.scheduled_date,
             schedule_id: entry.id,
             sort_order: entry.sort_order,
@@ -250,6 +255,7 @@ export function useUnscheduledRuns() {
             order_number,
             customer_name,
             substrate_id,
+            reference,
             substrate:label_stock(
               id,
               substrate_type,
@@ -291,6 +297,7 @@ export function useUnscheduledRuns() {
             order_number: order?.order_number || '',
             customer_name: order?.customer_name || '',
             substrate_id: order?.substrate_id || null,
+            reference: (order as any)?.reference || null,
             runs: [],
             ...substrateInfo,
             ...aggregateRuns([]),

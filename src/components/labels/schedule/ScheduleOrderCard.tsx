@@ -21,6 +21,7 @@ interface OrderCardData {
   substrate_type?: string | null;
   glue_type?: string | null;
   substrate_width_mm?: number | null;
+  reference?: string | null;
 }
 
 interface ScheduleOrderCardProps {
@@ -61,6 +62,26 @@ export function ScheduleOrderCard({ order, isDragging, onClick }: ScheduleOrderC
           <Package className="h-2.5 w-2.5" />
           {order.run_count}
         </span>
+      </div>
+
+      {/* Reference */}
+      {order.reference && (
+        <p className="text-[10px] text-muted-foreground truncate mb-1">Ref: {order.reference}</p>
+      )}
+
+      {/* Material info */}
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+        {order.substrate_type && (
+          <span className={cn('px-1 py-0.5 rounded font-medium', getSubstrateColor(order.substrate_type))}>
+            {order.substrate_type}
+          </span>
+        )}
+        {order.substrate_width_mm && (
+          <span>{order.substrate_width_mm}mm</span>
+        )}
+        {order.glue_type && (
+          <span className="opacity-75">{order.glue_type}</span>
+        )}
       </div>
 
       {/* Metrics */}
