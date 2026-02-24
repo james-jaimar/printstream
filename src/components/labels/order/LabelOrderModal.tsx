@@ -101,6 +101,9 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
     [order?.items]
   );
   const hasChangesRequested = changesRequestedItems.length > 0;
+  
+  // Check if all flagged items have been replaced (ready to resend)
+  const allFlaggedItemsReplaced = isChangesRequested && !hasChangesRequested;
 
   // Filter items based on active artwork tab, hiding split parents
   const filteredItems = useMemo(() => {
@@ -686,29 +689,49 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             {/* Changes Requested Banner */}
             {(hasChangesRequested || isChangesRequested) && (
               <div className="mx-4 mt-2">
-                <Alert className="border-destructive/50 bg-destructive/10">
-                  <AlertOctagon className="h-4 w-4 text-destructive" />
-                  <AlertTitle className="text-destructive">Changes Requested by Client</AlertTitle>
-                  <AlertDescription>
-                    <div className="space-y-2 mt-1">
-                      {changesRequestedItems.length > 0 && (
-                        <ul className="text-sm space-y-1">
-                          {changesRequestedItems.map(item => (
-                            <li key={item.id} className="flex items-start gap-2">
-                              <span className="font-medium">{item.name}:</span>
-                              <span className="text-muted-foreground italic">
-                                {item.artwork_issue || 'Changes requested'}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Replace the flagged artwork above, then click "Resend Proof" to send revised proofs to the client.
-                      </p>
-                    </div>
-                  </AlertDescription>
-                </Alert>
+                {allFlaggedItemsReplaced ? (
+                  <Alert className="border-emerald-500/50 bg-emerald-500/10">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    <AlertTitle className="text-emerald-700 dark:text-emerald-400">
+                      Artwork Replaced — Ready to Resend
+                    </AlertTitle>
+                    <AlertDescription className="text-emerald-600 dark:text-emerald-300 text-sm">
+                      All flagged items have been updated. Click{' '}
+                      <button
+                        type="button"
+                        onClick={() => { setActiveTab('artwork'); setSendProofDialogOpen(true); }}
+                        className="font-semibold underline underline-offset-2"
+                      >
+                        "Resend Proof v{(order?.proof_version ?? 0) + 1}"
+                      </button>{' '}
+                      to send the revised proofs to the client.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Alert className="border-destructive/50 bg-destructive/10">
+                    <AlertOctagon className="h-4 w-4 text-destructive" />
+                    <AlertTitle className="text-destructive">Changes Requested by Client</AlertTitle>
+                    <AlertDescription>
+                      <div className="space-y-2 mt-1">
+                        {changesRequestedItems.length > 0 && (
+                          <ul className="text-sm space-y-1">
+                            {changesRequestedItems.map(item => (
+                              <li key={item.id} className="flex items-start gap-2">
+                                <span className="font-medium">{item.name}:</span>
+                                <span className="text-muted-foreground italic">
+                                  {item.artwork_issue || 'Changes requested'}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          Replace the flagged artwork in the Artwork tab, then click "Resend Proof" to send revised proofs to the client.
+                        </p>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
             )}
 
