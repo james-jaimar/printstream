@@ -61,6 +61,7 @@ const statusConfig: Record<LabelOrderStatus, {
 }> = {
   quote: { label: 'Quote', variant: 'secondary', icon: FileText },
   pending_approval: { label: 'Pending Approval', variant: 'outline', icon: Clock },
+  changes_requested: { label: 'Changes Requested', variant: 'destructive', icon: AlertOctagon },
   approved: { label: 'Approved', variant: 'default', icon: CheckCircle2 },
   in_production: { label: 'In Production', variant: 'default', icon: Settings },
   completed: { label: 'Completed', variant: 'default', icon: CheckCircle2 },
@@ -89,6 +90,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
 
   // Lock-down state
   const isLocked = order?.status === 'pending_approval';
+  const isChangesRequested = order?.status === 'changes_requested';
   const proofVersion = order?.proof_version ?? 0;
   
   // Items needing revision (client requested changes)
@@ -525,13 +527,14 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                         Request Artwork
                       </Button>
                       <Button 
-                        variant="outline" 
+                        variant={isChangesRequested ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setSendProofDialogOpen(true)}
                         disabled={(order.items?.length || 0) === 0 || isLocked}
+                        className={isChangesRequested ? 'bg-[#00B8D4] hover:bg-[#0097A7] text-white' : ''}
                       >
                         <Send className="h-4 w-4 mr-1.5" />
-                        {proofVersion === 0 ? 'Send Proof' : `Send Proof v${proofVersion + 1}`}
+                        {isChangesRequested ? `Resend Proof v${proofVersion + 1}` : proofVersion === 0 ? 'Send Proof' : `Send Proof v${proofVersion + 1}`}
                       </Button>
                       <Dialog open={layoutDialogOpen} onOpenChange={setLayoutDialogOpen}>
                         <DialogTrigger asChild>
@@ -614,39 +617,28 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
             )}
 
             {/* Changes Requested Banner */}
-            {hasChangesRequested && (
+            {(hasChangesRequested || isChangesRequested) && (
               <div className="mx-4 mt-2">
                 <Alert className="border-destructive/50 bg-destructive/10">
                   <AlertOctagon className="h-4 w-4 text-destructive" />
                   <AlertTitle className="text-destructive">Changes Requested by Client</AlertTitle>
                   <AlertDescription>
                     <div className="space-y-2 mt-1">
-                      <ul className="text-sm space-y-1">
-                        {changesRequestedItems.map(item => (
-                          <li key={item.id} className="flex items-start gap-2">
-                            <span className="font-medium">{item.name}:</span>
-                            <span className="text-muted-foreground italic">
-                              {item.artwork_issue || 'Changes requested'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="mt-2"
-                        onClick={async () => {
-                          await updateOrder.mutateAsync({
-                            id: order.id,
-                            updates: { status: 'quote' as const },
-                          });
-                          toast.success('Order unlocked for revision');
-                        }}
-                        disabled={updateOrder.isPending}
-                      >
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        {updateOrder.isPending ? 'Unlocking...' : 'Revise & Resend'}
-                      </Button>
+                      {changesRequestedItems.length > 0 && (
+                        <ul className="text-sm space-y-1">
+                          {changesRequestedItems.map(item => (
+                            <li key={item.id} className="flex items-start gap-2">
+                              <span className="font-medium">{item.name}:</span>
+                              <span className="text-muted-foreground italic">
+                                {item.artwork_issue || 'Changes requested'}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Replace the flagged artwork above, then click "Resend Proof" to send revised proofs to the client.
+                      </p>
                     </div>
                   </AlertDescription>
                 </Alert>
@@ -685,7 +677,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       orderId={order.id}
                       dieline={order.dieline || null}
                       onFilesUploaded={handleDualFilesUploaded}
-                      disabled={!order.dieline || (isLocked && artworkTab === 'proof')}
+                      disabled={!order.dieline || (isLocked && !isChangesRequested && artworkTab === 'proof')}
                       activeTab={artworkTab}
                       onTabChange={setArtworkTab}
                     />

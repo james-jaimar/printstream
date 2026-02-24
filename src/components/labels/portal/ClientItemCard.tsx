@@ -75,6 +75,7 @@ export default function ClientItemCard({
   const canReview = status === 'awaiting_client';
   const needsUpload = status === 'client_needs_upload';
   const isApproved = status === 'approved';
+  const isUnderRevision = status === 'client_needs_upload' || status === 'draft';
 
   // SECURITY: Only use signed URLs — never expose raw Supabase storage paths
   const thumbnailUrl =
@@ -158,6 +159,12 @@ export default function ClientItemCard({
               {item.artwork_issue && (
                 <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-2 py-1">
                   {item.artwork_issue}
+                </p>
+              )}
+
+              {isUnderRevision && !canReview && !needsUpload && (
+                <p className="text-xs text-orange-700 bg-orange-50 rounded-lg px-2 py-1">
+                  We're working on the changes you requested. You'll be notified when revised proofs are ready.
                 </p>
               )}
 

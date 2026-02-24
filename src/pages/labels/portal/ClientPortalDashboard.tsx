@@ -53,6 +53,8 @@ function getVisibleItems(order: LabelOrder) {
 }
 
 function needsAction(order: LabelOrder): boolean {
+  // changes_requested means admin is working on it — no client action needed
+  if (order.status === 'changes_requested') return false;
   const items = getVisibleItems(order);
   const allApproved = items.length > 0 && items.every(i => i.proofing_status === 'approved');
   if (allApproved) return false;
@@ -65,6 +67,7 @@ function needsAction(order: LabelOrder): boolean {
 function getWorkflowStep(status: string): number {
   switch (status) {
     case 'pending_approval': return 1;
+    case 'changes_requested': return 1; // Still in review phase — under revision
     case 'approved': return 2;
     case 'in_production': return 3;
     case 'completed': return 3;
@@ -74,6 +77,7 @@ function getWorkflowStep(status: string): number {
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   pending_approval: { label: 'Awaiting Approval', color: 'bg-amber-100 text-amber-800' },
+  changes_requested: { label: 'Under Revision', color: 'bg-orange-100 text-orange-800' },
   approved: { label: 'Approved', color: 'bg-emerald-100 text-emerald-800' },
   in_production: { label: 'In Production', color: 'bg-blue-100 text-blue-800' },
   completed: { label: 'Completed', color: 'bg-green-100 text-green-800' },

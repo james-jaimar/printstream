@@ -48,6 +48,7 @@ export const DEFAULT_OPTIMIZATION_WEIGHTS = {
 export type LabelOrderStatus = 
   | 'quote' 
   | 'pending_approval' 
+  | 'changes_requested'
   | 'approved' 
   | 'in_production' 
   | 'completed' 
