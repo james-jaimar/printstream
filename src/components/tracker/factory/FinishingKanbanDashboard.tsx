@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +6,7 @@ import { RefreshCw, Hand, Layers, Circle, Package, FolderOpen, Book, FileText, S
 import { ViewToggle } from '../common/ViewToggle';
 import { DtpKanbanColumnWithBoundary } from './DtpKanbanColumnWithBoundary';
 import { EnhancedJobDetailsModal } from './EnhancedJobDetailsModal';
+import { GlobalBarcodeListener } from './GlobalBarcodeListener';
 import { JobListView } from '../common/JobListView';
 import { useAccessibleJobs, AccessibleJob } from '@/hooks/tracker/useAccessibleJobs';
 import { ScheduledJobStage } from '@/hooks/tracker/useScheduledJobs';
@@ -14,6 +15,7 @@ import { JobListLoading, JobErrorState } from '../common/JobLoadingStates';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserStagePermissions } from '@/hooks/tracker/useUserStagePermissions';
+import { toast } from 'sonner';
 
 interface QueueConfig {
   id: string;
@@ -38,7 +40,7 @@ const getStageIcon = (stageName: string): React.ReactNode => {
   if (name.includes('binding')) return <Book className="h-4 w-4" />;
   if (name.includes('scoring') || name.includes('folding')) return <FileText className="h-4 w-4" />;
   if (name.includes('cutting') || name.includes('die')) return <Scissors className="h-4 w-4" />;
-  return <Layers className="h-4 w-4" />; // Default icon
+  return <Layers className="h-4 w-4" />;
 };
 
 export const FinishingKanbanDashboard: React.FC = () => {
@@ -50,6 +52,7 @@ export const FinishingKanbanDashboard: React.FC = () => {
   });
   const [selectedJob, setSelectedJob] = useState<AccessibleJob | null>(null);
   const [showJobModal, setShowJobModal] = useState(false);
+  const [scanCompleted, setScanCompleted] = useState(false);
 
   const { consolidatedStages, isLoading: permissionsLoading } = useUserStagePermissions(user?.id);
   
@@ -59,7 +62,50 @@ export const FinishingKanbanDashboard: React.FC = () => {
 
   const { startJob, completeJob } = useJobActions(refreshJobs);
 
-  // Dynamically build queue configs from ALL user's accessible stages (no filtering)
+  // Helper: normalize and match barcode to WO number
+  const woMatchesBarcode = useCallback((woNo: string, barcodeData: string): boolean => {
+    const normalize = (s: string) => (s || "").toString().trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const stripLetters = (s: string) => s.replace(/^[A-Z]+/, "");
+    const cleanScanned = normalize(barcodeData);
+    const cleanExpected = normalize(woNo);
+    const numericScanned = stripLetters(cleanScanned);
+    const numericExpected = stripLetters(cleanExpected);
+    return (
+      cleanScanned === cleanExpected ||
+      numericScanned === numericExpected ||
+      cleanScanned.includes(cleanExpected) ||
+      cleanExpected.includes(cleanScanned) ||
+      numericScanned.includes(numericExpected) ||
+      numericExpected.includes(numericScanned)
+    );
+  }, []);
+
+  // Global barcode handler - works whether modal is open or not
+  const handleBarcodeDetected = useCallback((barcodeData: string) => {
+    console.log('🔍 Finishing barcode detected:', barcodeData, 'Modal open:', showJobModal);
+
+    if (showJobModal && selectedJob) {
+      if (woMatchesBarcode(selectedJob.wo_no, barcodeData)) {
+        setScanCompleted(true);
+        toast.success("Job barcode matched");
+      } else {
+        toast.error(`Scanned code does not match this job. Expected like: ${selectedJob.wo_no} (prefix optional). Got: ${barcodeData}`);
+      }
+      return;
+    }
+
+    const matchedJob = jobs.find(job => woMatchesBarcode(job.wo_no, barcodeData));
+    if (matchedJob) {
+      setSelectedJob(matchedJob);
+      setShowJobModal(true);
+      setScanCompleted(true);
+      toast.success(`Found job ${matchedJob.wo_no} - opening...`);
+    } else {
+      toast.warning(`No job found matching: ${barcodeData}`);
+    }
+  }, [showJobModal, selectedJob, jobs, woMatchesBarcode]);
+
+  // Dynamically build queue configs from ALL user's accessible stages
   const QUEUE_CONFIGS: QueueConfig[] = useMemo(() => {
     return consolidatedStages.map(stage => ({
       id: stage.stage_id,
@@ -84,11 +130,13 @@ export const FinishingKanbanDashboard: React.FC = () => {
   const handleJobClick = (job: AccessibleJob) => {
     setSelectedJob(job);
     setShowJobModal(true);
+    setScanCompleted(false);
   };
 
   const handleCloseModal = () => {
     setShowJobModal(false);
     setSelectedJob(null);
+    setScanCompleted(false);
   };
 
   // Convert AccessibleJob to ScheduledJobStage for EnhancedJobDetailsModal
@@ -170,6 +218,9 @@ export const FinishingKanbanDashboard: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full bg-muted/30 overflow-hidden">
+      {/* Global Barcode Listener - ALWAYS active to allow scanning to find jobs */}
+      <GlobalBarcodeListener onBarcodeDetected={handleBarcodeDetected} minLength={5} />
+
       <div className="flex-shrink-0 p-3 sm:p-4 space-y-3 sm:space-y-4 bg-background border-b">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h2 className="text-2xl font-bold">My Stages</h2>
@@ -259,6 +310,7 @@ export const FinishingKanbanDashboard: React.FC = () => {
           onClose={handleCloseModal}
           onStartJob={handleStartJobWrapper}
           onCompleteJob={handleCompleteJobWrapper}
+          scanCompleted={scanCompleted}
         />
       )}
     </div>
