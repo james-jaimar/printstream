@@ -2,6 +2,7 @@ import React from "react";
 import { Loader2 } from "lucide-react";
 import { FactoryFloorDashboard } from "@/components/tracker/dashboard/factory/FactoryFloorDashboard";
 import { useDashboardJobs } from "@/hooks/tracker/useDashboardJobs";
+import { supabase } from "@/integrations/supabase/client";
 
 const TrackerDashboard = () => {
   const {
@@ -11,6 +12,24 @@ const TrackerDashboard = () => {
     refreshJobs,
     lastFetchTime
   } = useDashboardJobs();
+
+  // Fetch completed this month count from DB using updated_at
+  const [completedThisMonthCount, setCompletedThisMonthCount] = React.useState(0);
+  React.useEffect(() => {
+    const fetchCompletedThisMonth = async () => {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const { count, error } = await supabase
+        .from('production_jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'Completed')
+        .gte('updated_at', startOfMonth);
+      if (!error && count !== null) {
+        setCompletedThisMonthCount(count);
+      }
+    };
+    fetchCompletedThisMonth();
+  }, [jobs]); // re-fetch when jobs refresh
 
   // Calculate comprehensive dashboard metrics
   const stats = React.useMemo(() => {
@@ -25,7 +44,7 @@ const TrackerDashboard = () => {
         dueThisWeek: 0,
         overdue: 0,
         critical: 0,
-        completedThisMonth: 0,
+        completedThisMonth: completedThisMonthCount,
         statusCounts: {},
         stages: []
       };
@@ -49,14 +68,14 @@ const TrackerDashboard = () => {
     }).length;
 
     const dueTomorrow = jobs.filter(job => {
-      if (!job.due_date || !job.proof_approved_at) return false;
+      if (!job.due_date || !job.proof_approved_at || job.status === 'Completed') return false;
       const dueDate = new Date(job.due_date);
       dueDate.setHours(0, 0, 0, 0);
       return dueDate.getTime() === tomorrow.getTime();
     }).length;
 
     const dueThisWeek = jobs.filter(job => {
-      if (!job.due_date || !job.proof_approved_at) return false;
+      if (!job.due_date || !job.proof_approved_at || job.status === 'Completed') return false;
       const dueDate = new Date(job.due_date);
       dueDate.setHours(0, 0, 0, 0);
       return dueDate > today && dueDate <= weekFromNow;
@@ -69,10 +88,7 @@ const TrackerDashboard = () => {
       return dueDate < today;
     }).length;
 
-    // Completed this month
-    const completedThisMonth = jobs.filter(job => 
-      job.status === 'Completed'
-    ).length;
+    const completedThisMonth = completedThisMonthCount;
 
     // Critical = overdue + due today + approved jobs with low progress and approaching due dates
     const critical = overdue + dueToday + jobs.filter(job => 
@@ -132,7 +148,7 @@ const TrackerDashboard = () => {
       statusCounts,
       stages
     };
-  }, [jobs]);
+  }, [jobs, completedThisMonthCount]);
 
   // Auto-refresh every 5 minutes for factory display
   React.useEffect(() => {
