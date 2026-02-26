@@ -43,6 +43,10 @@ import { supabase } from "@/integrations/supabase/client";
 import StageHoldDialog from "./StageHoldDialog";
 import { useStageActions } from "@/hooks/tracker/stage-management/useStageActions";
 import { useJobPaperSpecs } from "@/hooks/tracker/useJobPaperSpecs";
+import { PartialReworkDialog } from "../jobs/PartialReworkDialog";
+import { ReworkSchedulePlacementDialog } from "../jobs/ReworkSchedulePlacementDialog";
+import { ReworkBadge } from "../common/ReworkBadge";
+import { PaymentHoldBanner } from "../common/PaymentHoldBanner";
 
 // Normalize status variants from backend
 const normalizeStatus = (status?: string): 'pending' | 'active' | 'completed' | 'skipped' | 'on_hold' | 'changes_requested' => {
@@ -76,6 +80,10 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
   const [isProcessing, setIsProcessing] = useState(false);
   const [showHoldDialog, setShowHoldDialog] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
+  const [showPartialRework, setShowPartialRework] = useState(false);
+  const [showReworkSchedule, setShowReworkSchedule] = useState(false);
+  const [reworkStageIds, setReworkStageIds] = useState<string[]>([]);
+  const [reworkQty, setReworkQty] = useState(0);
   
   const { holdStage, resumeStage, isProcessing: stageActionsProcessing } = useStageActions();
   const { generic: paperSpecs, sheetSize, isLoading: specsLoading } = useJobPaperSpecs(job?.job_id || "");
@@ -238,12 +246,14 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
   };
 
   const handleMarkForRework = () => {
-    if (!reworkReason.trim()) {
-      toast.error('Please specify a rework reason');
-      return;
-    }
-    // TODO: Implement rework functionality
-    toast.info('Rework functionality coming soon');
+    setShowPartialRework(true);
+  };
+
+  const handleReworkCreated = (stageIds: string[]) => {
+    setReworkStageIds(stageIds);
+    setReworkQty(job.qty || 0); // will be overridden with actual shortfall
+    setShowPartialRework(false);
+    setShowReworkSchedule(true);
   };
 
   const handleQualityHold = () => {
@@ -350,7 +360,10 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
               <CardContent className="p-6">
                 <div className="flex items-start justify-between mb-6">
                   <div>
-                    <h2 className="text-3xl font-bold text-gray-900">{job.wo_no}</h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-3xl font-bold text-gray-900">{job.wo_no}</h2>
+                      <ReworkBadge reworkQty={(job as any).rework_qty} reworkPercentage={(job as any).rework_percentage} />
+                    </div>
                     <p className="text-xl text-gray-600 mt-1">{job.customer}</p>
                     <div className="flex items-center gap-4 mt-4 text-lg text-gray-600">
                       <div className="flex items-center gap-2">
@@ -406,6 +419,16 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
                 </div>
               </CardContent>
             </Card>
+
+            {/* Payment Hold Banner */}
+            {(job as any).payment_status === 'awaiting_payment' && (
+              <PaymentHoldBanner
+                jobId={job.job_id}
+                paymentStatus={(job as any).payment_status}
+                paymentHoldReason={(job as any).payment_hold_reason}
+                onReleased={onClose}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="details" className="space-y-6">
@@ -585,7 +608,7 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
                       className="h-10 border-orange-200 text-orange-700 hover:bg-orange-50"
                     >
                       <RotateCcw className="w-4 h-4 mr-2" />
-                      Mark for Rework
+                      Partial Rework
                     </Button>
                     
                     <Button
@@ -661,30 +684,35 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
             {/* Rework Section */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg text-orange-700">Rework Management</CardTitle>
+                <CardTitle className="text-lg text-orange-700 flex items-center gap-2">
+                  <RotateCcw className="h-5 w-5" />
+                  Rework Management
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Select value={reworkReason} onValueChange={setReworkReason}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select rework reason..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="material_defect">Material Defect</SelectItem>
-                    <SelectItem value="print_quality">Print Quality Issue</SelectItem>
-                    <SelectItem value="wrong_settings">Wrong Settings</SelectItem>
-                    <SelectItem value="operator_error">Operator Error</SelectItem>
-                    <SelectItem value="machine_malfunction">Machine Malfunction</SelectItem>
-                    <SelectItem value="customer_change">Customer Change Request</SelectItem>
-                  </SelectContent>
-                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Need to reprint some copies due to damages? Use partial rework to send specific quantities back through the workflow.
+                </p>
                 <Button 
                   variant="outline" 
                   onClick={handleMarkForRework}
                   className="w-full border-orange-200 text-orange-700 hover:bg-orange-50"
                 >
                   <RotateCcw className="w-4 h-4 mr-2" />
-                  Submit Rework Request
+                  Request Partial Rework
                 </Button>
+                
+                {/* Show rework info if exists */}
+                {(job as any).rework_qty && (
+                  <div className="p-3 rounded-lg bg-orange-50 border border-orange-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ReworkBadge reworkQty={(job as any).rework_qty} reworkPercentage={(job as any).rework_percentage} />
+                    </div>
+                    <p className="text-xs text-orange-700 mt-1">
+                      Last rework requested: {(job as any).rework_requested_at ? format(new Date((job as any).rework_requested_at), 'PPP p') : 'Unknown'}
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -839,6 +867,29 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
           scheduledMinutes={job.scheduled_minutes || 0}
           stageName={job.stage_name}
           isProcessing={stageActionsProcessing}
+        />
+
+        <PartialReworkDialog
+          isOpen={showPartialRework}
+          onClose={() => setShowPartialRework(false)}
+          jobId={job.job_id}
+          jobTableName="production_jobs"
+          woNo={job.wo_no}
+          originalQty={job.qty || 0}
+          onReworkCreated={handleReworkCreated}
+        />
+
+        <ReworkSchedulePlacementDialog
+          isOpen={showReworkSchedule}
+          onClose={() => setShowReworkSchedule(false)}
+          stageIds={reworkStageIds}
+          jobId={job.job_id}
+          woNo={job.wo_no}
+          reworkQty={reworkQty}
+          onScheduled={() => {
+            setShowReworkSchedule(false);
+            onClose();
+          }}
         />
       </DialogContent>
     </Dialog>

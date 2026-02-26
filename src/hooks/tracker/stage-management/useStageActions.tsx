@@ -15,16 +15,29 @@ export const useStageActions = () => {
   const startStage = useCallback(async (stageId: string, qrData?: any) => {
     setIsProcessing(true);
     try {
-      // Starting stage
-      
-      // Get stage info to check permissions
+      // Get stage info to check permissions and payment status
       const { data: stageData, error: fetchError } = await supabase
         .from('job_stage_instances')
-        .select('production_stage_id')
+        .select('production_stage_id, job_id, job_table_name')
         .eq('id', stageId)
         .single();
 
       if (fetchError) throw fetchError;
+
+      // Check payment status on the parent job
+      const { data: jobData } = await supabase
+        .from('production_jobs')
+        .select('payment_status')
+        .eq('id', stageData.job_id)
+        .single();
+
+      if (jobData?.payment_status === 'awaiting_payment') {
+        toast.error("Cannot start — awaiting payment", {
+          description: "This order must be released for production before work can begin."
+        });
+        setIsProcessing(false);
+        return false;
+      }
 
       // Check permissions - admins and managers can bypass
       if (!isAdmin && !isManager) {
