@@ -2866,6 +2866,11 @@ export type Database = {
           operation_quantities: Json | null
           original_committed_due_date: string | null
           paper_specifications: Json | null
+          payment_held_at: string | null
+          payment_hold_reason: string | null
+          payment_released_at: string | null
+          payment_released_by: string | null
+          payment_status: string
           prepress_specifications: Json | null
           printing_specifications: Json | null
           proof_approved_at: string | null
@@ -2875,6 +2880,10 @@ export type Database = {
           qty: number | null
           reference: string | null
           rep: string | null
+          rework_percentage: number | null
+          rework_qty: number | null
+          rework_requested_at: string | null
+          rework_requested_by: string | null
           size: string | null
           so_no: string | null
           specification: string | null
@@ -2924,6 +2933,11 @@ export type Database = {
           operation_quantities?: Json | null
           original_committed_due_date?: string | null
           paper_specifications?: Json | null
+          payment_held_at?: string | null
+          payment_hold_reason?: string | null
+          payment_released_at?: string | null
+          payment_released_by?: string | null
+          payment_status?: string
           prepress_specifications?: Json | null
           printing_specifications?: Json | null
           proof_approved_at?: string | null
@@ -2933,6 +2947,10 @@ export type Database = {
           qty?: number | null
           reference?: string | null
           rep?: string | null
+          rework_percentage?: number | null
+          rework_qty?: number | null
+          rework_requested_at?: string | null
+          rework_requested_by?: string | null
           size?: string | null
           so_no?: string | null
           specification?: string | null
@@ -2982,6 +3000,11 @@ export type Database = {
           operation_quantities?: Json | null
           original_committed_due_date?: string | null
           paper_specifications?: Json | null
+          payment_held_at?: string | null
+          payment_hold_reason?: string | null
+          payment_released_at?: string | null
+          payment_released_by?: string | null
+          payment_status?: string
           prepress_specifications?: Json | null
           printing_specifications?: Json | null
           proof_approved_at?: string | null
@@ -2991,6 +3014,10 @@ export type Database = {
           qty?: number | null
           reference?: string | null
           rep?: string | null
+          rework_percentage?: number | null
+          rework_qty?: number | null
+          rework_requested_at?: string | null
+          rework_requested_by?: string | null
           size?: string | null
           so_no?: string | null
           specification?: string | null
