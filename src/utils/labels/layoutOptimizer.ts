@@ -438,6 +438,133 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
   return runs;
 }
 
+// ─── STRATEGY 4: EQUAL-QUANTITY (cluster-based, zero intra-run waste) ──
+
+interface DemandEntry {
+  item_id: string;
+  remaining: number;
+  needs_rotation: boolean;
+}
+
+/**
+ * Equal-Quantity clustering strategy.
+ *
+ * 1. Build a demand pool for every item.
+ * 2. Identify natural quantity levels from the demand pool.
+ * 3. For each level (descending), create runs where ALL slots share the same
+ *    quantity_in_slot.  Items are split across levels as needed.
+ * 4. Blank slots (qty 0) are allowed when fewer items than slots at a level.
+ */
+function createEqualQuantityRuns(
+  items: LabelItem[],
+  config: SlotConfig,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
+): ProposedRun[] {
+  if (items.length === 0) return [];
+
+  // 1. Build demand pool
+  const demand: DemandEntry[] = items.map(i => ({
+    item_id: i.id,
+    remaining: i.quantity,
+    needs_rotation: i.needs_rotation || false,
+  }));
+
+  // 2. Collect all unique quantity values as candidate levels
+  const allQtys = items.map(i => i.quantity);
+  const uniqueLevels = [...new Set(allQtys)].sort((a, b) => b - a); // descending
+
+  const runs: ProposedRun[] = [];
+  let runNumber = 1;
+
+  // 3. Process each level
+  for (const level of uniqueLevels) {
+    if (level <= 0) continue;
+
+    // Keep creating runs at this level while there are items that can contribute
+    while (true) {
+      // Find items with remaining >= level
+      const eligible = demand.filter(d => d.remaining >= level);
+      if (eligible.length === 0) break;
+
+      // Take up to totalSlots items
+      const batch = eligible.slice(0, config.totalSlots);
+
+      const assignments: SlotAssignment[] = [];
+      for (let s = 0; s < config.totalSlots; s++) {
+        if (s < batch.length) {
+          assignments.push({
+            slot: s,
+            item_id: batch[s].item_id,
+            quantity_in_slot: level,
+            needs_rotation: batch[s].needs_rotation,
+          });
+          // Deduct from demand
+          batch[s].remaining -= level;
+        } else {
+          // Blank slot — duplicate an item from this batch with qty 0
+          assignments.push({
+            slot: s,
+            item_id: batch[s % batch.length].item_id,
+            quantity_in_slot: 0,
+            needs_rotation: batch[s % batch.length].needs_rotation,
+          });
+        }
+      }
+
+      const frames = calculateFramesForSlot(level, config);
+      runs.push({
+        run_number: runNumber++,
+        slot_assignments: assignments,
+        meters: calculateMeters(frames, config),
+        frames,
+      });
+    }
+  }
+
+  // 4. Handle any leftover remainders (quantities that didn't align to a level)
+  const leftovers = demand.filter(d => d.remaining > 0);
+  if (leftovers.length > 0) {
+    // Group leftovers into runs, bumping to the max remainder in each batch
+    while (leftovers.some(d => d.remaining > 0)) {
+      const active = leftovers.filter(d => d.remaining > 0);
+      if (active.length === 0) break;
+
+      const batch = active.slice(0, config.totalSlots);
+      const batchLevel = Math.max(...batch.map(d => d.remaining));
+
+      const assignments: SlotAssignment[] = [];
+      for (let s = 0; s < config.totalSlots; s++) {
+        if (s < batch.length) {
+          assignments.push({
+            slot: s,
+            item_id: batch[s].item_id,
+            quantity_in_slot: batchLevel,
+            needs_rotation: batch[s].needs_rotation,
+          });
+          batch[s].remaining = 0; // fully consumed (may bump up)
+        } else {
+          assignments.push({
+            slot: s,
+            item_id: batch[s % batch.length].item_id,
+            quantity_in_slot: 0,
+            needs_rotation: batch[s % batch.length].needs_rotation,
+          });
+        }
+      }
+
+      const frames = calculateFramesForSlot(batchLevel, config);
+      runs.push({
+        run_number: runNumber++,
+        slot_assignments: assignments,
+        meters: calculateMeters(frames, config),
+        frames,
+      });
+    }
+  }
+
+  return runs;
+}
+
 // ─── SCORING & OPTION CREATION ──────────────────────────────────────
 
 function createLayoutOption(
@@ -694,6 +821,22 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
           qtyPerRoll
         ));
       }
+    }
+  }
+  
+  // Option 5: Equal-Quantity — all slots in each run share the same quantity
+  if (items.length > 1) {
+    let equalQtyRuns = createEqualQuantityRuns(items, config, maxOverrun);
+    equalQtyRuns = annotateRunsWithRollInfo(equalQtyRuns, config, qtyPerRoll, maxOverrun);
+    if (equalQtyRuns.length > 0) {
+      partialOptions.push(createLayoutOption(
+        'equal-qty',
+        equalQtyRuns,
+        config,
+        theoreticalMinMeters,
+        'Equal-quantity strategy — all slots in each run print the same quantity, eliminating intra-run waste',
+        qtyPerRoll
+      ));
     }
   }
   

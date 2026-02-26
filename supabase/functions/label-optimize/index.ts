@@ -163,6 +163,40 @@ serve(async (req) => {
 
     const systemPrompt = `You are an expert print production optimizer for HP Indigo digital label printing on rolls.
 
+STRATEGY — EQUAL-QUANTITY RUNS (CRITICAL):
+Your PRIMARY goal is to create runs where ALL slots print the SAME quantity_in_slot.
+This eliminates intra-run overrun entirely (every slot uses the full run length).
+
+HOW TO ACHIEVE THIS:
+1. List every item and its ordered quantity.
+2. Find natural "quantity levels" — groups of up to ${totalSlots} items (or item-portions) that share the same quantity.
+3. For each level, create a run where every slot has quantity_in_slot = that level's quantity.
+4. Large items are SPLIT across multiple runs. E.g. an item needing 6300 labels might contribute 2650 to one run, 2650 to another, and 1000 to a third.
+5. Small items may be BUMPED UP slightly (e.g. 150 → 300) if doing so fills a run cleanly and the extra labels are acceptable.
+6. A slot may have quantity_in_slot = 0 (blank) if fewer items than slots remain at that level. Use the same item_id as another slot in the run.
+7. The sum of all quantity_in_slot values for each item across ALL runs must be >= the ordered quantity.
+
+WHY THIS WORKS:
+- When all slots in a run have the same quantity, frames = ceil(quantity / ${labelsPerSlotPerFrame}).
+- Actual output per slot = frames × ${labelsPerSlotPerFrame}, which is very close to quantity — near-zero waste.
+- The only "overrun" is inter-item: some items get a small quantity bump, which is far cheaper than intra-run overrun from mismatched slots.
+
+WORKED EXAMPLE (${totalSlots} slots):
+Items: A=700, B=2000, C=150, D=300, E=300, F=6300, G=5300, H=800, I=1000, J=1000, K=1400, L=700, M=700, N=700, O=800
+Step 1 — Identify clusters:
+  ~700: A(700), L(700), M(700), N(700) → Run at 700
+  ~1000: I(1000), J(1000), plus portions of B, K → Run at 1000
+  ~150: C(150), D(300→150+150), E(300→150+150) → Run at 150 (with blank or bump)
+  ~2650: portions of F(6300) and G(5300) → Run at 2650
+  ~800: H(800), O(800), plus remainders → Run at 800
+Step 2 — Build runs (all ${totalSlots} slots equal):
+  Run 1: ${totalSlots} slots × 700 each
+  Run 2: ${totalSlots} slots × 1000 each
+  Run 3: ${totalSlots} slots × 150 each
+  Run 4: ${totalSlots} slots × 2650 each
+  Run 5: ${totalSlots} slots × 800 each
+Result: 5 runs, zero intra-run waste, small bumps on a few items.
+
 CRITICAL PRODUCTION RULES:
 1. EVERY slot (column) in a frame MUST be filled. No empty slots allowed.
    - If there are ${totalSlots} slots and only 3 items, duplicate items across remaining slots using round-robin.
@@ -202,6 +236,8 @@ Use the actual item IDs provided below.
 The quantity_in_slot is how many labels that slot needs to print (before frame rounding).
 If an item appears in multiple slots (round-robin), divide its total quantity by the number of slots it occupies.
 If an item's quantity is split across runs, make sure the sum of all its slot quantities across all runs >= the ordered quantity.
+
+REMEMBER: The single most important rule is that ALL slots within a run should have the SAME quantity_in_slot value. This is the key to minimizing waste.
 
 ITEMS TO ASSIGN (use these exact IDs):
 ${items.map(i => `- ID: "${i.id}" | Name: "${i.name}" | Quantity: ${i.quantity}`).join('\n')}`;
