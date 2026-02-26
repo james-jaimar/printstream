@@ -32,6 +32,7 @@ export function LayoutOptionCard({
       case 'ganged-all': return <Zap className="h-4 w-4" />;
       case 'individual': return <Package className="h-4 w-4" />;
       case 'optimized': return <Scissors className="h-4 w-4" />;
+      case 'equal-qty': return <Zap className="h-4 w-4" />;
       default: return <Package className="h-4 w-4" />;
     }
   };
@@ -41,6 +42,7 @@ export function LayoutOptionCard({
       case 'ganged-all': return 'Ganged Run';
       case 'individual': return 'Individual Runs';
       case 'optimized': return 'Optimized Split';
+      case 'equal-qty': return 'Equal Quantity';
       default: return 'Layout Option';
     }
   };
