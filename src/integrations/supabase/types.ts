@@ -3350,6 +3350,45 @@ export type Database = {
         }
         Relationships: []
       }
+      quickeasy_sync_runs: {
+        Row: {
+          end_date: string
+          id: string
+          notes: string | null
+          processed_at: string | null
+          processed_by: string | null
+          raw_data: Json
+          row_count: number
+          start_date: string
+          status: string
+          synced_at: string
+        }
+        Insert: {
+          end_date: string
+          id?: string
+          notes?: string | null
+          processed_at?: string | null
+          processed_by?: string | null
+          raw_data?: Json
+          row_count?: number
+          start_date: string
+          status?: string
+          synced_at?: string
+        }
+        Update: {
+          end_date?: string
+          id?: string
+          notes?: string | null
+          processed_at?: string | null
+          processed_by?: string | null
+          raw_data?: Json
+          row_count?: number
+          start_date?: string
+          status?: string
+          synced_at?: string
+        }
+        Relationships: []
+      }
       schedule_gap_fills: {
         Row: {
           created_at: string | null
