@@ -7,6 +7,7 @@ import { createColumnMap } from './columnMapper';
 import { parseMatrixExcelFile, parseMatrixDataToJobs } from './matrixParser';
 import { EnhancedMappingProcessor } from './enhancedMappingProcessor';
 import { EnhancedJobCreator } from './enhancedJobCreator';
+import { checkParsedJobsForDuplicates } from '@/utils/jobDeduplication';
 import type { ExcelPreviewData, ColumnMapping } from '@/components/tracker/ColumnMappingDialog';
 import type { MatrixColumnMapping } from '@/components/tracker/MatrixMappingDialog';
 
@@ -357,7 +358,20 @@ export const parseExcelFileWithMapping = async (
   logger.addDebugInfo(`Enhanced import completed: ${stats.processedRows} processed, ${stats.skippedRows} skipped, ${stats.invalidDates} invalid dates, ${stats.invalidTimingData} invalid timing data`);
   logger.addDebugInfo(`Paper specs mapped: ${enhancedResult.stats.paperSpecsMapped}, Delivery specs mapped: ${enhancedResult.stats.deliverySpecsMapped}`);
 
-  return { jobs: enhancedResult.jobs, stats };
+  // Check for duplicates against existing database
+  const duplicateCheck = await checkParsedJobsForDuplicates(enhancedResult.jobs);
+  const filteredJobs = duplicateCheck.newJobs as ParsedJob[];
+  const duplicatesSkipped = duplicateCheck.duplicates.length;
+  const duplicateJobs = duplicateCheck.duplicates as ParsedJob[];
+
+  if (duplicatesSkipped > 0) {
+    logger.addWarning(`⚠️ Skipped ${duplicatesSkipped} duplicate WO numbers already in database`);
+    logger.addInfo(`Duplicate WO numbers: ${duplicateJobs.map(j => j.wo_no).join(', ')}`);
+    stats.processedRows -= duplicatesSkipped;
+    stats.skippedRows += duplicatesSkipped;
+  }
+
+  return { jobs: filteredJobs, stats, duplicatesSkipped, duplicateJobs };
 };
 
 /**
@@ -398,7 +412,8 @@ export const parseAndPrepareProductionReadyJobs = async (
   // Get enhanced result with user-approved stage mappings FIRST
   const enhancedProcessor = new EnhancedMappingProcessor(logger, availableSpecs);
   await enhancedProcessor.initialize();
-  const { jobs } = await parseExcelFileWithMapping(file, mapping, logger, availableSpecs);
+  const parseResult = await parseExcelFileWithMapping(file, mapping, logger, availableSpecs);
+  const { jobs } = parseResult;
   
   // Step 2: Process jobs with enhanced mapping
   const enhancedResult = await enhancedProcessor.processJobsWithEnhancedMapping(
@@ -431,6 +446,10 @@ export const parseAndPrepareProductionReadyJobs = async (
   
   logger.addDebugInfo(`Phase 4 enhanced job preparation completed: ${result.stats.total} jobs prepared for review`);
   
+  // Propagate duplicate info from parse phase
+  result.duplicatesSkipped = parseResult.duplicatesSkipped || 0;
+  result.duplicateJobs = parseResult.duplicateJobs || [];
+  
   return result;
 };
 
@@ -457,7 +476,7 @@ export const parseAndCreateProductionReadyJobs = async (
   const headers = jsonData[0] as string[];
   const dataRows = jsonData.slice(1) as any[][];
   
-  const { jobs } = await parseExcelFileWithMapping(file, mapping, logger, availableSpecs);
+  const { jobs } = await parseExcelFileWithMapping(file, mapping, logger, availableSpecs); // duplicates already filtered
   
   // Step 2: Create enhanced job creator with Excel data
   const jobCreator = new EnhancedJobCreator(logger, userId, generateQRCodes);
