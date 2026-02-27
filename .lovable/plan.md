@@ -1,33 +1,64 @@
 
+# Fix: Make "Awaiting Payment" Hold Accessible
 
-# Production Flexibility: Partial Rework, Payment Holds, and Schedule Placement
+## Problem
 
-## Status: ✅ IMPLEMENTED
+The "Hold for Payment" functionality was built but is currently inaccessible because:
 
-### Workstream 1: Partial Rework System ✅
-- `usePartialRework.ts` — hook for calculating rework percentages, creating rework stage instances, scheduling
-- `PartialReworkDialog.tsx` — modal with shortfall qty input, auto-percentage calc, editable per-stage qty table
-- `ReworkSchedulePlacementDialog.tsx` — 4 scheduling options after rework (Expedite, Tomorrow, Custom, Unscheduled)
-- `ReworkBadge.tsx` — orange badge showing rework qty on job cards/modals
+1. **Data not fetched**: `useAccessibleJobs` doesn't query `payment_status` from `production_jobs`, so it's always `undefined`
+2. **Conditional rendering bug**: The `PaymentHoldBanner` in `EnhancedJobDetailsModal` is only rendered when `payment_status === 'awaiting_payment'` — but the "Hold for Payment" button (for marking a paid job as on-hold) only shows when status is `'paid'`. So you can never reach it.
+3. **Missing type**: `payment_status` and `payment_hold_reason` aren't in the `AccessibleJob` interface
 
-### Workstream 2: Rework Visibility ✅
-- Rework badge shown in EnhancedJobDetailsModal header
-- Rework history section in Notes tab
-- "Partial Rework" button replaces old placeholder in workflow tab
-- Rework stages created with `is_rework = true` and reduced quantities
+## Changes
 
-### Workstream 3: Payment Hold ✅
-- `payment_status` column on `production_jobs` (default: 'paid')
-- `PaymentHoldBanner.tsx` — amber banner with release button (admin/manager only)
-- Stage start blocked in `useStageActions` when `payment_status = 'awaiting_payment'`
-- "Hold for Payment" button available to admin/manager on paid jobs
-- **Note**: Imported jobs default to 'paid'. Manual hold when needed.
+### 1. Add `payment_status` to `AccessibleJob` type
 
-### Database Columns Added
-- `rework_qty`, `rework_percentage`, `rework_requested_at`, `rework_requested_by`
-- `payment_status`, `payment_hold_reason`, `payment_held_at`, `payment_released_at`, `payment_released_by`
+**File**: `src/hooks/tracker/useAccessibleJobs/types.ts`
 
-## Previous: Layout Optimizer (Equal-Quantity Strategy) ✅
-- AI prompt updated with equal-quantity clustering strategy
-- Local `createEqualQuantityRuns` fallback algorithm added
-- Registered as 'equal-qty' layout option
+Add two new optional fields:
+- `payment_status?: string`
+- `payment_hold_reason?: string | null`
+
+### 2. Fetch `payment_status` in the accessible jobs query
+
+**File**: `src/hooks/tracker/useAccessibleJobs/` (the query file)
+
+Include `payment_status` and `payment_hold_reason` in the select query and map them into the returned job objects.
+
+### 3. Fix the conditional rendering in `EnhancedJobDetailsModal`
+
+**File**: `src/components/tracker/factory/EnhancedJobDetailsModal.tsx`
+
+Change the condition from:
+```
+{(job as any).payment_status === 'awaiting_payment' && (
+```
+To always render the banner (it handles both states internally):
+```
+<PaymentHoldBanner
+  jobId={job.job_id}
+  paymentStatus={job.payment_status || 'paid'}
+  paymentHoldReason={job.payment_hold_reason}
+  onReleased={onClose}
+/>
+```
+
+This way:
+- When status is `'paid'`, admins/managers see a **"Hold for Payment"** button
+- When status is `'awaiting_payment'`, the amber banner with **"Release"** button appears
+
+### 4. Add payment hold option to the job actions menus
+
+**File**: `src/components/tracker/views/components/JobRow.tsx` and `src/components/tracker/jobs/JobTableActions.tsx`
+
+Add a "Hold for Payment" / "Release Payment" menu item in the job dropdown actions, so you can toggle it directly from the jobs list without opening the detail modal.
+
+## Summary
+
+| File | Change |
+|------|--------|
+| `src/hooks/tracker/useAccessibleJobs/types.ts` | Add `payment_status` and `payment_hold_reason` fields |
+| `src/hooks/tracker/useAccessibleJobs/` (query file) | Fetch payment columns |
+| `src/components/tracker/factory/EnhancedJobDetailsModal.tsx` | Always render `PaymentHoldBanner`, remove `(job as any)` casts |
+| `src/components/tracker/views/components/JobRow.tsx` | Add payment hold toggle to dropdown menu |
+| `src/components/tracker/jobs/JobTableActions.tsx` | Add payment hold toggle to dropdown menu |
