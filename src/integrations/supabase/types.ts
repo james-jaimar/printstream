@@ -3352,38 +3352,53 @@ export type Database = {
       }
       quickeasy_sync_runs: {
         Row: {
+          duration_ms: number | null
           end_date: string
+          error: string | null
+          finished_at: string | null
           id: string
           notes: string | null
           processed_at: string | null
           processed_by: string | null
           raw_data: Json
           row_count: number
+          sample_rows: Json | null
           start_date: string
+          started_at: string | null
           status: string
           synced_at: string
         }
         Insert: {
+          duration_ms?: number | null
           end_date: string
+          error?: string | null
+          finished_at?: string | null
           id?: string
           notes?: string | null
           processed_at?: string | null
           processed_by?: string | null
           raw_data?: Json
           row_count?: number
+          sample_rows?: Json | null
           start_date: string
+          started_at?: string | null
           status?: string
           synced_at?: string
         }
         Update: {
+          duration_ms?: number | null
           end_date?: string
+          error?: string | null
+          finished_at?: string | null
           id?: string
           notes?: string | null
           processed_at?: string | null
           processed_by?: string | null
           raw_data?: Json
           row_count?: number
+          sample_rows?: Json | null
           start_date?: string
+          started_at?: string | null
           status?: string
           synced_at?: string
         }
