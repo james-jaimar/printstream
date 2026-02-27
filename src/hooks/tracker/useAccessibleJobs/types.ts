@@ -51,6 +51,9 @@ export interface AccessibleJob {
   current_stage_order?: number;
   // Contact information from Excel import
   contact?: string | null;
+  // Payment hold fields
+  payment_status?: string;
+  payment_hold_reason?: string | null;
 }
 
 export interface UseAccessibleJobsOptions {

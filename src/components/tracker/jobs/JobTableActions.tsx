@@ -13,9 +13,11 @@ import {
   Trash2, 
   Play,
   CheckCircle,
-  RefreshCw
+  RefreshCw,
+  CreditCard
 } from "lucide-react";
 import { MobileJobActions } from "./MobileJobActions";
+import { usePartialRework } from "@/hooks/tracker/usePartialRework";
 
 interface JobTableActionsProps {
   job: any;
@@ -38,6 +40,8 @@ export const JobTableActions: React.FC<JobTableActionsProps> = ({
 }) => {
   // Prevent multiple rapid clicks
   const [actionPending, setActionPending] = React.useState(false);
+  const { isProcessing: paymentProcessing, releasePaymentHold, setPaymentHold } = usePartialRework();
+  const isAwaitingPayment = job.payment_status === 'awaiting_payment';
 
   const handleAction = (action: () => void) => {
     if (actionPending) return;
@@ -117,6 +121,21 @@ export const JobTableActions: React.FC<JobTableActionsProps> = ({
                 Initialize Workflow
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isAwaitingPayment) {
+                  await releasePaymentHold(job.id);
+                } else {
+                  await setPaymentHold(job.id, 'Manually placed on hold');
+                }
+              }}
+              disabled={actionPending || paymentProcessing}
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              {isAwaitingPayment ? 'Release Payment Hold' : 'Hold for Payment'}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={(e) => {

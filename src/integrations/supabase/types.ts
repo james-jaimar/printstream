@@ -5261,7 +5261,7 @@ export type Database = {
           p_permission_type?: string
           p_stage_filter?: string
           p_status_filter?: string
-          p_user_id?: string
+          p_user_id: string
         }
         Returns: {
           category_color: string
@@ -5277,6 +5277,8 @@ export type Database = {
           display_stage_name: string
           due_date: string
           job_id: string
+          payment_hold_reason: string
+          payment_status: string
           proof_approved_at: string
           proof_emailed_at: string
           qty: number
@@ -5298,7 +5300,7 @@ export type Database = {
           p_permission_type?: string
           p_stage_filter?: string
           p_status_filter?: string
-          p_user_id?: string
+          p_user_id: string
         }
         Returns: {
           batch_category: string
@@ -5324,6 +5326,8 @@ export type Database = {
           job_id: string
           manual_due_date: string
           parallel_stages: Json
+          payment_hold_reason: string
+          payment_status: string
           proof_approved_at: string
           proof_emailed_at: string
           qty: number

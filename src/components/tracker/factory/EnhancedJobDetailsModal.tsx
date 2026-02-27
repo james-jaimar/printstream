@@ -421,14 +421,12 @@ export const EnhancedJobDetailsModal: React.FC<EnhancedJobDetailsModalProps> = (
             </Card>
 
             {/* Payment Hold Banner */}
-            {(job as any).payment_status === 'awaiting_payment' && (
-              <PaymentHoldBanner
-                jobId={job.job_id}
-                paymentStatus={(job as any).payment_status}
-                paymentHoldReason={(job as any).payment_hold_reason}
-                onReleased={onClose}
-              />
-            )}
+            <PaymentHoldBanner
+              jobId={job.job_id}
+              paymentStatus={(job as any).payment_status || 'paid'}
+              paymentHoldReason={(job as any).payment_hold_reason}
+              onReleased={onClose}
+            />
           </TabsContent>
 
           <TabsContent value="details" className="space-y-6">
