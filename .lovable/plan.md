@@ -1,33 +1,58 @@
 
-Goal: make QuickEasy sync reliable and stop the repeated "failed to fetch" loop.
 
-## Status: IMPLEMENTED ✅
+# Fix: Restore Duplicate Filtering in Standard Excel Import Flow
 
-### Architecture (async pipeline)
+## Problem
 
-1. **`firebird-sync`** (start endpoint) — validates input, creates `quickeasy_sync_runs` row with status `queued`, fires `firebird-sync-worker` asynchronously, returns `runId` immediately to the browser.
+The Excel Import system has two parsing paths:
+- **Matrix parser** (`parseMatrixDataToJobs`): Calls `checkParsedJobsForDuplicates` to filter out WO numbers already in the database. This works correctly.
+- **Standard parser** (`parseExcelFileWithMapping` / `parseAndPrepareProductionReadyJobs`): Never calls `checkParsedJobsForDuplicates`. All rows pass through regardless of whether they already exist in the database.
 
-2. **`firebird-sync-worker`** (new edge function) — connects to Firebird, runs `SP_DIGITAL_PRODUCTION`, decodes rows, writes results (raw_data, row_count, duration_ms, etc.) into `quickeasy_sync_runs`. Updates status to `completed` or `failed`.
+The database upsert with `ignoreDuplicates: true` silently drops duplicates at insert time, but the user never sees which ones were skipped during the preview/mapping phase, and the job count shown is misleading.
 
-3. **`QuickEasySyncPanel`** — calls start endpoint, then polls `quickeasy_sync_runs` every 3s for status. Shows elapsed time. When `completed`, processes data through existing import pipeline. Shows clear error on `failed`.
+## Fix
 
-4. **`quickeasy_sync_runs` table** — extended with: `started_at`, `finished_at`, `duration_ms`, `error`, `sample_rows`.
+### 1. Add duplicate check to `parseExcelFileWithMapping` in `src/utils/excel/enhancedParser.ts`
 
-### Cron jobs
-- The start endpoint returns in <1s, so pg_net default 5s timeout is adequate.
-- To add `timeout_milliseconds` explicitly, run this in the Supabase SQL Editor:
+After the jobs are parsed (around line 322, after the `dataRows.forEach` loop and before the enhanced mapping), add a call to `checkParsedJobsForDuplicates`:
 
-```sql
-SELECT cron.unschedule('quickeasy-sync-weekday');
-SELECT cron.schedule('quickeasy-sync-weekday', '0 5-15 * * 1-5', $$
-  SELECT net.http_post(
-    url := 'https://kgizusgqexmlfcqfjopk.supabase.co/functions/v1/firebird-sync',
-    headers := '{"Content-Type": "application/json", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtnaXp1c2dxZXhtbGZjcWZqb3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ1NTQwNzAsImV4cCI6MjA2MDEzMDA3MH0.NA2wRme-L8Z15my7n8u-BCQtO4Nw2opfsX0KSLYcs-I"}'::jsonb,
-    body := concat('{"startDate": "', CURRENT_DATE::text, '", "endDate": "', CURRENT_DATE::text, '"}')::jsonb,
-    timeout_milliseconds := 30000
-  ) AS request_id;
-$$);
+- Import `checkParsedJobsForDuplicates` from `@/utils/jobDeduplication`
+- After building the `mapped` array, call `checkParsedJobsForDuplicates(mapped)`
+- Filter out duplicates from the `mapped` array
+- Track `duplicatesSkipped` and `duplicateJobs` in the return value
+- Log which WO numbers were skipped
+
+### 2. Propagate duplicate info through `parseAndPrepareProductionReadyJobs`
+
+Currently this function calls `parseExcelFileWithMapping` but discards the duplicate info (the return type only has `{ jobs, stats }`). Update it to:
+- Capture `duplicatesSkipped` and `duplicateJobs` from the parse result
+- Pass them through to the final `EnhancedJobCreationResult`
+
+### 3. Update `ParsedData` type in `src/utils/excel/types.ts`
+
+Ensure `duplicatesSkipped` and `duplicateJobs` are consistently available on the `ParsedData` interface (they already exist as optional fields, so this is just verification).
+
+## Technical Details
+
+The key change is in `parseExcelFileWithMapping` around line 322:
+
+```typescript
+// After: const mapped: ParsedJob[] = [];  ... dataRows.forEach(...)
+
+// NEW: Check for duplicates against existing database
+const duplicateCheck = await checkParsedJobsForDuplicates(mapped);
+const filteredJobs = duplicateCheck.newJobs;
+const duplicatesSkipped = duplicateCheck.duplicates.length;
+const duplicateJobs = duplicateCheck.duplicates;
+
+if (duplicatesSkipped > 0) {
+  logger.addWarning(`Skipped ${duplicatesSkipped} duplicate WO numbers`);
+}
+
+// Then use filteredJobs instead of mapped for the rest of the function
 ```
 
-### Fallback note
-If the worker still times out (Supabase Edge wall-clock ~150s), the final fallback is a tiny on-prem bridge service next to Firebird.
+## Files Changed
+
+1. `src/utils/excel/enhancedParser.ts` -- add import and duplicate check call in `parseExcelFileWithMapping`, propagate in `parseAndPrepareProductionReadyJobs`
+
