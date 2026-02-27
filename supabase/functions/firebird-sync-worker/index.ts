@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
           else resolve(res);
         });
       }),
-      140000,
+      290000,
       "Firebird SP query"
     );
     const queryMs = Date.now() - queryStart;
@@ -141,12 +141,16 @@ Deno.serve(async (req: Request) => {
     console.error(`[worker] Run ${runId}: error —`, error);
 
     if (runId) {
-      const finishedAt = new Date();
-      await sb.from("quickeasy_sync_runs").update({
-        status: "failed",
-        finished_at: finishedAt.toISOString(),
-        error: error.message || "Unknown error",
-      }).eq("id", runId).catch(() => {});
+      try {
+        const finishedAt = new Date();
+        await sb.from("quickeasy_sync_runs").update({
+          status: "failed",
+          finished_at: finishedAt.toISOString(),
+          error: error.message || "Unknown error",
+        }).eq("id", runId);
+      } catch (updateErr) {
+        console.error(`[worker] Failed to mark run ${runId} as failed:`, updateErr);
+      }
     }
 
     return new Response(
