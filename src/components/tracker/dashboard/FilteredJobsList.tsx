@@ -16,7 +16,8 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle,
-  X
+  X,
+  CreditCard
 } from "lucide-react";
 import { format } from "date-fns";
 import { JobStatusDisplay } from "../common/JobStatusDisplay";
@@ -155,6 +156,12 @@ export const FilteredJobsList: React.FC<FilteredJobsListProps> = ({
                         <h3 className="font-semibold text-gray-900 truncate">
                           {job.wo_no}
                         </h3>
+                        {job.payment_status === 'awaiting_payment' && (
+                          <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                            <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                            AWAITING PAYMENT
+                          </Badge>
+                        )}
                       </div>
                       
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-600">

@@ -13,7 +13,8 @@ import {
   CheckCircle,
   AlertCircle,
   Play,
-  Pause
+  Pause,
+  CreditCard
 } from "lucide-react";
 import { format } from "date-fns";
 import { TrafficLightIndicator } from "./production/TrafficLightIndicator";
@@ -99,6 +100,12 @@ export const EnhancedJobCard: React.FC<EnhancedJobCardProps> = ({
               <BatchContextIndicator job={job} size="sm" showDetails={false} />
               <BatchStageIndicator job={job} compact />
               <ConditionalStageIndicator job={job} compact />
+              {job.payment_status === 'awaiting_payment' && (
+                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                  <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                  AWAITING PAYMENT
+                </Badge>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">

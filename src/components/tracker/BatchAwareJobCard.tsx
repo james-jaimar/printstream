@@ -7,7 +7,8 @@ import {
   Calendar, 
   Clock,
   ExternalLink,
-  Layers
+  Layers,
+  CreditCard
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -153,6 +154,8 @@ interface BatchAwareJobCardProps {
     current_stage_status?: string | null;
     workflow_progress?: number;
     
+    // Payment hold
+    payment_status?: string;
     // Batch context
     is_batch_master?: boolean;
     batch_name?: string | null;
@@ -222,12 +225,19 @@ export const BatchAwareJobCard: React.FC<BatchAwareJobCardProps> = ({
                   <p className="text-xs text-gray-600 truncate">{job.customer}</p>
                 )}
               </div>
-              <BatchContextIndicator 
-                job={job} 
-                size="sm" 
-                showDetails={false}
-                className="ml-2"
-              />
+              <div className="flex items-center gap-1 ml-2">
+                <BatchContextIndicator 
+                  job={job} 
+                  size="sm" 
+                  showDetails={false}
+                />
+                {job.payment_status === 'awaiting_payment' && (
+                  <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                    <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                    AWAITING PAYMENT
+                  </Badge>
+                )}
+              </div>
             </div>
             
             <div className="flex items-center justify-between">
@@ -269,6 +279,12 @@ export const BatchAwareJobCard: React.FC<BatchAwareJobCardProps> = ({
                 {job.is_batch_master && (
                   <Badge className="bg-purple-600 text-white text-xs">
                     MASTER
+                  </Badge>
+                )}
+                {job.payment_status === 'awaiting_payment' && (
+                  <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                    <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                    AWAITING PAYMENT
                   </Badge>
                 )}
               </div>

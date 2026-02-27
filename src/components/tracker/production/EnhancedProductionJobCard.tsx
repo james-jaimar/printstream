@@ -11,7 +11,8 @@ import {
   Clock,
   CheckCircle,
   Play,
-  MoreHorizontal
+  MoreHorizontal,
+  CreditCard
 } from "lucide-react";
 import { 
   DropdownMenu, 
@@ -135,6 +136,12 @@ export const EnhancedProductionJobCard: React.FC<EnhancedProductionJobCardProps>
               {isOverdue && (
                 <Badge variant="destructive" className="text-xs">
                   Overdue
+                </Badge>
+              )}
+              {job.payment_status === 'awaiting_payment' && (
+                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                  <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                  AWAITING PAYMENT
                 </Badge>
               )}
             </div>

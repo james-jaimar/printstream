@@ -16,7 +16,8 @@ import {
   Play,
   CheckCircle,
   MoreHorizontal,
-  QrCode
+  QrCode,
+  CreditCard
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -48,6 +49,7 @@ interface CompactJobCardProps {
     qty?: number;
     due_date?: string;
     status: string;
+    payment_status?: string;
     location?: string;
     reference?: string;
     current_stage?: string;
@@ -145,6 +147,12 @@ export const CompactJobCard: React.FC<CompactJobCardProps> = ({
                   <Badge className={`text-xs ${getStatusColor(job.status)}`}>
                     {job.status}
                   </Badge>
+                  {job.payment_status === 'awaiting_payment' && (
+                    <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                      <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                      AWAITING PAYMENT
+                    </Badge>
+                  )}
                 </div>
 
                 {/* Quick Info Row */}

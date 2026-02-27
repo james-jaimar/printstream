@@ -15,7 +15,8 @@ import {
   Activity,
   RefreshCw,
   Wifi,
-  WifiOff
+  WifiOff,
+  CreditCard
 } from "lucide-react";
 import { useAccessibleJobs } from "@/hooks/tracker/useAccessibleJobs";
 import { calculateDashboardMetrics } from "@/hooks/tracker/useAccessibleJobs/dashboardUtils";
@@ -349,7 +350,15 @@ export const ManagerDashboard: React.FC = () => {
                 metrics.recentCompletions.map((job) => (
                   <div key={job.job_id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                     <div>
-                      <div className="font-medium">{job.wo_no}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{job.wo_no}</span>
+                        {job.payment_status === 'awaiting_payment' && (
+                          <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                            <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                            AWAITING PAYMENT
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-sm text-gray-600">{job.customer || 'Unknown Customer'}</div>
                     </div>
                     <Badge className="bg-green-600">{Math.round(job.workflow_progress)}%</Badge>
@@ -377,7 +386,15 @@ export const ManagerDashboard: React.FC = () => {
                 metrics.overdueJobs.map((job) => (
                   <div key={job.job_id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
                     <div>
-                      <div className="font-medium">{job.wo_no}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{job.wo_no}</span>
+                        {job.payment_status === 'awaiting_payment' && (
+                          <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                            <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                            AWAITING PAYMENT
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-sm text-red-600">
                         Overdue: {job.due_date ? new Date(job.due_date).toLocaleDateString() : 'No date'}
                       </div>

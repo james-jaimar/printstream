@@ -9,7 +9,8 @@ import {
   Package, 
   Play,
   CheckCircle,
-  Clock
+  Clock,
+  CreditCard
 } from "lucide-react";
 import { JobSpecificationCard } from "../common/JobSpecificationCard";
 import { PartAssignmentIndicator } from "../common/PartAssignmentIndicator";
@@ -60,6 +61,12 @@ export const EnhancedKanbanJobCard: React.FC<EnhancedKanbanJobCardProps> = ({
             {isOverdue && (
               <Badge variant="destructive" className="text-xs ml-1">
                 Overdue
+              </Badge>
+            )}
+            {job.payment_status === 'awaiting_payment' && (
+              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0 ml-1">
+                <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                AWAITING PAYMENT
               </Badge>
             )}
           </div>
