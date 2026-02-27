@@ -12,12 +12,24 @@ export interface DuplicateJobInfo {
 
 export const findDuplicateJobs = async (): Promise<DuplicateJobInfo[][]> => {
   try {
-    const { data: jobs, error } = await supabase
-      .from('production_jobs')
-      .select('id, wo_no, customer, created_at')
-      .order('created_at', { ascending: true });
+    // Paginate to fetch ALL jobs (Supabase default limit is 1,000)
+    let allJobs: { id: string; wo_no: string; customer: string | null; created_at: string }[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data: batch, error } = await supabase
+        .from('production_jobs')
+        .select('id, wo_no, customer, created_at')
+        .order('created_at', { ascending: true })
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+      if (error) throw error;
+      if (!batch || batch.length === 0) break;
+      allJobs = allJobs.concat(batch);
+      if (batch.length < pageSize) break;
+      page++;
+    }
+    const jobs = allJobs;
 
-    if (error) throw error;
 
     // Group jobs by normalized WO number
     const jobGroups = new Map<string, DuplicateJobInfo[]>();
@@ -68,10 +80,20 @@ export const mergeDuplicateJobs = async (jobsToKeep: string[], jobsToRemove: str
 
 export const checkParsedJobsForDuplicates = async (parsedJobs: any[]): Promise<{ newJobs: typeof parsedJobs; duplicates: typeof parsedJobs; existingWONumbers: Set<string> }> => {
   try {
-    // Get all existing WO numbers from database
+    // Extract normalized WO numbers from parsed jobs for targeted query
+    const woNumbers = parsedJobs
+      .map(job => formatWONumber(job.wo_no))
+      .filter(Boolean) as string[];
+
+    if (woNumbers.length === 0) {
+      return { newJobs: parsedJobs, duplicates: [], existingWONumbers: new Set() };
+    }
+
+    // Query only the specific WO numbers we need to check (avoids 1,000-row default limit)
     const { data: existingJobs, error } = await supabase
       .from('production_jobs')
-      .select('wo_no');
+      .select('wo_no')
+      .in('wo_no', woNumbers);
 
     if (error) throw error;
 
