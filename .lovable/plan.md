@@ -1,28 +1,47 @@
 
-# Fix Firebird Query Timeout
 
-## Problem
-The `db.sequentially()` streaming API times out after 90 seconds. Both `SELECT * FROM` and `EXECUTE BLOCK` with streaming hang in Deno Deploy's TCP compatibility layer. The connection itself works fine (test mode passes), but multi-row result streaming is broken.
+# Fix Firebird Sync - Remove Wasted EXECUTE BLOCK Timeout
 
-## Solution
-Switch from `db.sequentially()` to `db.query()` for the EXECUTE BLOCK. The `query()` method buffers all results in memory rather than streaming row-by-row, which is more compatible with Deno's TCP shim. Since we expect ~126 rows (not millions), buffering is perfectly fine.
+## Root Cause
 
-If `db.query()` with EXECUTE BLOCK also hangs, add a second fallback: loop `EXECUTE PROCEDURE` with pagination using `FIRST/SKIP` or `ROWS` syntax to fetch rows in small batches.
+The edge function logs tell the full story:
+1. EXECUTE BLOCK query starts, hangs for 120 seconds, times out
+2. Fallback `SELECT * FROM SP_DIGITAL_PRODUCTION(...)` starts at the 120s mark
+3. The Supabase edge function gets killed at ~200s (platform wall-clock limit) before the fallback can complete
 
-## Changes
+The stored procedure runs in 3 seconds locally. The issue is `node-firebird` in Deno's npm compatibility layer struggling with multi-row stored procedure results. By wasting 120 seconds on the EXECUTE BLOCK attempt, the fallback `SELECT *` never gets enough time.
 
-### File: `supabase/functions/firebird-sync/index.ts`
+## Fix
 
-1. Replace `db.sequentially()` call (lines 120-133) with `db.query()`:
-   - Use `db.query(sql, [], callback)` which returns all rows at once
-   - Keep the same EXECUTE BLOCK SQL (it works as a selectable block with `query()` too)
-   - Increase timeout to 120 seconds as the SP is inherently slow
-   - Add a fallback: if the EXECUTE BLOCK query fails, try `db.query("SELECT * FROM SP_DIGITAL_PRODUCTION(...)")` as a plain select
+### 1. Simplify `supabase/functions/firebird-sync/index.ts`
 
-2. Add better error logging to distinguish between connection issues and query issues
+- **Remove the EXECUTE BLOCK entirely** (lines 102-116) -- it hangs every time and wastes 120 seconds
+- **Remove the try/catch fallback pattern** -- go straight to `SELECT * FROM SP_DIGITAL_PRODUCTION('{startDate}','{endDate}')`
+- **Set timeout to 140 seconds** -- just under the Supabase platform limit (~150s) so we get a clean error instead of a hard kill
+- This gives the single query the full available window instead of splitting time between two attempts
 
-### Redeploy
-After code change, the edge function will be automatically redeployed.
+### 2. Code change summary
 
-## Technical Detail
-`node-firebird`'s `query()` internally uses the same wire protocol but collects rows into an array before invoking the callback. This avoids the per-row callback pattern that seems to break in Deno's async TCP handling. The EXECUTE BLOCK wrapper ensures the selectable SP results are properly materialized.
+Replace lines 102-156 (the EXECUTE BLOCK + fallback pattern) with a single query:
+
+```text
+const sql = `SELECT * FROM SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`;
+console.log(`[firebird-sync] SQL: ${sql}`);
+
+const result = await withTimeout(
+  new Promise((resolve, reject) => {
+    db.query(sql, [], (err, res) => {
+      if (err) reject(new Error(`Query failed: ${err.message}`));
+      else resolve(res);
+    });
+  }),
+  140000,
+  "Firebird SP query"
+);
+const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
+rows = rawRows.map(decodeRow);
+console.log(`[firebird-sync] Query returned ${rows.length} rows`);
+```
+
+No other files need changes. The frontend panel and data mapper are working correctly.
+
