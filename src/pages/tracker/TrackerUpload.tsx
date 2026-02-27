@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ExcelUpload } from "@/components/tracker/ExcelUpload";
+import { QuickEasySyncPanel } from "@/components/tracker/QuickEasySyncPanel";
 
 const TrackerUpload = () => {
   return (
@@ -18,10 +19,13 @@ const TrackerUpload = () => {
           </Button>
         </div>
         <h1 className="text-3xl font-bold">Upload Production Jobs</h1>
-        <p className="text-gray-600">Import production jobs from Excel files</p>
+        <p className="text-muted-foreground">Import production jobs from QuickEasy or Excel files</p>
       </div>
 
-      <ExcelUpload />
+      <div className="space-y-6">
+        <QuickEasySyncPanel />
+        <ExcelUpload />
+      </div>
     </div>
   );
 };
