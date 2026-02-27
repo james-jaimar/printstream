@@ -1,49 +1,61 @@
 
 
-# Fix: Duplicate Check Missing Jobs Due to Supabase Default Row Limit
+# QuickEasy Sync: Push-Based Architecture + Bug Fixes
 
-## Root Cause
+## Overview
 
-The console log confirms: `Duplicate check complete: 36 new jobs, 0 duplicates found` -- the check runs but finds zero duplicates, even though D430770 exists in the database.
-
-The problem is in `checkParsedJobsForDuplicates` in `src/utils/jobDeduplication.ts` (line 72):
-
-```typescript
-const { data: existingJobs, error } = await supabase
-  .from('production_jobs')
-  .select('wo_no');
-```
-
-**Supabase's default `.select()` returns a maximum of 1,000 rows.** The database has 2,074 production jobs, so only ~1,000 WO numbers are loaded into the lookup set. If D430770 falls outside that first 1,000, it is not found and the job passes through as "new."
-
-## Fix
-
-**File: `src/utils/jobDeduplication.ts`**
-
-### Option 1 (targeted -- preferred): Only query WO numbers that are in the import batch
-
-Instead of fetching all 2,074 WO numbers, query only the specific ones we need to check:
-
-```typescript
-// Extract normalized WO numbers from parsed jobs
-const woNumbers = parsedJobs
-  .map(job => formatWONumber(job.wo_no))
-  .filter(Boolean);
-
-const { data: existingJobs, error } = await supabase
-  .from('production_jobs')
-  .select('wo_no')
-  .in('wo_no', woNumbers);
-```
-
-This is faster, avoids the 1,000-row limit issue entirely, and scales regardless of how many total jobs exist.
-
-### Backup: Also fix `findDuplicateJobs` (same file, line 16)
-
-The `findDuplicateJobs` function has the same 1,000-row limit issue. Add pagination or use the `.in()` approach where applicable.
+Build a new Edge Function endpoint that **receives** pre-fetched QuickEasy data (pushed from your local network), plus fix the two bugs causing the "stuck forever" issue. The existing pull-based sync remains as a fallback.
 
 ## Changes
 
-1. **`src/utils/jobDeduplication.ts`** -- `checkParsedJobsForDuplicates`: Replace broad `select('wo_no')` with targeted `.in('wo_no', woNumbers)` query using the batch's WO numbers
-2. **`src/utils/jobDeduplication.ts`** -- `findDuplicateJobs`: Add pagination loop to fetch all rows (this function needs all jobs)
+### 1. New Edge Function: `quickeasy-receive`
+
+A simple endpoint that accepts JSON data and writes it to `quickeasy_sync_runs`. This is what the local relay script will POST to.
+
+- Accepts `{ startDate, endDate, rows }` in the request body
+- Validates the payload
+- Creates a completed sync run in `quickeasy_sync_runs` with the data
+- Returns `{ success: true, runId }`
+- Uses a shared secret header for basic auth (prevents random POSTs)
+
+**File:** `supabase/functions/quickeasy-receive/index.ts`
+
+Also add to `supabase/config.toml`:
+```toml
+[functions.quickeasy-receive]
+verify_jwt = false
+```
+
+### 2. Fix broken error handler in worker
+
+**File:** `supabase/functions/firebird-sync-worker/index.ts`
+
+Replace the broken `.catch()` (Supabase JS returns PromiseLike, not Promise) with a proper try/catch so failed runs are always marked as `"failed"` in the database instead of staying stuck at `"running"` forever.
+
+### 3. Add 5-minute max polling timeout on frontend
+
+**File:** `src/components/tracker/QuickEasySyncPanel.tsx`
+
+Add a maximum polling duration of 5 minutes. If the run is still `"running"` after 5 minutes, stop polling and show a timeout error instead of spinning forever.
+
+### 4. Clean up stuck runs in database
+
+Run a migration to mark all existing stuck `"running"` or `"queued"` runs (older than 10 minutes) as `"failed"` so they don't interfere with future syncs.
+
+### 5. Provide local relay script template
+
+Create a reference script at `scripts/quickeasy-relay.js` (won't run in Lovable, but gives you a ready-to-use template for your local machine). About 40 lines of Node.js:
+
+```text
+[Local machine] → Firebird query (5s) → POST JSON → [quickeasy-receive] → DB
+```
+
+## Files Created/Modified
+
+1. **NEW** `supabase/functions/quickeasy-receive/index.ts` -- receiving endpoint
+2. **EDIT** `supabase/functions/firebird-sync-worker/index.ts` -- fix error handler bug
+3. **EDIT** `src/components/tracker/QuickEasySyncPanel.tsx` -- add 5-min polling timeout
+4. **EDIT** `supabase/config.toml` -- add quickeasy-receive function config
+5. **NEW** `scripts/quickeasy-relay.js` -- local relay script template
+6. **DB migration** -- clean up stuck runs
 
