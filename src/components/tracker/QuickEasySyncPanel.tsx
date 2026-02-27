@@ -1,10 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Database, RefreshCw, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
+import { Database, RefreshCw, Loader2, CheckCircle, AlertTriangle, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -22,13 +22,19 @@ function getTodayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+type SyncStatus = "idle" | "queued" | "running" | "completed" | "failed";
+
 export const QuickEasySyncPanel: React.FC = () => {
   const { user } = useAuth();
   const [startDate, setStartDate] = useState(getTodayStr());
   const [endDate, setEndDate] = useState(getTodayStr());
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const [runId, setRunId] = useState<string | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<{ rows: number; jobs: number; duplicates: number } | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Paginated dialog state
   const [enhancedResult, setEnhancedResult] = useState<EnhancedJobCreationResult | null>(null);
@@ -40,107 +46,153 @@ export const QuickEasySyncPanel: React.FC = () => {
   const [showPartAssignment, setShowPartAssignment] = useState(false);
   const [partAssignmentJob, setPartAssignmentJob] = useState<{ id: string; wo_no: string } | null>(null);
 
+  const isSyncing = syncStatus === "queued" || syncStatus === "running";
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  // Process completed run data
+  const processRunData = useCallback(async (rawData: any[]) => {
+    if (!user) return;
+
+    const firebirdRows: FirebirdRow[] = rawData || [];
+    if (firebirdRows.length === 0) {
+      toast.info("No orders found in the selected date range");
+      setLastSyncResult({ rows: 0, jobs: 0, duplicates: 0 });
+      return;
+    }
+
+    toast.info(`Fetched ${firebirdRows.length} rows from QuickEasy. Processing...`);
+
+    const matrixData = firebirdRowsToMatrixData(firebirdRows);
+    debugLogger.addDebugInfo(`Firebird sync: ${firebirdRows.length} rows, ${matrixData.detectedGroups.length} groups detected`);
+
+    const columnMapping = {
+      woNo: 0, customer: 2, reference: 4, date: 1, dueDate: -1,
+      rep: -1, category: -1, location: -1, size: 5,
+      specification: -1, contact: 3, qty: 11,
+    };
+
+    const jobsResult = await parseMatrixDataToJobs(matrixData, columnMapping, debugLogger);
+
+    if (jobsResult.jobs.length === 0) {
+      toast.info(`No new orders to import (${jobsResult.duplicatesSkipped} duplicates skipped)`);
+      setLastSyncResult({ rows: firebirdRows.length, jobs: 0, duplicates: jobsResult.duplicatesSkipped });
+      return;
+    }
+
+    const enhancedProcessor = new EnhancedMappingProcessor(debugLogger, []);
+    await enhancedProcessor.initialize();
+
+    const enhancedMappingResult = await enhancedProcessor.processJobsWithEnhancedMapping(
+      jobsResult.jobs, -1, -1, matrixData.rows, {}
+    );
+
+    const jobCreator = new EnhancedJobCreator(debugLogger, user.id, true);
+    await jobCreator.initialize();
+
+    const result = await jobCreator.prepareEnhancedJobsWithExcelData(
+      enhancedMappingResult.jobs, matrixData.headers, matrixData.rows,
+    );
+
+    result.duplicatesSkipped = jobsResult.duplicatesSkipped;
+    result.duplicateJobs = jobsResult.duplicateJobs;
+
+    setEnhancedResult(result);
+    setShowEnhancedDialog(true);
+    setLastSyncResult({
+      rows: firebirdRows.length,
+      jobs: jobsResult.jobs.length,
+      duplicates: jobsResult.duplicatesSkipped,
+    });
+
+    const dupMsg = jobsResult.duplicatesSkipped > 0
+      ? ` (${jobsResult.duplicatesSkipped} duplicates skipped)`
+      : "";
+    toast.success(`${jobsResult.jobs.length} orders ready for review${dupMsg}`);
+  }, [user, debugLogger]);
+
+  // Poll for run completion
+  const startPolling = useCallback((id: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(async () => {
+      const { data, error } = await supabase
+        .from("quickeasy_sync_runs")
+        .select("status, row_count, raw_data, error, duration_ms")
+        .eq("id", id)
+        .single();
+
+      if (error) {
+        console.error("[QuickEasy Poll] Error:", error);
+        return;
+      }
+
+      if (data.status === "completed") {
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setSyncStatus("completed");
+        toast.success(`QuickEasy sync completed — ${data.row_count} rows in ${((data.duration_ms || 0) / 1000).toFixed(1)}s`);
+        
+        // Process the data through the import pipeline
+        try {
+          await processRunData(data.raw_data as any[]);
+        } catch (err: any) {
+          console.error("[QuickEasy] Processing error:", err);
+          setSyncError(`Data fetched but processing failed: ${err.message}`);
+        }
+      } else if (data.status === "failed") {
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setSyncStatus("failed");
+        setSyncError(data.error || "Sync failed (unknown reason)");
+        toast.error(`QuickEasy sync failed: ${data.error || "Unknown error"}`);
+      } else if (data.status === "running" && syncStatus !== "running") {
+        setSyncStatus("running");
+      }
+    }, 3000);
+  }, [processRunData, syncStatus]);
+
   const handleSync = async () => {
     if (!user?.id) {
       toast.error("You must be logged in");
       return;
     }
 
-    setIsSyncing(true);
+    setSyncStatus("queued");
     setSyncError(null);
     setLastSyncResult(null);
+    setElapsedSeconds(0);
     debugLogger.clear();
 
+    // Start elapsed timer
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds((s) => s + 1);
+    }, 1000);
+
     try {
-      // Step 1: Fetch rows from Firebird
-      toast.info("Connecting to QuickEasy...");
+      toast.info("Starting QuickEasy sync...");
       const { data, error } = await supabase.functions.invoke("firebird-sync", {
         body: { startDate, endDate },
       });
 
       if (error) throw new Error(error.message || "Edge function error");
-      if (!data?.success) throw new Error(data?.error || "Unknown error from Firebird");
+      if (!data?.success || !data?.runId) throw new Error(data?.error || "Failed to start sync");
 
-      const firebirdRows: FirebirdRow[] = data.data || [];
-      if (firebirdRows.length === 0) {
-        toast.info("No orders found in the selected date range");
-        setLastSyncResult({ rows: 0, jobs: 0, duplicates: 0 });
-        return;
-      }
-
-      toast.info(`Fetched ${firebirdRows.length} rows from QuickEasy. Processing...`);
-
-      // Step 2: Convert to matrix format (includes Pre-press qty fix)
-      const matrixData = firebirdRowsToMatrixData(firebirdRows);
-      debugLogger.addDebugInfo(`Firebird sync: ${firebirdRows.length} rows, ${matrixData.detectedGroups.length} groups detected`);
-
-      // Step 3: Parse matrix data to jobs (groups rows by WO, deduplicates)
-      const columnMapping = {
-        woNo: 0,
-        customer: 2,
-        reference: 4,
-        date: 1,
-        dueDate: -1, // SP doesn't provide due date
-        rep: -1,
-        category: -1,
-        location: -1,
-        size: 5,
-        specification: -1,
-        contact: 3,
-        qty: 11, // Use WO Qty as the job-level qty
-      };
-
-      const jobsResult = await parseMatrixDataToJobs(matrixData, columnMapping, debugLogger);
-
-      if (jobsResult.jobs.length === 0) {
-        toast.info(`No new orders to import (${jobsResult.duplicatesSkipped} duplicates skipped)`);
-        setLastSyncResult({ rows: firebirdRows.length, jobs: 0, duplicates: jobsResult.duplicatesSkipped });
-        return;
-      }
-
-      // Step 4: Run through enhanced mapping processor
-      const enhancedProcessor = new EnhancedMappingProcessor(debugLogger, []);
-      await enhancedProcessor.initialize();
-
-      const enhancedMappingResult = await enhancedProcessor.processJobsWithEnhancedMapping(
-        jobsResult.jobs,
-        -1,
-        -1,
-        matrixData.rows,
-        {} // No user-provided column mappings
-      );
-
-      // Step 5: Prepare for PaginatedJobCreationDialog
-      const jobCreator = new EnhancedJobCreator(debugLogger, user.id, true);
-      await jobCreator.initialize();
-
-      const result = await jobCreator.prepareEnhancedJobsWithExcelData(
-        enhancedMappingResult.jobs,
-        matrixData.headers,
-        matrixData.rows,
-      );
-
-      result.duplicatesSkipped = jobsResult.duplicatesSkipped;
-      result.duplicateJobs = jobsResult.duplicateJobs;
-
-      setEnhancedResult(result);
-      setShowEnhancedDialog(true);
-      setLastSyncResult({
-        rows: firebirdRows.length,
-        jobs: jobsResult.jobs.length,
-        duplicates: jobsResult.duplicatesSkipped,
-      });
-
-      const dupMsg = jobsResult.duplicatesSkipped > 0
-        ? ` (${jobsResult.duplicatesSkipped} duplicates skipped)`
-        : "";
-      toast.success(`${jobsResult.jobs.length} orders ready for review${dupMsg}`);
+      setRunId(data.runId);
+      startPolling(data.runId);
     } catch (err: any) {
       console.error("[QuickEasy Sync] Error:", err);
+      setSyncStatus("failed");
       setSyncError(err.message || "Sync failed");
       toast.error(`QuickEasy sync failed: ${err.message}`);
-    } finally {
-      setIsSyncing(false);
+      if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
@@ -182,6 +234,12 @@ export const QuickEasySyncPanel: React.FC = () => {
     toast.success("QuickEasy import completed!");
   };
 
+  const formatElapsed = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  };
+
   return (
     <>
       <Card>
@@ -221,7 +279,7 @@ export const QuickEasySyncPanel: React.FC = () => {
               {isSyncing ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Syncing...
+                  {syncStatus === "queued" ? "Starting..." : "Syncing..."}
                 </>
               ) : (
                 <>
@@ -231,6 +289,17 @@ export const QuickEasySyncPanel: React.FC = () => {
               )}
             </Button>
           </div>
+
+          {/* Running status indicator */}
+          {isSyncing && (
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted text-sm">
+              <Clock className="h-4 w-4 text-muted-foreground animate-pulse" />
+              <span>
+                {syncStatus === "queued" ? "Queued — connecting to QuickEasy..." : "Fetching data from QuickEasy..."}
+              </span>
+              <Badge variant="outline">{formatElapsed(elapsedSeconds)}</Badge>
+            </div>
+          )}
 
           {syncError && (
             <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
