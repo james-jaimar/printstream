@@ -87,3 +87,7 @@ verify_jwt = false
 [functions.label-notify]
 verify_jwt = false
 
+# QUICKEASY: Direct Firebird DB integration
+[functions.firebird-sync]
+verify_jwt = false
+
