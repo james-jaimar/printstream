@@ -74,30 +74,65 @@ Deno.serve(async (req: Request) => {
     );
     console.log("[firebird-sync] Connected");
 
-    let sql: string;
     if (testMode) {
-      sql = "SELECT 1 AS TEST_VALUE FROM RDB$DATABASE";
-    } else {
-      sql = `EXECUTE PROCEDURE SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`;
+      const sql = "SELECT 1 AS TEST_VALUE FROM RDB$DATABASE";
+      console.log(`[firebird-sync] SQL: ${sql}`);
+      
+      const result: any = await withTimeout(
+        new Promise((resolve, reject) => {
+          db.query(sql, [], (err: any, res: any) => {
+            if (err) reject(new Error(`Query failed: ${err.message || JSON.stringify(err)}`));
+            else resolve(res);
+          });
+        }),
+        30000,
+        "Firebird test query"
+      );
+
+      try { db.detach(() => {}); } catch (_) {}
+      const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
+      const rows = rawRows.map(decodeRow);
+      
+      return new Response(
+        JSON.stringify({ success: true, rowCount: rows.length, data: rows, query: { testMode: true } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    console.log(`[firebird-sync] SQL: ${sql}`);
+    // Use EXECUTE BLOCK with FOR SELECT to stream all rows from selectable SP
+    const sql = `EXECUTE BLOCK RETURNS (
+      WOID INTEGER, WODATE TIMESTAMP, COMPANY VARCHAR(200), CONTACT VARCHAR(200),
+      REFERENCE VARCHAR(500), SIZE VARCHAR(200), ITEM_TYPE VARCHAR(100),
+      GROUPS VARCHAR(100), DESCRIPTION VARCHAR(500), PROVIDER VARCHAR(200),
+      QTY NUMERIC(18,2), WO_QTY NUMERIC(18,2), EMAIL VARCHAR(200)
+    ) AS
+    BEGIN
+      FOR SELECT WOID, WODATE, COMPANY, CONTACT, REFERENCE, SIZE, ITEM_TYPE,
+                 GROUPS, DESCRIPTION, PROVIDER, QTY, WO_QTY, EMAIL
+          FROM SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')
+          INTO :WOID, :WODATE, :COMPANY, :CONTACT, :REFERENCE, :SIZE, :ITEM_TYPE,
+               :GROUPS, :DESCRIPTION, :PROVIDER, :QTY, :WO_QTY, :EMAIL
+      DO SUSPEND;
+    END`;
 
-    const result: any = await withTimeout(
-      new Promise((resolve, reject) => {
-        db.query(sql, [], (err: any, res: any) => {
+    console.log(`[firebird-sync] Executing BLOCK for SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`);
+
+    const rows: any[] = [];
+    
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        db.sequentially(sql, [], (row: any, index: number) => {
+          rows.push(decodeRow(row));
+        }, (err: any) => {
           if (err) reject(new Error(`Query failed: ${err.message || JSON.stringify(err)}`));
-          else resolve(res);
+          else resolve();
         });
       }),
-      30000,
-      "Firebird query"
+      90000,
+      "Firebird SP query"
     );
 
     try { db.detach(() => {}); } catch (_) {}
-
-    const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
-    const rows = rawRows.map(decodeRow);
     console.log(`[firebird-sync] Returning ${rows.length} decoded rows`);
 
     return new Response(
@@ -105,8 +140,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         rowCount: rows.length,
         data: rows,
-        query: testMode ? { testMode: true } : { startDate, endDate },
-        note: "Using EXECUTE PROCEDURE — returns first result row. If SP is selectable with multiple rows, the Firebird SP may need modification to use a wrapper view or table."
+        query: { startDate, endDate }
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
