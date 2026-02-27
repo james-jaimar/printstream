@@ -16,10 +16,12 @@ import {
   Tags, 
   Settings, 
   Trash2,
-  Package
+  Package,
+  CreditCard
 } from "lucide-react";
 import { JobActionButtons } from "@/components/tracker/common/JobActionButtons";
 import { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
+import { usePartialRework } from "@/hooks/tracker/usePartialRework";
 
 interface JobRowProps {
   job: AccessibleJob;
@@ -35,6 +37,28 @@ interface JobRowProps {
   onDeleteJob: (jobId: string) => void;
   onAssignParts?: (job: AccessibleJob) => void; // Added for part assignment functionality
 }
+
+// Inline payment hold menu item component
+const PaymentHoldMenuItem: React.FC<{ job: AccessibleJob }> = ({ job }) => {
+  const { isProcessing, releasePaymentHold, setPaymentHold } = usePartialRework();
+  const isAwaiting = job.payment_status === 'awaiting_payment';
+  
+  return (
+    <DropdownMenuItem
+      onClick={async () => {
+        if (isAwaiting) {
+          await releasePaymentHold(job.job_id);
+        } else {
+          await setPaymentHold(job.job_id, 'Manually placed on hold');
+        }
+      }}
+      disabled={isProcessing}
+    >
+      <CreditCard className="h-4 w-4 mr-2" />
+      {isAwaiting ? 'Release Payment Hold' : 'Hold for Payment'}
+    </DropdownMenuItem>
+  );
+};
 
 export const JobRow: React.FC<JobRowProps> = ({
   job,
@@ -142,6 +166,8 @@ export const JobRow: React.FC<JobRowProps> = ({
                 Assign Parts
               </DropdownMenuItem>
             )}
+
+            <PaymentHoldMenuItem job={job} />
             
             <DropdownMenuSeparator />
             
