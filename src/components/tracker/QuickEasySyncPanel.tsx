@@ -117,11 +117,25 @@ export const QuickEasySyncPanel: React.FC = () => {
     toast.success(`${jobsResult.jobs.length} orders ready for review${dupMsg}`);
   }, [user, debugLogger]);
 
-  // Poll for run completion
+  // Poll for run completion (max 5 minutes)
+  const MAX_POLL_MS = 5 * 60 * 1000;
+  const pollStartRef = useRef<number>(0);
+
   const startPolling = useCallback((id: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    pollStartRef.current = Date.now();
 
     pollRef.current = setInterval(async () => {
+      // Safety: stop polling after 5 minutes
+      if (Date.now() - pollStartRef.current > MAX_POLL_MS) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setSyncStatus("failed");
+        setSyncError("Sync timed out after 5 minutes. The Edge Function may still be running — check Supabase logs.");
+        toast.error("QuickEasy sync timed out after 5 minutes");
+        return;
+      }
+
       const { data, error } = await supabase
         .from("quickeasy_sync_runs")
         .select("status, row_count, raw_data, error, duration_ms")
@@ -139,7 +153,6 @@ export const QuickEasySyncPanel: React.FC = () => {
         setSyncStatus("completed");
         toast.success(`QuickEasy sync completed — ${data.row_count} rows in ${((data.duration_ms || 0) / 1000).toFixed(1)}s`);
         
-        // Process the data through the import pipeline
         try {
           await processRunData(data.raw_data as any[]);
         } catch (err: any) {

@@ -94,3 +94,7 @@ verify_jwt = false
 # QUICKEASY: Async worker for long-running Firebird queries
 [functions.firebird-sync-worker]
 verify_jwt = false
+
+# QUICKEASY: Push-based receiver for local relay script
+[functions.quickeasy-receive]
+verify_jwt = false
