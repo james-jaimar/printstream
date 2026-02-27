@@ -99,61 +99,24 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Use EXECUTE BLOCK with FOR SELECT to stream all rows from selectable SP
-    const sql = `EXECUTE BLOCK RETURNS (
-      WOID INTEGER, WODATE TIMESTAMP, COMPANY VARCHAR(200), CONTACT VARCHAR(200),
-      REFERENCE VARCHAR(500), SIZE VARCHAR(200), ITEM_TYPE VARCHAR(100),
-      GROUPS VARCHAR(100), DESCRIPTION VARCHAR(500), PROVIDER VARCHAR(200),
-      QTY NUMERIC(18,2), WO_QTY NUMERIC(18,2), EMAIL VARCHAR(200)
-    ) AS
-    BEGIN
-      FOR SELECT WOID, WODATE, COMPANY, CONTACT, REFERENCE, SIZE, ITEM_TYPE,
-                 GROUPS, DESCRIPTION, PROVIDER, QTY, WO_QTY, EMAIL
-          FROM SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')
-          INTO :WOID, :WODATE, :COMPANY, :CONTACT, :REFERENCE, :SIZE, :ITEM_TYPE,
-               :GROUPS, :DESCRIPTION, :PROVIDER, :QTY, :WO_QTY, :EMAIL
-      DO SUSPEND;
-    END`;
-
-    console.log(`[firebird-sync] Executing BLOCK for SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`);
+    const sql = `SELECT * FROM SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`;
+    console.log(`[firebird-sync] SQL: ${sql}`);
 
     let rows: any[] = [];
-    
-    try {
-      console.log("[firebird-sync] Trying db.query() with EXECUTE BLOCK...");
-      const result: any = await withTimeout(
-        new Promise((resolve, reject) => {
-          db.query(sql, [], (err: any, res: any) => {
-            if (err) reject(new Error(`EXECUTE BLOCK query failed: ${err.message || JSON.stringify(err)}`));
-            else resolve(res);
-          });
-        }),
-        120000,
-        "Firebird EXECUTE BLOCK query"
-      );
-      const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
-      rows = rawRows.map(decodeRow);
-      console.log(`[firebird-sync] db.query() returned ${rows.length} rows`);
-    } catch (blockError) {
-      console.warn("[firebird-sync] EXECUTE BLOCK failed, trying plain SELECT fallback:", blockError.message);
-      
-      const fallbackSql = `SELECT * FROM SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`;
-      console.log(`[firebird-sync] Fallback SQL: ${fallbackSql}`);
-      
-      const result: any = await withTimeout(
-        new Promise((resolve, reject) => {
-          db.query(fallbackSql, [], (err: any, res: any) => {
-            if (err) reject(new Error(`Fallback query failed: ${err.message || JSON.stringify(err)}`));
-            else resolve(res);
-          });
-        }),
-        120000,
-        "Firebird fallback SELECT query"
-      );
-      const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
-      rows = rawRows.map(decodeRow);
-      console.log(`[firebird-sync] Fallback returned ${rows.length} rows`);
-    }
+
+    const result: any = await withTimeout(
+      new Promise((resolve, reject) => {
+        db.query(sql, [], (err: any, res: any) => {
+          if (err) reject(new Error(`Query failed: ${err.message || JSON.stringify(err)}`));
+          else resolve(res);
+        });
+      }),
+      140000,
+      "Firebird SP query"
+    );
+    const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
+    rows = rawRows.map(decodeRow);
+    console.log(`[firebird-sync] Query returned ${rows.length} rows`);
 
     try { db.detach(() => {}); } catch (_) {}
     console.log(`[firebird-sync] Returning ${rows.length} decoded rows`);
