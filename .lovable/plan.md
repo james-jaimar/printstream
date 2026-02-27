@@ -1,58 +1,49 @@
 
 
-# Fix: Restore Duplicate Filtering in Standard Excel Import Flow
+# Fix: Duplicate Check Missing Jobs Due to Supabase Default Row Limit
 
-## Problem
+## Root Cause
 
-The Excel Import system has two parsing paths:
-- **Matrix parser** (`parseMatrixDataToJobs`): Calls `checkParsedJobsForDuplicates` to filter out WO numbers already in the database. This works correctly.
-- **Standard parser** (`parseExcelFileWithMapping` / `parseAndPrepareProductionReadyJobs`): Never calls `checkParsedJobsForDuplicates`. All rows pass through regardless of whether they already exist in the database.
+The console log confirms: `Duplicate check complete: 36 new jobs, 0 duplicates found` -- the check runs but finds zero duplicates, even though D430770 exists in the database.
 
-The database upsert with `ignoreDuplicates: true` silently drops duplicates at insert time, but the user never sees which ones were skipped during the preview/mapping phase, and the job count shown is misleading.
+The problem is in `checkParsedJobsForDuplicates` in `src/utils/jobDeduplication.ts` (line 72):
+
+```typescript
+const { data: existingJobs, error } = await supabase
+  .from('production_jobs')
+  .select('wo_no');
+```
+
+**Supabase's default `.select()` returns a maximum of 1,000 rows.** The database has 2,074 production jobs, so only ~1,000 WO numbers are loaded into the lookup set. If D430770 falls outside that first 1,000, it is not found and the job passes through as "new."
 
 ## Fix
 
-### 1. Add duplicate check to `parseExcelFileWithMapping` in `src/utils/excel/enhancedParser.ts`
+**File: `src/utils/jobDeduplication.ts`**
 
-After the jobs are parsed (around line 322, after the `dataRows.forEach` loop and before the enhanced mapping), add a call to `checkParsedJobsForDuplicates`:
+### Option 1 (targeted -- preferred): Only query WO numbers that are in the import batch
 
-- Import `checkParsedJobsForDuplicates` from `@/utils/jobDeduplication`
-- After building the `mapped` array, call `checkParsedJobsForDuplicates(mapped)`
-- Filter out duplicates from the `mapped` array
-- Track `duplicatesSkipped` and `duplicateJobs` in the return value
-- Log which WO numbers were skipped
-
-### 2. Propagate duplicate info through `parseAndPrepareProductionReadyJobs`
-
-Currently this function calls `parseExcelFileWithMapping` but discards the duplicate info (the return type only has `{ jobs, stats }`). Update it to:
-- Capture `duplicatesSkipped` and `duplicateJobs` from the parse result
-- Pass them through to the final `EnhancedJobCreationResult`
-
-### 3. Update `ParsedData` type in `src/utils/excel/types.ts`
-
-Ensure `duplicatesSkipped` and `duplicateJobs` are consistently available on the `ParsedData` interface (they already exist as optional fields, so this is just verification).
-
-## Technical Details
-
-The key change is in `parseExcelFileWithMapping` around line 322:
+Instead of fetching all 2,074 WO numbers, query only the specific ones we need to check:
 
 ```typescript
-// After: const mapped: ParsedJob[] = [];  ... dataRows.forEach(...)
+// Extract normalized WO numbers from parsed jobs
+const woNumbers = parsedJobs
+  .map(job => formatWONumber(job.wo_no))
+  .filter(Boolean);
 
-// NEW: Check for duplicates against existing database
-const duplicateCheck = await checkParsedJobsForDuplicates(mapped);
-const filteredJobs = duplicateCheck.newJobs;
-const duplicatesSkipped = duplicateCheck.duplicates.length;
-const duplicateJobs = duplicateCheck.duplicates;
-
-if (duplicatesSkipped > 0) {
-  logger.addWarning(`Skipped ${duplicatesSkipped} duplicate WO numbers`);
-}
-
-// Then use filteredJobs instead of mapped for the rest of the function
+const { data: existingJobs, error } = await supabase
+  .from('production_jobs')
+  .select('wo_no')
+  .in('wo_no', woNumbers);
 ```
 
-## Files Changed
+This is faster, avoids the 1,000-row limit issue entirely, and scales regardless of how many total jobs exist.
 
-1. `src/utils/excel/enhancedParser.ts` -- add import and duplicate check call in `parseExcelFileWithMapping`, propagate in `parseAndPrepareProductionReadyJobs`
+### Backup: Also fix `findDuplicateJobs` (same file, line 16)
+
+The `findDuplicateJobs` function has the same 1,000-row limit issue. Add pagination or use the `.in()` approach where applicable.
+
+## Changes
+
+1. **`src/utils/jobDeduplication.ts`** -- `checkParsedJobsForDuplicates`: Replace broad `select('wo_no')` with targeted `.in('wo_no', woNumbers)` query using the batch's WO numbers
+2. **`src/utils/jobDeduplication.ts`** -- `findDuplicateJobs`: Add pagination loop to fetch all rows (this function needs all jobs)
 
