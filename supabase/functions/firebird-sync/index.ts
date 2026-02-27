@@ -117,20 +117,43 @@ Deno.serve(async (req: Request) => {
 
     console.log(`[firebird-sync] Executing BLOCK for SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`);
 
-    const rows: any[] = [];
+    let rows: any[] = [];
     
-    await withTimeout(
-      new Promise<void>((resolve, reject) => {
-        db.sequentially(sql, [], (row: any, index: number) => {
-          rows.push(decodeRow(row));
-        }, (err: any) => {
-          if (err) reject(new Error(`Query failed: ${err.message || JSON.stringify(err)}`));
-          else resolve();
-        });
-      }),
-      90000,
-      "Firebird SP query"
-    );
+    try {
+      console.log("[firebird-sync] Trying db.query() with EXECUTE BLOCK...");
+      const result: any = await withTimeout(
+        new Promise((resolve, reject) => {
+          db.query(sql, [], (err: any, res: any) => {
+            if (err) reject(new Error(`EXECUTE BLOCK query failed: ${err.message || JSON.stringify(err)}`));
+            else resolve(res);
+          });
+        }),
+        120000,
+        "Firebird EXECUTE BLOCK query"
+      );
+      const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
+      rows = rawRows.map(decodeRow);
+      console.log(`[firebird-sync] db.query() returned ${rows.length} rows`);
+    } catch (blockError) {
+      console.warn("[firebird-sync] EXECUTE BLOCK failed, trying plain SELECT fallback:", blockError.message);
+      
+      const fallbackSql = `SELECT * FROM SP_DIGITAL_PRODUCTION('${startDate}','${endDate}')`;
+      console.log(`[firebird-sync] Fallback SQL: ${fallbackSql}`);
+      
+      const result: any = await withTimeout(
+        new Promise((resolve, reject) => {
+          db.query(fallbackSql, [], (err: any, res: any) => {
+            if (err) reject(new Error(`Fallback query failed: ${err.message || JSON.stringify(err)}`));
+            else resolve(res);
+          });
+        }),
+        120000,
+        "Firebird fallback SELECT query"
+      );
+      const rawRows = Array.isArray(result) ? result : (result ? [result] : []);
+      rows = rawRows.map(decodeRow);
+      console.log(`[firebird-sync] Fallback returned ${rows.length} rows`);
+    }
 
     try { db.detach(() => {}); } catch (_) {}
     console.log(`[firebird-sync] Returning ${rows.length} decoded rows`);
