@@ -7,7 +7,8 @@ import {
   Calendar, 
   User, 
   MapPin,
-  Hash
+  Hash,
+  CreditCard
 } from "lucide-react";
 import { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { SubSpecificationBadge } from "../common/SubSpecificationBadge";
@@ -56,6 +57,12 @@ export const JobOverviewCard: React.FC<JobOverviewCardProps> = ({ job }) => {
               <MapPin className="h-4 w-4 text-gray-400" />
               <span className="text-sm font-medium">Status:</span>
               <Badge variant="outline">{job.status}</Badge>
+              {job.payment_status === 'awaiting_payment' && (
+                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                  <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                  AWAITING PAYMENT
+                </Badge>
+              )}
             </div>
           </div>
 

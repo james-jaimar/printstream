@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Package, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Package, Users, CreditCard } from "lucide-react";
 import { useBatchConstituentJobs } from "@/hooks/tracker/useBatchConstituentJobs";
 import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs/types";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -37,6 +37,12 @@ export const BatchJobCard = ({ job, onJobAction, onBatchStageComplete, showActio
             <Badge variant="secondary" className="text-xs">
               Batch Master
             </Badge>
+            {job.payment_status === 'awaiting_payment' && (
+              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
+                <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                AWAITING PAYMENT
+              </Badge>
+            )}
           </div>
           <div className="flex items-center space-x-2">
             <Badge 

@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ChevronRight, ChevronDown, Circle } from "lucide-react";
+import { ChevronRight, ChevronDown, Circle, CreditCard } from "lucide-react";
 import { TrafficLightIndicator } from "./TrafficLightIndicator";
 
 interface FilteredJobsViewProps {
@@ -94,6 +94,12 @@ export const FilteredJobsView: React.FC<FilteredJobsViewProps> = ({
                 <span className="text-xs text-gray-500 ml-1">{job.customer}</span>
               )}
               <span className="text-xs text-gray-400 ml-1">{job.reference}</span>
+              {job.payment_status === 'awaiting_payment' && (
+                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0 ml-1">
+                  <CreditCard className="h-2.5 w-2.5 mr-0.5" />
+                  AWAITING PAYMENT
+                </Badge>
+              )}
             </div>
             
             {/* Stage/Status */}
