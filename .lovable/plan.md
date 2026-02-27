@@ -1,42 +1,86 @@
 
-# Lateral Thinking Rule + Payment Badge Everywhere
 
-## 1. Add a project-wide instruction rule
+# Direct Firebird Database Integration — QuickEasy Live Sync
 
-Create `.lovable/rules.md` with a guideline that any UI status indicator, badge, or visual cue must be applied **across all views** where the relevant data is displayed — not just the view the user is currently looking at. This ensures future features get comprehensive coverage automatically.
+## Overview
 
-## 2. Add "AWAITING PAYMENT" badge to all job display components
+Replace the manual Excel export/import workflow with a live connection to the QuickEasy Firebird database. This will allow on-demand ingestion of digital production orders by calling the stored procedure `SP_DIGITAL_PRODUCTION` directly.
 
-The badge currently only appears in `JobRow.tsx`. It needs to appear in **every** component that renders a job card or job listing. Here are the components that need updating:
+## Technical Challenge
 
-| Component | Location | What to add |
-|-----------|----------|-------------|
-| `EnhancedKanbanJobCard` | `src/components/tracker/kanban/EnhancedKanbanJobCard.tsx` | Amber badge after the Overdue badge in the header |
-| `EnhancedJobCard` | `src/components/tracker/EnhancedJobCard.tsx` | Amber badge in the header badges area |
-| `ProductionJobCard` | `src/components/tracker/ProductionJobCard.tsx` | Amber badge in the header section |
-| `BatchJobCard` | `src/components/tracker/BatchJobCard.tsx` | Amber badge next to "Batch Master" badge |
-| `BatchAwareJobCard` | `src/components/tracker/BatchAwareJobCard.tsx` | Amber badge in both compact and full variants |
-| `ProductionJobsList` | `src/components/tracker/production/ProductionJobsList.tsx` | Amber badge next to the WO number |
-| `EnhancedProductionJobCard` | `src/components/tracker/production/EnhancedProductionJobCard.tsx` | Amber badge next to the WO number |
-| `CompactJobCard` | `src/components/tracker/production/CompactJobCard.tsx` | Amber badge in the header row |
-| `FilteredJobsList` (dashboard) | `src/components/tracker/dashboard/FilteredJobsList.tsx` | Amber badge next to the job title |
-| `FilteredJobsView` (production) | `src/components/tracker/production/FilteredJobsView.tsx` | Amber badge inline with the WO number |
-| `ManagerDashboard` | `src/components/tracker/factory/ManagerDashboard.tsx` | Amber badge in the "Recent Progress" and "Attention Required" job rows |
-| `JobOverviewCard` | `src/components/tracker/factory/JobOverviewCard.tsx` | Amber badge next to the Status badge |
+Firebird uses a **raw TCP wire protocol** (port 3050), not HTTP. Supabase Edge Functions run on Deno Deploy, which has limited support for raw TCP connections through Node.js compatibility layers. The `node-firebird` npm package is a pure-JS implementation of the Firebird wire protocol, so it *may* work — but there's a real risk it won't due to Deno Deploy's networking constraints.
 
-Each component will get a consistent amber badge using the `PaymentHoldBanner` component in `variant="badge"` mode (which already exists), or a simple inline badge matching the same styling used in `JobRow.tsx`.
+## Approach: Two-Phase Strategy
 
-## Technical details
+### Phase 1 — Try Edge Function with `node-firebird` (quick test)
 
-- Import `CreditCard` from lucide-react and `Badge` (already imported in most components)
-- The condition is: `job.payment_status === 'awaiting_payment'`
-- The badge markup is consistent everywhere:
-```tsx
-{job.payment_status === 'awaiting_payment' && (
-  <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-semibold text-[10px] px-1.5 py-0">
-    <CreditCard className="h-2.5 w-2.5 mr-0.5" />
-    AWAITING PAYMENT
-  </Badge>
-)}
+Create a Supabase Edge Function `firebird-sync` that:
+1. Uses `npm:node-firebird` to connect to the Firebird DB
+2. Executes `SELECT * FROM SP_DIGITAL_PRODUCTION(:start, :end)` with date parameters
+3. Returns the results as JSON
+
+If this works, we're golden — no extra infrastructure needed.
+
+### Phase 2 — Fallback: On-Prem HTTP Proxy (if TCP fails)
+
+If Edge Functions can't establish TCP to Firebird, you'd need a tiny HTTP service running on the same server as QuickEasy that:
+- Accepts HTTP requests from the Edge Function
+- Queries Firebird locally
+- Returns JSON
+
+This is a common pattern for on-prem database integrations. We'd still build the Edge Function, but it would call the HTTP proxy instead of Firebird directly.
+
+## Implementation Plan (Phase 1)
+
+### Step 1: Store Firebird credentials as Supabase secrets
+
+| Secret Name | Value |
+|---|---|
+| `FIREBIRD_HOST` | `impress.cpronline-ddns.com` |
+| `FIREBIRD_PORT` | `3050` |
+| `FIREBIRD_DATABASE` | `/opt/QuickEasy/Data/IMPRESSX.fdb` |
+| `FIREBIRD_USER` | `sysdba` |
+| `FIREBIRD_PASSWORD` | `hjisthebest` |
+
+### Step 2: Create the `firebird-sync` Edge Function
+
+**File**: `supabase/functions/firebird-sync/index.ts`
+
+- Accept POST requests with `{ startDate, endDate }` parameters
+- Connect to Firebird using `node-firebird`
+- Execute `SP_DIGITAL_PRODUCTION` stored procedure
+- Return raw results as JSON for initial testing
+- Include CORS headers and error handling
+
+### Step 3: Add to `supabase/config.toml`
+
+```toml
+[functions.firebird-sync]
+verify_jwt = false
 ```
-- For components that don't use `AccessibleJob` type directly (like `BatchAwareJobCard`), the `payment_status` field will be added to their local interface as an optional property.
+
+### Step 4: Add `node-firebird` to `deno.json`
+
+```json
+"node-firebird": "npm:node-firebird@0.9.3"
+```
+
+### Step 5: Test the connection
+
+Call the edge function with a date range to verify we can read data from QuickEasy.
+
+## What Comes Next (after successful connection)
+
+Once we confirm the Firebird connection works:
+- Map the SP_DIGITAL_PRODUCTION output fields to the existing `production_jobs` table schema
+- Build a "Sync from QuickEasy" button on the Upload page (or Dashboard)
+- Add duplicate detection (skip orders already imported)
+- Optionally set up scheduled auto-sync via a cron trigger
+
+## Security Notes
+
+- Credentials stored as Supabase secrets (not in code)
+- The Firebird server must be reachable from the internet (your DDNS setup handles this)
+- Consider adding IP whitelisting on the Firebird server if possible
+- The edge function will validate authentication before querying
+
