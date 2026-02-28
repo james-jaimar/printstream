@@ -3214,6 +3214,8 @@ export type Database = {
           is_used: boolean
           job_id: string
           job_table_name: string
+          last_reminder_sent_at: string | null
+          reminder_count: number
           resend_count: number | null
           responded_at: string | null
           scheduling_results: Json | null
@@ -3239,6 +3241,8 @@ export type Database = {
           is_used?: boolean
           job_id: string
           job_table_name?: string
+          last_reminder_sent_at?: string | null
+          reminder_count?: number
           resend_count?: number | null
           responded_at?: string | null
           scheduling_results?: Json | null
@@ -3264,6 +3268,8 @@ export type Database = {
           is_used?: boolean
           job_id?: string
           job_table_name?: string
+          last_reminder_sent_at?: string | null
+          reminder_count?: number
           resend_count?: number | null
           responded_at?: string | null
           scheduling_results?: Json | null
