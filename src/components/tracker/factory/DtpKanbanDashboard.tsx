@@ -68,7 +68,7 @@ export const DtpKanbanDashboard = () => {
   const [scanCompleted, setScanCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
-  const [showAllSendToPrint, setShowAllSendToPrint] = useState(false);
+  const [showAllSendToPrint, setShowAllSendToPrint] = useState(true);
 
   // Filter auto-approved jobs based on toggle - show only jobs user worked on
   const filteredAutoApprovedJobs = useMemo(() => {
