@@ -98,3 +98,7 @@ verify_jwt = false
 # QUICKEASY: Push-based receiver for local relay script
 [functions.quickeasy-receive]
 verify_jwt = false
+
+# PROOF REMINDERS: Automated reminder emails for pending proofs
+[functions.proof-reminder]
+verify_jwt = false
