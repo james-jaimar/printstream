@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
@@ -16,7 +18,11 @@ import {
   XCircle, 
   Search,
   Download,
-  ExternalLink
+  ExternalLink,
+  Settings,
+  ChevronDown,
+  Save,
+  Loader2
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -53,6 +59,82 @@ export const ProofLinkManagement = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
+
+  // Reminder settings state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reminderInterval, setReminderInterval] = useState(24);
+  const [maxReminders, setMaxReminders] = useState(5);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Load reminder settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('app_settings')
+          .select('product_type, sla_target_days')
+          .eq('setting_type', 'proof_reminder');
+
+        if (error) throw error;
+
+        if (data) {
+          for (const row of data) {
+            if (row.product_type === 'reminder_interval_hours') {
+              setReminderInterval(row.sla_target_days);
+            } else if (row.product_type === 'max_reminders') {
+              setMaxReminders(row.sla_target_days);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load reminder settings:', err);
+      } finally {
+        setSettingsLoaded(true);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      // Upsert reminder_interval_hours
+      const { error: err1 } = await supabase
+        .from('app_settings')
+        .upsert(
+          {
+            setting_type: 'proof_reminder',
+            product_type: 'reminder_interval_hours',
+            sla_target_days: reminderInterval,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'setting_type,product_type' }
+        );
+      if (err1) throw err1;
+
+      // Upsert max_reminders
+      const { error: err2 } = await supabase
+        .from('app_settings')
+        .upsert(
+          {
+            setting_type: 'proof_reminder',
+            product_type: 'max_reminders',
+            sla_target_days: maxReminders,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'setting_type,product_type' }
+        );
+      if (err2) throw err2;
+
+      toast.success('Reminder settings saved');
+    } catch (err) {
+      console.error('Failed to save reminder settings:', err);
+      toast.error('Failed to save settings');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
   const fetchProofLinks = async () => {
     setLoading(true);
@@ -164,14 +246,72 @@ export const ProofLinkManagement = () => {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Mail className="h-5 w-5" />
-          Proof Link Management
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="space-y-4">
+      {/* Reminder Settings */}
+      <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <Card>
+          <CollapsibleTrigger asChild>
+            <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  Reminder Settings
+                </span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${settingsOpen ? 'rotate-180' : ''}`} />
+              </CardTitle>
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="space-y-4 pt-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
+                <div className="space-y-2">
+                  <Label htmlFor="reminder-interval">Reminder interval (business hours)</Label>
+                  <Input
+                    id="reminder-interval"
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={reminderInterval}
+                    onChange={(e) => setReminderInterval(Number(e.target.value))}
+                    disabled={!settingsLoaded}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    8 business hours = 1 working day (8 AM – 5 PM)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="max-reminders">Max reminders per proof</Label>
+                  <Input
+                    id="max-reminders"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={maxReminders}
+                    onChange={(e) => setMaxReminders(Number(e.target.value))}
+                    disabled={!settingsLoaded}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Stop sending after this many reminders
+                  </p>
+                </div>
+              </div>
+              <Button onClick={saveSettings} disabled={savingSettings} size="sm">
+                {savingSettings ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+                Save Settings
+              </Button>
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5" />
+            Proof Link Management
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
         {/* Filters */}
         <div className="flex gap-4 items-end">
           <div className="flex-1">
@@ -320,5 +460,6 @@ export const ProofLinkManagement = () => {
         </div>
       </CardContent>
     </Card>
+    </div>
   );
 };

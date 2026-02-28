@@ -11,7 +11,8 @@ const resend = new Resend(Deno.env.get('RESEND_API_KEY') as string)
 
 const LOGO_URL = 'https://printstream.impressweb.co.za/impress-logo-colour.png';
 const PRODUCTION_DOMAIN = 'https://printstream.impressweb.co.za';
-const MAX_REMINDERS = 5;
+const DEFAULT_MAX_REMINDERS = 5;
+const DEFAULT_INTERVAL_HOURS = 24;
 
 // Branded reminder email template (matches handle-proof-approval template)
 const generateReminderEmail = (params: {
@@ -20,8 +21,9 @@ const generateReminderEmail = (params: {
   proofUrl: string;
   daysSinceProof: number;
   reminderNumber: number;
+  maxReminders: number;
 }) => {
-  const { clientName, woNumber, proofUrl, daysSinceProof, reminderNumber } = params;
+  const { clientName, woNumber, proofUrl, daysSinceProof, reminderNumber, maxReminders } = params;
 
   return `
     <!DOCTYPE html>
@@ -113,7 +115,7 @@ const generateReminderEmail = (params: {
                     Professional printing services you can trust
                   </p>
                   <p style="color: #bbbbbb; font-size: 11px; margin: 8px 0 0 0;">
-                    Reminder ${reminderNumber} of ${MAX_REMINDERS}
+                    Reminder ${reminderNumber} of ${maxReminders}
                   </p>
                 </td>
               </tr>
@@ -138,6 +140,24 @@ serve(async (req) => {
     );
 
     console.log('🔔 Proof reminder job starting...');
+
+    // Step 0: Load configurable settings from app_settings
+    let INTERVAL_HOURS = DEFAULT_INTERVAL_HOURS;
+    let MAX_REMINDERS = DEFAULT_MAX_REMINDERS;
+
+    const { data: settingsRows } = await supabase
+      .from('app_settings')
+      .select('product_type, sla_target_days')
+      .eq('setting_type', 'proof_reminder');
+
+    if (settingsRows) {
+      for (const row of settingsRows) {
+        if (row.product_type === 'reminder_interval_hours') INTERVAL_HOURS = row.sla_target_days;
+        if (row.product_type === 'max_reminders') MAX_REMINDERS = row.sla_target_days;
+      }
+    }
+
+    console.log(`⚙️ Settings: interval=${INTERVAL_HOURS}h, max=${MAX_REMINDERS}`);
 
     // Step 1: Get all pending proof links that haven't been used/expired/invalidated
     // and haven't hit the max reminder count
@@ -234,8 +254,8 @@ serve(async (req) => {
         console.log(`📧 WO ${woNo}: ${businessDayCount} business day(s) elapsed — sending reminder`);
       } else {
         // RPC returned the count
-        if (businessHours < 24) {
-          console.log(`⏭️ WO ${woNo}: Only ${businessHours}h business hours since last contact, need 24h`);
+        if (businessHours < INTERVAL_HOURS) {
+          console.log(`⏭️ WO ${woNo}: Only ${businessHours}h business hours since last contact, need ${INTERVAL_HOURS}h`);
           results.push({ woNo, sent: false, reason: `only_${businessHours}h` });
           continue;
         }
@@ -273,6 +293,7 @@ serve(async (req) => {
             proofUrl,
             daysSinceProof: approxBusinessDays,
             reminderNumber: newReminderCount,
+            maxReminders: MAX_REMINDERS,
           }),
         });
 
