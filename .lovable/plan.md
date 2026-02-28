@@ -1,65 +1,48 @@
 
 
-# Automated Proof Reminder Emails
+# Proof Reminder Interval Control
 
 ## Overview
 
-Build an automated system that sends reminder emails to clients who haven't responded to proof approval requests. Reminders are sent every 24 business hours (skipping weekends and public holidays), using the existing `is_working_day()` function already in the database.
+Add a configurable "Reminder Interval" setting to the **Proof Links** tab in Tracker Admin, allowing you to set how many business hours must pass before a reminder is sent (e.g. 4, 8, 24 hours). The edge function will read this setting at runtime instead of using a hardcoded 24-hour threshold.
 
-## How It Works
+## What You'll See
 
-1. A **pg_cron job** runs every hour during business hours (Mon-Fri, 8AM-5PM SAST)
-2. It calls a new **edge function** (`proof-reminder`) that:
-   - Finds all `proof_links` that are still pending (not used, not expired, not invalidated)
-   - Checks if 24+ business hours have passed since the last email (initial send or last reminder)
-   - Sends a branded reminder email via Resend using the existing email template
-   - Updates tracking columns so we know when the last reminder was sent and how many have gone out
-3. The reminder email uses the same branded template but with a "Reminder" subject line and slightly different copy emphasising the job won't be scheduled until approved
+A new settings card at the top of the Proof Links tab with:
+- A number input for "Reminder interval (business hours)" -- defaulting to 24
+- A number input for "Max reminders" -- defaulting to 5
+- A Save button that persists to the `app_settings` table
+- Helper text explaining that 8 business hours = 1 working day
 
-## What Gets Built
+## Technical Detail
 
-### 1. Database Migration
-- Add `last_reminder_sent_at` (timestamptz) and `reminder_count` (integer, default 0) columns to `proof_links`
-- Add `proof_reminder_enabled` (boolean, default true) to a settings table or keep it simple with a hard-coded default (we can make it configurable later)
+### 1. Database: Store settings in `app_settings`
 
-### 2. New Edge Function: `proof-reminder`
-- Queries `proof_links` for rows where:
-  - `is_used = false` (not yet responded)
-  - `expires_at > now()` (not expired)
-  - `invalidated_at IS NULL` (not manually invalidated)
-  - Last contact was 24+ business hours ago (using `is_working_day()` to skip weekends/holidays)
-- For each qualifying link, sends a reminder email via Resend with the existing branded template
-- Updates `last_reminder_sent_at` and increments `reminder_count`
-- Returns a summary of how many reminders were sent
+Insert a new row into the existing `app_settings` table using `setting_type = 'proof_reminder'`:
+- `product_type = 'reminder_interval_hours'`, `sla_target_days` repurposed to store the hour value (e.g. 8)
+- `product_type = 'max_reminders'`, `sla_target_days` stores the max count (e.g. 5)
 
-### 3. Cron Job (pg_cron + pg_net)
-- Scheduled to run hourly on weekdays during business hours
-- Calls the `proof-reminder` edge function via HTTP
-- This ensures reminders only fire during working hours
+This reuses the existing table without any schema changes. The `sla_target_days` column is just an integer -- works fine for storing hours or counts.
 
-## Technical Details
+### 2. Frontend: Add settings UI to `ProofLinkManagement.tsx`
 
-### Business Day Calculation
-The function will use the existing `is_working_day()` database function to determine if a day counts. The logic:
-- Take `COALESCE(last_reminder_sent_at, email_sent_at)` as the baseline
-- Count forward through calendar days, only counting working days
-- If 1+ full business day has elapsed, the proof is due for a reminder
+Add a collapsible settings section above the proof links table with:
+- Input for reminder interval (business hours)
+- Input for max reminders
+- Save button that upserts to `app_settings` with `setting_type = 'proof_reminder'`
+- Load on mount from `app_settings`
 
-### Email Content
-- Subject: `Reminder: Proof Awaiting Your Approval - WO {wo_no}`
-- Uses the existing `generateBrandedEmail()` template with `isReminder: true`
-- Includes a note: "Your job will not be scheduled for production until the proof is approved"
-- Shows how many days the proof has been waiting
+### 3. Edge Function: Read settings dynamically
 
-### Safeguards
-- Maximum 5 reminders per proof link (configurable) to avoid spamming
-- Only sends during business hours (controlled by cron schedule)
-- Respects the existing `invalidated_at` field for manually stopped proofs
-- Edge function is idempotent -- safe to call multiple times
+Update `supabase/functions/proof-reminder/index.ts` to:
+- Query `app_settings` where `setting_type = 'proof_reminder'` at the start of each run
+- Use the `reminder_interval_hours` value instead of the hardcoded `24`
+- Use the `max_reminders` value instead of the hardcoded `MAX_REMINDERS = 5`
+- Fall back to defaults (24h, 5 max) if no settings exist
 
-### Files to Create/Modify
-1. **New migration**: Add `last_reminder_sent_at` and `reminder_count` to `proof_links`
-2. **New edge function**: `supabase/functions/proof-reminder/index.ts`
-3. **Update config**: Add `proof-reminder` to `supabase/config.toml` with `verify_jwt = false`
-4. **Cron job**: SQL insert to set up the hourly pg_cron schedule (via read-query, not migration)
+### Files to Modify
+1. `src/components/admin/ProofLinkManagement.tsx` -- add settings UI section
+2. `supabase/functions/proof-reminder/index.ts` -- read settings from DB instead of hardcoded values
+
+No database migration needed -- reuses the existing `app_settings` table.
 
