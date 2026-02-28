@@ -5021,6 +5021,7 @@ export type Database = {
           merged_count: number
         }[]
       }
+      count_business_hours_since: { Args: { p_since: string }; Returns: number }
       create_batch_master_job:
         | {
             Args: { p_batch_id: string; p_constituent_job_ids: string[] }
