@@ -1,33 +1,56 @@
 
 
-# Fix: Ghost Time Slots Causing Inflated Completion Dates
+# Prevent Future Ghost Time Slots
 
-## What's Happening
+## What Happened
 
-When you bulk-cleaned old orders, the **jobs and their stage instances** were cleaned up, but the **433 `stage_time_slots`** belonging to those old jobs were left behind. These "ghost slots" stretch all the way to **March 20th** across every resource (Shipping, Packaging, Printing, Folding, etc.).
+The `delete_production_jobs()` RPC function already correctly deletes `stage_time_slots` when jobs are removed through the normal UI (line 25 of the function). The ghost slots only appeared because the earlier bulk cleanup bypassed this function.
 
-When a new job is approved and the scheduler runs `scheduler_append_jobs`, it calculates each resource's next available time by looking at `MAX(slot_end_time)` from the `stage_time_slots` table. Since those ghost slots claim resources are busy until March 20th, the new job gets placed **after** them -- hence the March 23rd estimate for a single job.
+Going forward, normal job deletions will be fine. But as a safety net, we should add a database trigger to automatically clean up time slots when their parent stage instance is removed or completed.
 
-## The Fix (Two Parts)
+## The Fix: Automatic Cleanup Trigger
 
-### Part 1: Database Cleanup (immediate)
-Delete all orphaned `stage_time_slots` where the associated job no longer exists or has been completed/removed. Specifically:
+Create a single database trigger on `job_stage_instances` that fires on DELETE or UPDATE, and removes the associated `stage_time_slots` when:
+- A stage instance row is deleted, OR
+- A stage instance's status changes to `completed`
+
+This ensures that no matter how jobs are cleaned up (RPC, direct SQL, bulk operation), the time slots always get cleaned too.
+
+## Technical Detail
+
+One SQL migration to create the trigger:
 
 ```sql
--- Delete ghost time slots whose jobs no longer have active stage instances
-DELETE FROM stage_time_slots sts
-WHERE sts.slot_end_time >= now()
-  AND (sts.is_completed = false OR sts.is_completed IS NULL)
-  AND NOT EXISTS (
-    SELECT 1 FROM job_stage_instances jsi
-    WHERE jsi.id = sts.stage_instance_id
-      AND jsi.status IN ('pending', 'active', 'on_hold', 'awaiting_approval', 'scheduled')
-  );
+-- Trigger function: clean up stage_time_slots when a stage instance is deleted or completed
+CREATE OR REPLACE FUNCTION public.cleanup_stage_time_slots_on_jsi_change()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM stage_time_slots
+    WHERE stage_instance_id = OLD.id;
+    RETURN OLD;
+  END IF;
+
+  -- On UPDATE: if status changed to 'completed', remove future non-completed slots
+  IF TG_OP = 'UPDATE'
+     AND NEW.status = 'completed'
+     AND OLD.status IS DISTINCT FROM 'completed' THEN
+    DELETE FROM stage_time_slots
+    WHERE stage_instance_id = NEW.id
+      AND COALESCE(is_completed, false) = false;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_cleanup_stage_time_slots
+AFTER DELETE OR UPDATE OF status ON job_stage_instances
+FOR EACH ROW
+EXECUTE FUNCTION public.cleanup_stage_time_slots_on_jsi_change();
 ```
 
-### Part 2: Reschedule the newly approved job
-After cleaning up the ghost slots, re-run the scheduler for any currently pending jobs so they get correct start times (starting from tomorrow, not March 20th).
-
-### No Code Changes Needed
-This is purely a data cleanup issue. The scheduler logic itself is correct -- it just had stale data to work with. Going forward, whenever jobs are bulk-cleaned, the corresponding `stage_time_slots` should be cleaned too (this could be addressed with a database trigger or a cleanup step in the bulk operation, but that's a separate enhancement).
+No frontend code changes needed.
 
