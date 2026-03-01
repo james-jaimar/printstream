@@ -11,6 +11,7 @@ import { WeekNavigation } from "./navigation/WeekNavigation";
 import { JobDiagnosticsModal } from "./JobDiagnosticsModal";
 import { MasterOrderModal } from "@/components/tracker/modals/MasterOrderModal";
 import { ExpediteJobDialog } from "@/components/tracker/common/ExpediteJobDialog";
+import { PrinterReassignmentModal } from "@/components/tracker/jobs/PrinterReassignmentModal";
 import type { ScheduleDayData, ScheduledStageData } from "@/hooks/useScheduleReader";
 import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobDiagnostics } from "@/hooks/useJobDiagnostics";
@@ -49,6 +50,7 @@ export function ScheduleBoard({
   // Expedite dialog state
   const [expediteOpen, setExpediteOpen] = useState(false);
   const [expediteStage, setExpediteStage] = useState<ScheduledStageData | null>(null);
+  const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
 
   // Filter schedule days to only show the current week (Monday to Friday)
   const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }); // Monday
@@ -178,6 +180,7 @@ export function ScheduleBoard({
           onReschedule={onReschedule}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          onPrinterReassignment={isAdminUser ? () => setShowPrinterReassignment(true) : undefined}
         />
         
         {/* Week Navigation */}
@@ -268,6 +271,13 @@ export function ScheduleBoard({
           onExpedited={onRefresh}
         />
       )}
+
+      {/* Printer Reassignment Modal */}
+      <PrinterReassignmentModal
+        isOpen={showPrinterReassignment}
+        onClose={() => setShowPrinterReassignment(false)}
+        onComplete={onRefresh}
+      />
     </div>
   );
 }
