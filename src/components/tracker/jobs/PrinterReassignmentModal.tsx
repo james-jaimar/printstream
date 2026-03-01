@@ -20,8 +20,8 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { ArrowRight, Search, Printer, Loader2 } from 'lucide-react';
-import { usePrinterReassignment, PendingPrintJob } from '@/hooks/tracker/usePrinterReassignment';
+import { ArrowRight, Search, Printer, Loader2, AlertTriangle } from 'lucide-react';
+import { usePrinterReassignment, PendingPrintJob, getQuantityMultiplier } from '@/hooks/tracker/usePrinterReassignment';
 import { format } from 'date-fns';
 
 interface PrinterReassignmentModalProps {
@@ -75,6 +75,15 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
     }
   }, [targetStageId, fetchSpecsForStage]);
 
+  // Calculate multiplier based on source/target size classes
+  const multiplier = useMemo(() => {
+    const sourceStage = printerStages.find(s => s.id === sourceStageId);
+    const targetStage = printerStages.find(s => s.id === targetStageId);
+    return getQuantityMultiplier(sourceStage?.size_class || null, targetStage?.size_class || null);
+  }, [printerStages, sourceStageId, targetStageId]);
+
+  const quantityChanges = multiplier !== 1;
+
   // Filter jobs by search query
   const filteredJobs = useMemo(() => {
     if (!searchQuery) return pendingJobs;
@@ -91,7 +100,6 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
     return printerStages.filter(stage => stage.id !== sourceStageId);
   }, [printerStages, sourceStageId]);
 
-  // Toggle job selection
   const toggleJobSelection = (jobId: string) => {
     setSelectedJobIds(prev => {
       const next = new Set(prev);
@@ -104,7 +112,6 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
     });
   };
 
-  // Select/deselect all filtered jobs
   const toggleSelectAll = () => {
     if (selectedJobIds.size === filteredJobs.length) {
       setSelectedJobIds(new Set());
@@ -113,7 +120,6 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
     }
   };
 
-  // Handle reassignment
   const handleReassign = async () => {
     if (!sourceStageId || !targetStageId || !targetSpecId || selectedJobIds.size === 0) {
       return;
@@ -124,7 +130,7 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
       targetStageId,
       targetStageSpecId: targetSpecId,
       stageInstanceIds: Array.from(selectedJobIds)
-    });
+    }, multiplier);
 
     if (success) {
       onComplete();
@@ -143,6 +149,14 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
 
   const sourceStageName = printerStages.find(s => s.id === sourceStageId)?.name || '';
   const targetStageName = printerStages.find(s => s.id === targetStageId)?.name || '';
+
+  // Summary stats for selected jobs
+  const selectedJobsSummary = useMemo(() => {
+    const selected = pendingJobs.filter(j => selectedJobIds.has(j.stage_instance_id));
+    const totalOriginal = selected.reduce((sum, j) => sum + (j.quantity || 0), 0);
+    const totalAdjusted = Math.ceil(totalOriginal * multiplier);
+    return { totalOriginal, totalAdjusted, count: selected.length };
+  }, [pendingJobs, selectedJobIds, multiplier]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -168,7 +182,7 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
               <SelectContent>
                 {printerStages.map(stage => (
                   <SelectItem key={stage.id} value={stage.id}>
-                    {stage.name}
+                    {stage.name} {stage.size_class ? `(${stage.size_class})` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -215,12 +229,23 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
                   </div>
                 ) : (
                   <div className="p-2 space-y-1">
+                    {/* Column headers */}
+                    <div className="grid grid-cols-6 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1 border-b">
+                      <span>WO#</span>
+                      <span>Customer</span>
+                      <span>Spec</span>
+                      <span className="text-right">Qty</span>
+                      {quantityChanges && <span className="text-right">Adj. Qty</span>}
+                      <span className="text-right">Due</span>
+                    </div>
                     {filteredJobs.map(job => (
                       <JobRow
                         key={job.stage_instance_id}
                         job={job}
                         isSelected={selectedJobIds.has(job.stage_instance_id)}
                         onToggle={() => toggleJobSelection(job.stage_instance_id)}
+                        multiplier={multiplier}
+                        showAdjusted={quantityChanges}
                       />
                     ))}
                   </div>
@@ -246,11 +271,25 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
                 <SelectContent>
                   {availableTargetStages.map(stage => (
                     <SelectItem key={stage.id} value={stage.id}>
-                      {stage.name}
+                      {stage.name} {stage.size_class ? `(${stage.size_class})` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {/* Quantity change warning */}
+          {targetStageId && quantityChanges && (
+            <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-950/30 dark:border-amber-800">
+              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <div className="text-sm text-amber-800 dark:text-amber-200">
+                {multiplier === 2 ? (
+                  <span>Moving to an <strong>A3</strong> machine will <strong>double</strong> all quantities (A2 sheets → 2× A3 sheets).</span>
+                ) : (
+                  <span>Moving to an <strong>A2</strong> machine will <strong>halve</strong> all quantities (A3 sheets → ½ A2 sheets, rounded up).</span>
+                )}
+              </div>
             </div>
           )}
 
@@ -259,7 +298,7 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
             <div className="space-y-2">
               <Label className="text-sm font-medium">Step 4: Select Print Mode</Label>
               <RadioGroup value={targetSpecId} onValueChange={setTargetSpecId}>
-          {targetSpecs.map(spec => (
+                {targetSpecs.map(spec => (
                   <div key={spec.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-muted/50">
                     <RadioGroupItem value={spec.id} id={spec.id} />
                     <Label htmlFor={spec.id} className="flex-1 cursor-pointer">
@@ -276,7 +315,7 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
             </div>
           )}
 
-          {/* Preview */}
+          {/* Preview / Summary */}
           {sourceStageId && targetStageId && targetSpecId && selectedJobIds.size > 0 && (
             <div className="p-3 bg-muted/50 rounded-md space-y-1">
               <p className="text-sm font-medium">Summary</p>
@@ -286,12 +325,17 @@ export const PrinterReassignmentModal: React.FC<PrinterReassignmentModalProps> =
                 <span className="font-medium">{targetStageName}</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                Moving {selectedJobIds.size} job(s) with{' '}
+                Moving {selectedJobsSummary.count} job(s) with{' '}
                 <span className="font-medium">
                   {targetSpecs.find(s => s.id === targetSpecId)?.name || 'selected'} 
                 </span>{' '}
                 print mode
               </p>
+              {quantityChanges && (
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                  Total sheets: {selectedJobsSummary.totalOriginal.toLocaleString()} → {selectedJobsSummary.totalAdjusted.toLocaleString()} ({multiplier === 2 ? '×2' : '÷2'})
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -332,9 +376,13 @@ interface JobRowProps {
   job: PendingPrintJob;
   isSelected: boolean;
   onToggle: () => void;
+  multiplier: number;
+  showAdjusted: boolean;
 }
 
-const JobRow: React.FC<JobRowProps> = ({ job, isSelected, onToggle }) => {
+const JobRow: React.FC<JobRowProps> = ({ job, isSelected, onToggle, multiplier, showAdjusted }) => {
+  const adjustedQty = job.quantity != null ? Math.ceil(job.quantity * multiplier) : null;
+  
   return (
     <div
       className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${
@@ -343,11 +391,16 @@ const JobRow: React.FC<JobRowProps> = ({ job, isSelected, onToggle }) => {
       onClick={onToggle}
     >
       <Checkbox checked={isSelected} onCheckedChange={onToggle} />
-      <div className="flex-1 min-w-0 grid grid-cols-5 gap-2 text-sm">
+      <div className={`flex-1 min-w-0 grid gap-2 text-sm ${showAdjusted ? 'grid-cols-6' : 'grid-cols-5'}`}>
         <span className="font-mono font-medium truncate">{job.wo_no}</span>
         <span className="truncate text-muted-foreground">{job.customer || '-'}</span>
         <span className="truncate text-muted-foreground">{job.stage_spec_name || '-'}</span>
         <span className="text-right">{job.quantity ?? '-'}</span>
+        {showAdjusted && (
+          <span className="text-right font-medium text-amber-700 dark:text-amber-300">
+            {adjustedQty ?? '-'}
+          </span>
+        )}
         <span className="text-right text-muted-foreground">
           {job.due_date ? format(new Date(job.due_date), 'MMM d') : '-'}
         </span>

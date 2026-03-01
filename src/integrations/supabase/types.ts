@@ -3120,6 +3120,7 @@ export type Database = {
           name: string
           order_index: number
           running_speed_per_hour: number | null
+          size_class: string | null
           speed_unit: string | null
           stage_group_id: string | null
           supports_multi_specifications: boolean | null
@@ -3138,6 +3139,7 @@ export type Database = {
           name: string
           order_index?: number
           running_speed_per_hour?: number | null
+          size_class?: string | null
           speed_unit?: string | null
           stage_group_id?: string | null
           supports_multi_specifications?: boolean | null
@@ -3156,6 +3158,7 @@ export type Database = {
           name?: string
           order_index?: number
           running_speed_per_hour?: number | null
+          size_class?: string | null
           speed_unit?: string | null
           stage_group_id?: string | null
           supports_multi_specifications?: boolean | null
