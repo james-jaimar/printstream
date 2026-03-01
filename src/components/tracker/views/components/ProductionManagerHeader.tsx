@@ -3,7 +3,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Search, X } from "lucide-react";
+import { RefreshCw, Search, X, ArrowLeftRight } from "lucide-react";
 
 interface ProductionManagerHeaderProps {
   jobCount: number;
@@ -19,6 +19,8 @@ interface ProductionManagerHeaderProps {
   setSortBy: (field: 'wo_no' | 'due_date') => void;
   sortOrder: 'asc' | 'desc';
   setSortOrder: (order: 'asc' | 'desc') => void;
+  onPrinterReassignment?: () => void;
+  showPrinterReassignment?: boolean;
 }
 
 export const ProductionManagerHeader: React.FC<ProductionManagerHeaderProps> = ({
@@ -34,7 +36,9 @@ export const ProductionManagerHeader: React.FC<ProductionManagerHeaderProps> = (
   sortBy,
   setSortBy,
   sortOrder,
-  setSortOrder
+  setSortOrder,
+  onPrinterReassignment,
+  showPrinterReassignment = false
 }) => {
   const handleSort = (field: 'wo_no' | 'due_date') => {
     if (sortBy === field) {
@@ -115,6 +119,17 @@ export const ProductionManagerHeader: React.FC<ProductionManagerHeaderProps> = (
             ))}
           </SelectContent>
         </Select>
+        
+        {showPrinterReassignment && onPrinterReassignment && (
+          <Button
+            variant="outline"
+            onClick={onPrinterReassignment}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+            Move Printers
+          </Button>
+        )}
         
         <Button 
           variant="outline" 

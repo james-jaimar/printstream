@@ -2,7 +2,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Calendar, Zap, Search } from "lucide-react";
+import { RefreshCw, Calendar, Zap, Search, ArrowLeftRight } from "lucide-react";
 import type { ScheduleDayData } from "@/hooks/useScheduleReader";
 
 interface ScheduleWorkflowHeaderProps {
@@ -13,6 +13,7 @@ interface ScheduleWorkflowHeaderProps {
   onReschedule: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  onPrinterReassignment?: () => void;
 }
 
 export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
@@ -22,7 +23,8 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
   onRefresh,
   onReschedule,
   searchQuery,
-  onSearchChange
+  onSearchChange,
+  onPrinterReassignment
 }) => {
   const totalStages = scheduleDays.reduce((total, day) => total + day.total_stages, 0);
   const totalMinutes = scheduleDays.reduce((total, day) => total + day.total_minutes, 0);
@@ -95,6 +97,17 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
             <Zap className="h-4 w-4" />
             Reschedule All
           </Button>
+          {onPrinterReassignment && (
+            <Button
+              onClick={onPrinterReassignment}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <ArrowLeftRight className="h-4 w-4" />
+              Move Printers
+            </Button>
+          )}
         </div>
       </div>
 

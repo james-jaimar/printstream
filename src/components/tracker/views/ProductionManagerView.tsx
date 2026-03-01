@@ -10,6 +10,7 @@ import { ProductionManagerHeader } from "./components/ProductionManagerHeader";
 import { ProductionManagerStats } from "./components/ProductionManagerStats";
 import { ProductionManagerModals } from "./components/ProductionManagerModals";
 import { LostJobRecovery } from "../diagnostics/LostJobRecovery";
+import { PrinterReassignmentModal } from "../jobs/PrinterReassignmentModal";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useUserRole } from "@/hooks/tracker/useUserRole";
@@ -27,6 +28,7 @@ export const ProductionManagerView = () => {
   const { isAdmin } = useUserRole();
   const [refreshing, setRefreshing] = useState(false);
   const [showLostJobRecovery, setShowLostJobRecovery] = useState(false);
+  const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
 
   // Modal states
   const [editingJob, setEditingJob] = useState<AccessibleJob | null>(null);
@@ -220,6 +222,8 @@ export const ProductionManagerView = () => {
         setSortBy={setSortBy}
         sortOrder={sortOrder}
         setSortOrder={setSortOrder}
+        onPrinterReassignment={() => setShowPrinterReassignment(true)}
+        showPrinterReassignment={isAdmin}
       />
 
       {/* Production Statistics */}
@@ -385,6 +389,13 @@ export const ProductionManagerView = () => {
         setShowPartAssignment={setShowPartAssignment}
         partAssignmentJob={partAssignmentJob}
         setPartAssignmentJob={setPartAssignmentJob}
+      />
+
+      {/* Printer Reassignment Modal */}
+      <PrinterReassignmentModal
+        isOpen={showPrinterReassignment}
+        onClose={() => setShowPrinterReassignment(false)}
+        onComplete={handleRefresh}
       />
     </div>
   );
