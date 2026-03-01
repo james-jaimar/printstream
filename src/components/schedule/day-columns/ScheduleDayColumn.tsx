@@ -21,6 +21,7 @@ interface ScheduleDayColumnProps {
   selectedStageName?: string | null;
   onJobClick?: (stage: ScheduledStageData) => void;
   onDiagnosticsClick?: (stage: ScheduledStageData) => void;
+  onExpediteClick?: (stage: ScheduledStageData) => void;
   isAdminUser?: boolean;
   onScheduleUpdate?: () => void;
 }
@@ -31,6 +32,7 @@ export const ScheduleDayColumn: React.FC<ScheduleDayColumnProps> = ({
   selectedStageName,
   onJobClick,
   onDiagnosticsClick,
+  onExpediteClick,
   isAdminUser = false,
   onScheduleUpdate
 }) => {
@@ -320,6 +322,7 @@ export const ScheduleDayColumn: React.FC<ScheduleDayColumnProps> = ({
                             stage={stage}
                             onJobClick={onJobClick}
                             onDiagnosticsClick={onDiagnosticsClick}
+                            onExpediteClick={onExpediteClick}
                             isAdminUser={isAdminUser}
                             disabled={isReordering || stage.is_split_job}
                           />
