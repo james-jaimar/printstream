@@ -1,64 +1,66 @@
 
 
-# Expedite Job: Scheduler-Level Priority with Next-Day Constraint
+# Enhanced Printer Reassignment: Quantity Doubling and Auto-Reschedule
 
 ## Overview
 
-Allow admins to expedite a job so it gets scheduled first, starting no earlier than 08:00 on the next working day. This works by modifying the scheduler's job ordering to respect the existing `is_expedited` flag, then auto-triggering a reschedule. No timestamp manipulation needed.
+Enhance the existing "Move Jobs Between Printers" modal to handle the sheet size difference between A2 machines (HP 12000, T250) and the A3 machine (7900). When moving jobs from an A2 printer to the 7900, quantities automatically double. When moving from the 7900 to an A2 printer, quantities halve. After reassignment, the system auto-triggers a full reschedule so timings update immediately.
+
+## How It Works
+
+The three main printers and their effective sheet sizes:
+- **HP 12000** -- A2 (large sheet)
+- **T250** -- A2 equivalent (roll-to-roll, but effectively A2 page)
+- **7900** -- A3 (half size)
+
+Rules:
+- HP 12000 to T250 (or vice versa): quantity stays the same (both A2)
+- HP 12000 or T250 to 7900: quantity doubles (A2 to A3 = 2x sheets)
+- 7900 to HP 12000 or T250: quantity halves (A3 to A2 = half sheets)
 
 ## What Changes
 
-### 1. Database Migration: Fix the Scheduler ORDER BY
+### 1. Database: Add size_class to production_stages
 
-The scheduler function `scheduler_reschedule_all_parallel_aware` currently orders jobs purely by `proof_approved_at` (line 145 of the function). We change this single line to:
+Add a `size_class` column to the `production_stages` table so the system knows which machines are A2 vs A3. This avoids hard-coding stage names or IDs.
 
 ```sql
-ORDER BY 
-  pj.is_expedited DESC NULLS LAST,
-  pj.expedited_at ASC NULLS LAST,
-  pj.proof_approved_at ASC
+ALTER TABLE production_stages 
+  ADD COLUMN size_class TEXT DEFAULT NULL;
+
+-- Set known values
+UPDATE production_stages SET size_class = 'A2' WHERE id = '968c2e44-9fd1-452b-b497-fa29edda389c'; -- HP 12000
+UPDATE production_stages SET size_class = 'A2' WHERE id = '18e39cec-1083-4b62-96fd-afd2caafc1d3'; -- T250
+UPDATE production_stages SET size_class = 'A3' WHERE id = '906cd851-9c55-4694-bad8-7bffcfb10f45'; -- 7900
 ```
 
-This ensures:
-- Expedited jobs are always scheduled first, regardless of their original proof approval date
-- Multiple expedited jobs are ordered by when they were expedited (first request wins)
-- Non-expedited jobs continue in normal FIFO order
-- Incomplete jobs from previous days cannot jump ahead of an expedited job -- the `is_expedited` flag always wins over any `proof_approved_at` timestamp
+This column can also be managed from the Production Stages admin panel in future.
 
-### 2. Update useJobExpediting Hook
+### 2. Update usePrinterReassignment Hook
 
-After successfully expediting (or removing expedite status), automatically trigger the `simple-scheduler` edge function to rebuild the schedule. This ensures the schedule board immediately reflects the new priority.
+- Fetch `size_class` alongside `id, name, color` when loading printer stages
+- Add a `getQuantityMultiplier(sourceSizeClass, targetSizeClass)` function:
+  - A2 to A3 = multiply by 2
+  - A3 to A2 = multiply by 0.5
+  - Same class = multiply by 1
+- In `reassignJobs`, update the `quantity` field on each `job_stage_instances` row using the multiplier
+- Also recalculate `estimated_duration_minutes` proportionally (double the sheets = double the print time)
+- After successful reassignment, auto-trigger `simple-scheduler` with `{ commit: true, nuclear: true }` to rebuild the schedule
 
-The hook will:
-- Call the existing `expedite_job_factory_wide` RPC (already sets `is_expedited = true`, `expedited_at`, reason, etc.)
-- Then call `supabase.functions.invoke('simple-scheduler', { body: { commit: true, nuclear: true } })`
-- Same for `removeExpediteStatus` -- restore normal priority and reschedule
+### 3. Update PrinterReassignmentModal UI
 
-### 3. Add Expedite Button to Schedule Board Cards
+- Show a warning banner when the quantity will change (e.g., "Moving to 7900 (A3) will double quantities")
+- In the job list, show the adjusted quantity in a preview column so the admin can see what will happen before confirming
+- In the summary section, show total original vs adjusted quantities
 
-Add a lightning bolt button to `SortableScheduleStageCard.tsx` for admin users. This opens the existing `ExpediteJobDialog` directly from the schedule board.
+### 4. Files to Modify
 
-The card component needs:
-- A new `onExpedite` callback prop
-- A `Zap` icon button (red, small) visible only to admins
-- The button stops event propagation so it doesn't trigger the card click
+1. **New SQL migration** -- Add `size_class` column to `production_stages`, set values for the three printers
+2. `src/hooks/tracker/usePrinterReassignment.ts` -- Add size_class to stage fetching, quantity multiplier logic, estimated_minutes recalculation, auto-reschedule call
+3. `src/components/tracker/jobs/PrinterReassignmentModal.tsx` -- Show quantity adjustment warning and preview, display adjusted quantities per job
 
-### 4. Wire Up in ScheduleBoard
+### 5. Edge Cases
 
-Pass the expedite handler and dialog state through the component tree so clicking "Expedite" on a card opens the dialog and triggers a reschedule on completion.
-
-## Why This Solves the Carry-Over Problem
-
-The user correctly identified that manipulating `proof_approved_at` would fail when Monday's incomplete jobs carry over to Tuesday -- their earlier timestamps would jump ahead of the expedited job. By using a dedicated `is_expedited` flag in the ORDER BY, expedited jobs ALWAYS come first regardless of any other job's timestamp. The overnight cron (which does a nuclear reschedule) will also respect this ordering.
-
-## Next-Day Constraint
-
-The scheduler already handles this naturally: when called mid-day, it starts scheduling from the current time (or next working start). Since expedited jobs will be first in the queue, they'll get the earliest available slots -- which will be on the current or next working day depending on remaining capacity. The existing `ExpediteJobDialog` can be kept simple since the scheduler handles placement automatically.
-
-## Files to Modify
-
-1. **New SQL migration** -- Change the ORDER BY in `scheduler_reschedule_all_parallel_aware` (single line change)
-2. `src/hooks/tracker/useJobExpediting.tsx` -- Add auto-reschedule after expedite/remove
-3. `src/components/schedule/day-columns/SortableScheduleStageCard.tsx` -- Add expedite button for admins
-4. `src/components/schedule/ScheduleBoard.tsx` -- Wire expedite dialog and refresh
-
+- **Odd quantities when halving**: Round up (e.g., 1001 A3 sheets becomes 501 A2 sheets). Better to have one extra sheet than one missing
+- **Jobs with null quantity**: Skip the multiplier, leave as-is
+- **Envelope Printing / Large Format**: These don't have a `size_class` set, so multiplier defaults to 1 (no change). The modal already filters to printing stages only
