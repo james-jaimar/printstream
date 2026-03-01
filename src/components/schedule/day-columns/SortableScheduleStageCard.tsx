@@ -4,7 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Clock, GripVertical, Lock, HelpCircle } from "lucide-react";
+import { Clock, GripVertical, Lock, HelpCircle, Zap } from "lucide-react";
 import type { ScheduledStageData } from "@/hooks/useScheduleReader";
 import { EnhancedDueDateDisplay } from "@/components/tracker/production/EnhancedDueDateDisplay";
 
@@ -12,6 +12,7 @@ interface SortableScheduleStageCardProps {
   stage: ScheduledStageData;
   onJobClick?: (stage: ScheduledStageData) => void;
   onDiagnosticsClick?: (stage: ScheduledStageData) => void;
+  onExpediteClick?: (stage: ScheduledStageData) => void;
   isAdminUser?: boolean;
   disabled?: boolean;
 }
@@ -20,6 +21,7 @@ export const SortableScheduleStageCard: React.FC<SortableScheduleStageCardProps>
   stage,
   onJobClick,
   onDiagnosticsClick,
+  onExpediteClick,
   isAdminUser = false,
   disabled = false
 }) => {
@@ -90,6 +92,20 @@ export const SortableScheduleStageCard: React.FC<SortableScheduleStageCardProps>
             <Badge variant="outline" className="text-xs">
               {stage.estimated_duration_minutes}m
             </Badge>
+            {isAdminUser && onExpediteClick && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 text-destructive hover:text-destructive/80"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExpediteClick(stage);
+                }}
+                title="Expedite job"
+              >
+                <Zap className="h-3 w-3" />
+              </Button>
+            )}
             {onDiagnosticsClick && (
               <Button
                 variant="ghost"

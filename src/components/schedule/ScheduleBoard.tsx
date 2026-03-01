@@ -10,6 +10,7 @@ import { ScheduleDayColumn } from "./day-columns/ScheduleDayColumn";
 import { WeekNavigation } from "./navigation/WeekNavigation";
 import { JobDiagnosticsModal } from "./JobDiagnosticsModal";
 import { MasterOrderModal } from "@/components/tracker/modals/MasterOrderModal";
+import { ExpediteJobDialog } from "@/components/tracker/common/ExpediteJobDialog";
 import type { ScheduleDayData, ScheduledStageData } from "@/hooks/useScheduleReader";
 import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobDiagnostics } from "@/hooks/useJobDiagnostics";
@@ -44,6 +45,10 @@ export function ScheduleBoard({
   // Diagnostics Modal state
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const { isLoading: diagnosticsLoading, diagnostics, getDiagnostics } = useJobDiagnostics();
+
+  // Expedite dialog state
+  const [expediteOpen, setExpediteOpen] = useState(false);
+  const [expediteStage, setExpediteStage] = useState<ScheduledStageData | null>(null);
 
   // Filter schedule days to only show the current week (Monday to Friday)
   const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }); // Monday
@@ -154,6 +159,12 @@ export function ScheduleBoard({
     setDiagnosticsOpen(true);
     await getDiagnostics(stage.id);
   };
+  // Open expedite dialog (triggered by Zap button on card)
+  const handleExpediteClick = (stage: ScheduledStageData) => {
+    console.log('Expedite clicked:', stage);
+    setExpediteStage(stage);
+    setExpediteOpen(true);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -202,6 +213,7 @@ export function ScheduleBoard({
               selectedStageName={selectedStageName}
               onJobClick={handleJobClick}
               onDiagnosticsClick={handleDiagnosticsClick}
+              onExpediteClick={handleExpediteClick}
               isAdminUser={isAdminUser}
               onScheduleUpdate={onRefresh}
             />
@@ -242,6 +254,20 @@ export function ScheduleBoard({
         diagnostics={diagnostics}
         isLoading={diagnosticsLoading}
       />
+
+      {/* Expedite Job Dialog */}
+      {expediteStage && (
+        <ExpediteJobDialog
+          isOpen={expediteOpen}
+          onClose={() => {
+            setExpediteOpen(false);
+            setExpediteStage(null);
+          }}
+          jobId={expediteStage.job_id}
+          jobWoNo={expediteStage.job_wo_no}
+          onExpedited={onRefresh}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,24 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+const triggerReschedule = async () => {
+  try {
+    console.log('🔄 Triggering nuclear reschedule after expedite change...');
+    const { error } = await supabase.functions.invoke('simple-scheduler', {
+      body: { commit: true, nuclear: true }
+    });
+    if (error) {
+      console.error('⚠️ Auto-reschedule failed:', error);
+      toast.warning('Job priority updated but auto-reschedule failed. Please reschedule manually.');
+    } else {
+      console.log('✅ Auto-reschedule completed');
+    }
+  } catch (err) {
+    console.error('⚠️ Auto-reschedule error:', err);
+    toast.warning('Job priority updated but auto-reschedule failed. Please reschedule manually.');
+  }
+};
+
 export const useJobExpediting = () => {
   const [isExpediting, setIsExpediting] = useState(false);
   const [isRemovingExpedite, setIsRemovingExpedite] = useState(false);
@@ -24,7 +42,11 @@ export const useJobExpediting = () => {
       }
 
       console.log('✅ Job expedited successfully');
-      toast.success('Job expedited - will be prioritized in all stages');
+      toast.success('Job expedited - rebuilding schedule…');
+      
+      // Auto-trigger reschedule so the board reflects new priority
+      await triggerReschedule();
+      
       return true;
     } catch (err) {
       console.error('❌ Error expediting job:', err);
@@ -51,7 +73,11 @@ export const useJobExpediting = () => {
       }
 
       console.log('✅ Expedite status removed successfully');
-      toast.success('Expedite status removed');
+      toast.success('Expedite removed - rebuilding schedule…');
+      
+      // Auto-trigger reschedule
+      await triggerReschedule();
+      
       return true;
     } catch (err) {
       console.error('❌ Error removing expedite status:', err);
