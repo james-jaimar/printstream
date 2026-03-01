@@ -1,48 +1,50 @@
 
+# Fix: Proof Reminder Settings Save Failing
 
-# Proof Reminder Interval Control
+## Problem
 
-## Overview
+The "Save Settings" button fails because the `app_settings` table has Row Level Security (RLS) enabled with only a **SELECT** policy. There are no INSERT or UPDATE policies, so the upsert from the frontend is blocked by Supabase.
 
-Add a configurable "Reminder Interval" setting to the **Proof Links** tab in Tracker Admin, allowing you to set how many business hours must pass before a reminder is sent (e.g. 4, 8, 24 hours). The edge function will read this setting at runtime instead of using a hardcoded 24-hour threshold.
+## Solution
 
-## What You'll See
-
-A new settings card at the top of the Proof Links tab with:
-- A number input for "Reminder interval (business hours)" -- defaulting to 24
-- A number input for "Max reminders" -- defaulting to 5
-- A Save button that persists to the `app_settings` table
-- Helper text explaining that 8 business hours = 1 working day
+Add an INSERT and UPDATE RLS policy to the `app_settings` table, restricted to admin users only.
 
 ## Technical Detail
 
-### 1. Database: Store settings in `app_settings`
+### Database Migration
 
-Insert a new row into the existing `app_settings` table using `setting_type = 'proof_reminder'`:
-- `product_type = 'reminder_interval_hours'`, `sla_target_days` repurposed to store the hour value (e.g. 8)
-- `product_type = 'max_reminders'`, `sla_target_days` stores the max count (e.g. 5)
+Add two RLS policies to `app_settings`:
 
-This reuses the existing table without any schema changes. The `sla_target_days` column is just an integer -- works fine for storing hours or counts.
+1. **INSERT policy** (`admin_insert_app_settings`): Allows authenticated users with `role = 'admin'` in the `user_roles` table to insert rows.
+2. **UPDATE policy** (`admin_update_app_settings`): Same admin check for updating rows.
 
-### 2. Frontend: Add settings UI to `ProofLinkManagement.tsx`
+```sql
+CREATE POLICY admin_insert_app_settings ON public.app_settings
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.user_roles
+      WHERE user_roles.user_id = auth.uid()
+        AND user_roles.role = 'admin'
+    )
+  );
 
-Add a collapsible settings section above the proof links table with:
-- Input for reminder interval (business hours)
-- Input for max reminders
-- Save button that upserts to `app_settings` with `setting_type = 'proof_reminder'`
-- Load on mount from `app_settings`
+CREATE POLICY admin_update_app_settings ON public.app_settings
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.user_roles
+      WHERE user_roles.user_id = auth.uid()
+        AND user_roles.role = 'admin'
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.user_roles
+      WHERE user_roles.user_id = auth.uid()
+        AND user_roles.role = 'admin'
+    )
+  );
+```
 
-### 3. Edge Function: Read settings dynamically
-
-Update `supabase/functions/proof-reminder/index.ts` to:
-- Query `app_settings` where `setting_type = 'proof_reminder'` at the start of each run
-- Use the `reminder_interval_hours` value instead of the hardcoded `24`
-- Use the `max_reminders` value instead of the hardcoded `MAX_REMINDERS = 5`
-- Fall back to defaults (24h, 5 max) if no settings exist
-
-### Files to Modify
-1. `src/components/admin/ProofLinkManagement.tsx` -- add settings UI section
-2. `supabase/functions/proof-reminder/index.ts` -- read settings from DB instead of hardcoded values
-
-No database migration needed -- reuses the existing `app_settings` table.
-
+No frontend code changes needed -- the existing save logic will work once the policies are in place.
