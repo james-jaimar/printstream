@@ -45,6 +45,7 @@ interface ProofStageActionsProps {
   onBatchCategoryChange: (category: string) => void;
   setStageInstance: (instance: StageInstance | null) => void;
   onOpenProofDialog?: () => void;
+  onReloadModal?: () => Promise<void>;
 }
 
 export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
@@ -60,7 +61,8 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
   onProofApprovalFlowChange,
   onBatchCategoryChange,
   setStageInstance,
-  onOpenProofDialog
+  onOpenProofDialog,
+  onReloadModal
 }) => {
   const { user } = useAuth();
   const { startStage, completeStage, completeStageAndSkipConditional, isProcessing } = useStageActions();
@@ -135,6 +137,7 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
         if (jobError) throw jobError;
 
         toast.success("Proof stage started");
+        if (onReloadModal) await onReloadModal();
         onRefresh?.();
       }
     } catch (error) {
@@ -264,6 +267,7 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
 
       toast.success("🟡 Proof sent! Job remains in queue awaiting online client approval");
       setGeneratedProofLink(null); // Reset link state
+      if (onReloadModal) await onReloadModal();
       onRefresh?.();
     } catch (error) {
       console.error('Error marking proof as emailed:', error);
@@ -299,6 +303,7 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
       }
 
       toast.success("✅ Proof marked as emailed manually - awaiting client response");
+      if (onReloadModal) await onReloadModal();
       onRefresh?.();
     } catch (error) {
       console.error('Error marking proof as manually emailed:', error);
@@ -339,6 +344,7 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
       });
 
       toast.success('✅ Proof approved on Printjob - please assign paper sizes and approve');
+      if (onReloadModal) await onReloadModal();
       onRefresh?.();
       
     } catch (error) {
@@ -388,6 +394,7 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
       }
 
       toast.success("✅ Proof reverted - ready for changes");
+      if (onReloadModal) await onReloadModal();
       onRefresh?.();
     } catch (error) {
       console.error('Error marking proof as needing changes:', error);

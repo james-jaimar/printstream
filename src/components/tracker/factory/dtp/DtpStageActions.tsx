@@ -16,6 +16,7 @@ interface DtpStageActionsProps {
   onComplete?: (jobId: string, stageId: string) => Promise<boolean>;
   onRefresh?: () => void;
   onClose: () => void;
+  onReloadModal?: () => Promise<void>;
 }
 
 export const DtpStageActions: React.FC<DtpStageActionsProps> = ({
@@ -25,7 +26,8 @@ export const DtpStageActions: React.FC<DtpStageActionsProps> = ({
   onStart,
   onComplete,
   onRefresh,
-  onClose
+  onClose,
+  onReloadModal
 }) => {
   const { user } = useAuth();
 
@@ -41,10 +43,9 @@ export const DtpStageActions: React.FC<DtpStageActionsProps> = ({
       if (success) {
         console.log('✅ DTP work started successfully');
         toast.success("DTP work started");
-        if (onRefresh) {
-          await new Promise(resolve => setTimeout(resolve, 500)); // Longer delay for consistency
-          onRefresh();
-        }
+        // Reload modal data immediately to update UI
+        if (onReloadModal) await onReloadModal();
+        if (onRefresh) onRefresh();
       } else {
         console.error('❌ DTP work start failed');
         toast.error("Failed to start DTP work");
@@ -64,10 +65,8 @@ export const DtpStageActions: React.FC<DtpStageActionsProps> = ({
       if (success) {
         console.log('✅ DTP work completed successfully');
         toast.success("DTP completed - moved to Proof");
-        if (onRefresh) {
-          await new Promise(resolve => setTimeout(resolve, 500)); // Longer delay for consistency
-          onRefresh();
-        }
+        if (onReloadModal) await onReloadModal();
+        if (onRefresh) onRefresh();
         onClose();
       } else {
         console.error('❌ DTP work completion failed');
