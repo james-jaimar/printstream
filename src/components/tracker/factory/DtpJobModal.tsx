@@ -162,6 +162,7 @@ export const DtpJobModal: React.FC<DtpJobModalProps> = ({
                     onComplete={onCompleteJob}
                     onRefresh={onRefresh}
                     onClose={onClose}
+                    onReloadModal={loadModalData}
                   />
                 </CardContent>
               </Card>
@@ -187,6 +188,7 @@ export const DtpJobModal: React.FC<DtpJobModalProps> = ({
                     onProofApprovalFlowChange={setProofApprovalFlow}
                     onBatchCategoryChange={setSelectedBatchCategory}
                     setStageInstance={setStageInstance}
+                    onReloadModal={loadModalData}
                   />
                 </CardContent>
               </Card>
