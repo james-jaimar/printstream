@@ -61,7 +61,7 @@ const TrackerDashboard = () => {
 
     // Calculate time-based metrics
     const dueToday = jobs.filter(job => {
-      if (!job.due_date || !job.proof_approved_at) return false;
+      if (!job.due_date || !job.proof_approved_at || job.status === 'Completed') return false;
       const dueDate = new Date(job.due_date);
       dueDate.setHours(0, 0, 0, 0);
       return dueDate.getTime() === today.getTime();
@@ -92,7 +92,7 @@ const TrackerDashboard = () => {
 
     // Critical = overdue + due today + approved jobs with low progress and approaching due dates
     const critical = overdue + dueToday + jobs.filter(job => 
-      job.proof_approved_at && job.workflow_progress && job.workflow_progress < 30 && job.due_date && 
+      job.status !== 'Completed' && job.proof_approved_at && job.workflow_progress && job.workflow_progress < 30 && job.due_date && 
       new Date(job.due_date) <= weekFromNow
     ).length;
 
