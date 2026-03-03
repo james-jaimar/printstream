@@ -1,51 +1,62 @@
 
 
-# Proof Viewer: Missing Data & PDF Visibility Fixes
+# Performance Analysis: System-Wide Lag
 
-## Root Cause Analysis
+## Findings
 
-### Issue 1: Missing job info when pasting URL directly
+### Critical Issue 1: N+1 Batch Query Storm (20+ individual requests per page load)
 
-The `production_jobs` table has **no public SELECT policy**. All its SELECT policies require `auth.uid() IS NOT NULL` (authenticated users only).
+The network logs show **20+ individual queries** to `batches?select=id&name=eq.D430xxx` with `.single()`, all fired simultaneously and all returning **406 errors** (no matching rows). This is a classic N+1 query problem.
 
-The `job_stage_instances` table DOES have a public policy: "Public can view stage via valid proof link". So when a non-authenticated visitor loads the proof page:
-- `proof_links` query works (has public SELECT policy by token)
-- `job_stage_instances` query works (has public policy via proof link)
-- But the **nested join to `production_jobs`** returns `null` because `production_jobs` blocks anonymous access
+**Root cause chain:**
+1. Every job in a list renders a `BatchSplitButton` component
+2. `BatchSplitButton` wraps each job in a `BatchSplitDetector`
+3. `BatchSplitDetector` logs extensively for EVERY job (even non-batch jobs) -- confirmed by the 30+ console log entries
+4. Meanwhile, `useBatchAwareProductionJobs.tsx` (lines 287-307) runs a **serial loop** querying `batches` table individually for each BATCH- prefixed job using `.single()`
 
-When clicking from email in a browser where you're already logged in, `auth.uid()` is set, so the join succeeds. Pasting the URL in incognito or a different browser = no session = no job data.
+The 406 errors happen because regular jobs (D430800 etc.) are being looked up in the `batches` table by name, but they don't exist there. This wastes API calls and generates unnecessary errors.
 
-**Fix**: Add a public SELECT policy on `production_jobs` scoped to jobs that have a valid (non-expired, non-used) proof link:
+### Critical Issue 2: BatchSplitDetector runs for EVERY job
 
-```sql
-CREATE POLICY "Public can view job via valid proof link"
-ON production_jobs
-FOR SELECT
-TO public
-USING (
-  EXISTS (
-    SELECT 1 FROM proof_links
-    WHERE proof_links.job_id = production_jobs.id
-    AND proof_links.expires_at > now()
-    AND proof_links.is_used = false
-  )
-);
+`BatchSplitDetector` (line 72-79) logs a debug object for **every single job** on every render, even when `isBatchJob` is `false`. This is pure waste -- both in console noise and in component overhead.
+
+### Critical Issue 3: Verbose console logging throughout
+
+The `BatchSplitDetector` alone produces 30+ log entries per page load. Combined with other hooks logging (useAccessibleJobs, useDataManager), this creates significant I/O overhead.
+
+## Plan
+
+### 1. Eliminate N+1 batch queries in `useBatchAwareProductionJobs.tsx`
+
+Replace the serial loop (lines 287-307) that queries `batches` one-by-one with a single batched `.in()` query:
+
+```
+// Instead of:  for each batchJob -> query batches by name -> query batch_job_references
+// Do:          collect all batch names -> single .in('name', names) query -> single batch refs query
 ```
 
-### Issue 2: Customers not seeing the PDF
+### 2. Remove verbose logging from BatchSplitDetector
 
-The `PdfViewer` component loads PDFs via an external iframe: `mozilla.github.io/pdf.js/web/viewer.html?file=<signed_url>`. This external domain tries to fetch the PDF from Supabase storage, which will be blocked by **CORS** (Supabase storage doesn't whitelist `mozilla.github.io` as an allowed origin). Additionally, `getSignedUrl` uses `download: true`, setting `Content-Disposition: attachment` which prevents inline display.
+Remove the `console.log` at lines 72-79 in `BatchSplitDetector.tsx`. It fires for every job on every render and provides no value for non-batch jobs.
 
-**Fix**: Change the `PdfViewer` to use the signed URL directly in the iframe (browsers have native PDF rendering), or use `download: false` for the signed URL and embed directly. The simplest reliable approach:
+### 3. Short-circuit BatchSplitButton for non-batch jobs
 
-1. In `src/utils/pdf/urlUtils.ts`: Remove `download: true` from the `createSignedUrl` call (or add a parameter to control it)
-2. In `src/components/pdf/PdfViewer.tsx`: Use the signed URL directly in an `<iframe src={signedUrl}>` instead of going through the external `mozilla.github.io` viewer
+In `BatchSplitButton.tsx` or the parent `JobActionButtons.tsx`, skip rendering `BatchSplitDetector` entirely when the job is clearly not a batch master (no `is_batch_master` flag and no `BATCH-` prefix). This eliminates unnecessary component mounts and effect runs.
 
-## Files to Change
+### 4. Remove excessive debug logging across hooks
 
-| File | Change |
-|------|--------|
-| Database migration | Add public SELECT policy on `production_jobs` for proof link access |
-| `src/utils/pdf/urlUtils.ts` | Add option to generate non-download signed URLs |
-| `src/components/pdf/PdfViewer.tsx` | Use direct iframe with signed URL instead of external PDF.js viewer |
+Strip or gate behind a debug flag the verbose logging in:
+- `useAccessibleJobsSimple.tsx` (lines with emoji prefixes)
+- `useDataManager.tsx` auto-refresh logs
+- `BatchSplitDetector.tsx`
+
+### Summary of Impact
+
+| Fix | Queries Saved | Impact |
+|-----|--------------|--------|
+| Batch N+1 elimination | ~20-40 per page load | Major DB/network reduction |
+| BatchSplitDetector short-circuit | ~30 component mounts | Reduces render overhead |
+| Logging cleanup | N/A | Reduces I/O + easier debugging |
+
+These are all app-side bottlenecks, not internet speed issues. The lag is caused by the app firing dozens of unnecessary individual database queries per page load.
 
