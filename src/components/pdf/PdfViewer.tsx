@@ -1,10 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
 import { getSignedUrl } from '@/utils/pdf/urlUtils';
-
-// Set CDN worker URL
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface PdfViewerProps {
   url: string | null;
@@ -75,7 +71,7 @@ const PdfViewer = ({ url, className = '' }: PdfViewerProps) => {
   return (
     <div className={`overflow-hidden ${className}`}>
       <iframe
-        src={`https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(pdfUrl)}`}
+        src={pdfUrl}
         className="w-full h-[600px] border-0"
         title="PDF Viewer"
       />
