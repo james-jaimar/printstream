@@ -129,7 +129,14 @@ export const PremiumUserManagement = () => {
           label: 'Operator',
           description: 'Production floor'
         };
-      default: 
+      case 'viewer': 
+        return { 
+          color: 'bg-gradient-to-r from-amber-500 to-yellow-600 text-white',
+          icon: Eye,
+          label: 'Viewer',
+          description: 'Read-only access'
+        };
+      default:
         return { 
           color: 'bg-gradient-to-r from-gray-500 to-slate-600 text-white',
           icon: Eye,

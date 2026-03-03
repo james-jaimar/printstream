@@ -53,7 +53,8 @@ const roleOptions = [
   { value: 'operator', label: 'Operator' },
   { value: 'dtp_operator', label: 'DTP Operator' },
   { value: 'manager', label: 'Manager' },
-  { value: 'admin', label: 'Administrator' }
+  { value: 'admin', label: 'Administrator' },
+  { value: 'viewer', label: 'Viewer' }
 ];
 
 export function UserForm({ initialData, onSubmit, isEditing = false }: UserFormProps) {
