@@ -14,6 +14,7 @@ import { PrinterReassignmentModal } from "../jobs/PrinterReassignmentModal";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useUserRole } from "@/hooks/tracker/useUserRole";
+import { useReadOnly } from "@/contexts/ReadOnlyContext";
 
 export const ProductionManagerView = () => {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export const ProductionManagerView = () => {
   });
   const { categories } = useCategories();
   const { isAdmin } = useUserRole();
+  const { isReadOnly } = useReadOnly();
   const [refreshing, setRefreshing] = useState(false);
   const [showLostJobRecovery, setShowLostJobRecovery] = useState(false);
   const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
@@ -223,7 +225,7 @@ export const ProductionManagerView = () => {
         sortOrder={sortOrder}
         setSortOrder={setSortOrder}
         onPrinterReassignment={() => setShowPrinterReassignment(true)}
-        showPrinterReassignment={isAdmin}
+        showPrinterReassignment={isAdmin && !isReadOnly}
       />
 
       {/* Production Statistics */}
@@ -265,95 +267,83 @@ export const ProductionManagerView = () => {
       {jobs.length > 0 ? (
         <EnhancedProductionJobsList
           jobs={filteredJobs}
-          onStartJob={startJob}
-          onCompleteJob={completeJob}
-          onEditJob={setEditingJob}
-          onCategoryAssign={setCategoryAssignJob}
-          onCustomWorkflow={(job) => {
+          onStartJob={isReadOnly ? undefined : startJob}
+          onCompleteJob={isReadOnly ? undefined : completeJob}
+          onEditJob={isReadOnly ? undefined : setEditingJob}
+          onCategoryAssign={isReadOnly ? undefined : setCategoryAssignJob}
+          onCustomWorkflow={isReadOnly ? undefined : (job) => {
             setCustomWorkflowJob(job);
             setShowCustomWorkflow(true);
           }}
-          onDeleteJob={async (jobId) => {
-            // Use the actual job_id for database operations
+          onDeleteJob={isReadOnly ? undefined : async (jobId) => {
             const actualJobId = jobs.find(j => j.job_id === jobId)?.job_id || jobId;
-            
             try {
               const { data, error } = await supabase.rpc('delete_production_jobs', {
                 job_ids: [actualJobId]
               });
-
               if (error) throw error;
-              
-              // Check if the RPC succeeded
               if (data && !(data as any).success) {
                 throw new Error((data as any).error || 'Failed to delete job');
               }
-
               toast.success('Job deleted successfully');
-              await handleRefresh(); // Use our enhanced refresh
+              await handleRefresh();
             } catch (err) {
               console.error('Error deleting job:', err);
               toast.error('Failed to delete job');
             }
           }}
-          onBulkCategoryAssign={(selectedJobs) => {
+          onBulkCategoryAssign={isReadOnly ? undefined : (selectedJobs) => {
             if (selectedJobs.length > 0) {
               const firstJob = {
                 ...selectedJobs[0],
-                id: selectedJobs[0].job_id, // Map job_id to id for UI consistency
+                id: selectedJobs[0].job_id,
                 isMultiple: true,
                 selectedIds: selectedJobs.map(j => j.job_id)
               };
               setCategoryAssignJob(firstJob as any);
             }
           }}
-          onBulkStatusUpdate={async (selectedJobs, status) => {
+          onBulkStatusUpdate={isReadOnly ? undefined : async (selectedJobs, status) => {
             try {
               const { error } = await supabase
                 .from('production_jobs')
                 .update({ status })
                 .in('id', selectedJobs.map(j => j.job_id));
-
               if (error) throw error;
-
               toast.success(`Updated ${selectedJobs.length} job(s) to ${status} status`);
-              await handleRefresh(); // Use our enhanced refresh
+              await handleRefresh();
             } catch (err) {
               console.error('Error updating job status:', err);
               toast.error('Failed to update job status');
             }
           }}
-          onBulkMarkCompleted={handleBulkMarkCompleted}
-          onBulkDelete={async (selectedJobs) => {
+          onBulkMarkCompleted={isReadOnly ? undefined : handleBulkMarkCompleted}
+          onBulkDelete={isReadOnly ? undefined : async (selectedJobs) => {
             try {
               const jobIds = selectedJobs.map(j => j.job_id);
               const { data, error } = await supabase.rpc('delete_production_jobs', {
                 job_ids: jobIds
               });
-
               if (error) throw error;
-              
-              // Check if the RPC succeeded
               if (data && !(data as any).success) {
                 throw new Error((data as any).error || 'Failed to delete jobs');
               }
-
               toast.success(`Deleted ${selectedJobs.length} job(s) successfully`);
-              await handleRefresh(); // Use our enhanced refresh
+              await handleRefresh();
             } catch (err) {
               console.error('Error deleting jobs:', err);
               toast.error('Failed to delete jobs');
             }
           }}
-          onGenerateBarcodes={(selectedJobs) => {
+          onGenerateBarcodes={isReadOnly ? undefined : (selectedJobs) => {
             setSelectedJobsForBarcodes(selectedJobs);
             setShowBarcodeLabels(true);
           }}
-          onAssignParts={(job) => {
+          onAssignParts={isReadOnly ? undefined : (job) => {
             setPartAssignmentJob(job);
             setShowPartAssignment(true);
           }}
-          isAdmin={isAdmin}
+          isAdmin={isReadOnly ? false : isAdmin}
           searchQuery={searchQuery}
         />
       ) : (

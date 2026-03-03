@@ -7,7 +7,7 @@ import AppSelector from './AppSelector';
 
 const Index = () => {
   const { user, loading: authLoading } = useAuth();
-  const { userRole, isLoading: roleLoading, isLabelsUser, isAdmin, isManager } = useUserRole();
+  const { userRole, isLoading: roleLoading, isLabelsUser, isAdmin, isManager, isViewer } = useUserRole();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -41,8 +41,13 @@ const Index = () => {
         navigate('/labels');
         return;
       }
+      // Redirect viewers (sales) to tracker dashboard
+      if (isViewer) {
+        navigate('/tracker/dashboard');
+        return;
+      }
     }
-  }, [user, authLoading, userRole, roleLoading, isLabelsUser, isAdmin, isManager, navigate]);
+  }, [user, authLoading, userRole, roleLoading, isLabelsUser, isAdmin, isManager, isViewer, navigate]);
 
   // Show loading while checking auth and role
   if (authLoading || roleLoading) {
@@ -58,7 +63,7 @@ const Index = () => {
   }
 
   // Don't render anything if redirecting
-  if (!user || userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator' || (isLabelsUser && !isAdmin && !isManager)) {
+  if (!user || userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator' || userRole === 'viewer' || (isLabelsUser && !isAdmin && !isManager)) {
     return null;
   }
 

@@ -13,7 +13,7 @@ export interface UserProfile {
 }
 
 // Updated to include all roles that the system actually uses
-export type UserRole = 'admin' | 'manager' | 'operator' | 'dtp_operator' | 'packaging_operator' | 'user';
+export type UserRole = 'admin' | 'manager' | 'operator' | 'dtp_operator' | 'packaging_operator' | 'viewer' | 'user';
 
 export interface UserFormData {
   email?: string;

@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 /**
  * Represents the available user roles in the system
  */
-export type UserRole = 'admin' | 'manager' | 'operator' | 'dtp_operator' | 'packaging_operator' | 'user';
+export type UserRole = 'admin' | 'manager' | 'operator' | 'dtp_operator' | 'packaging_operator' | 'viewer' | 'user';
 
 /**
  * Response from the useUserRole hook
@@ -26,6 +26,8 @@ export interface UserRoleResponse {
   isDtpOperator: boolean;
   /** Whether the user is specifically a Packaging & Shipping operator */
   isPackagingOperator: boolean;
+  /** Whether the user is a read-only viewer (sales) */
+  isViewer: boolean;
   /** Whether the user belongs to the Labels group */
   isLabelsUser: boolean;
   /** List of stages the user has access to - based on actual group memberships, not admin overrides */
@@ -94,6 +96,16 @@ export const useUserRole = (): UserRoleResponse => {
         if (hasAdminRole) {
           console.log('🔑 User determined as admin');
           setUserRole('admin');
+          setAccessibleStages([]);
+          setIsLoading(false);
+          return;
+        }
+
+        // Check for viewer role - read-only sales users
+        const hasViewerRole = userRoles?.some(r => r.role === 'viewer');
+        if (hasViewerRole) {
+          console.log('🔑 User determined as viewer (read-only)');
+          setUserRole('viewer');
           setAccessibleStages([]);
           setIsLoading(false);
           return;
@@ -269,10 +281,10 @@ export const useUserRole = (): UserRoleResponse => {
   // Derived properties for convenient access
   const isAdmin = userRole === 'admin';
   const isManager = userRole === 'manager' || userRole === 'admin';
-  // IMPORTANT: isOperator should NOT include admin/manager - only actual operators
   const isOperator = userRole === 'operator' || userRole === 'dtp_operator' || userRole === 'packaging_operator';
   const isDtpOperator = userRole === 'dtp_operator';
   const isPackagingOperator = userRole === 'packaging_operator';
+  const isViewer = userRole === 'viewer';
   const [isLabelsUser, setIsLabelsUser] = useState(false);
 
   // Detect Labels group membership from group data
@@ -292,12 +304,13 @@ export const useUserRole = (): UserRoleResponse => {
 
   return {
     userRole,
-    isLoading: authLoading || isLoading, // Include auth loading state
+    isLoading: authLoading || isLoading,
     isAdmin,
     isManager,
     isOperator,
     isDtpOperator,
     isPackagingOperator,
+    isViewer,
     isLabelsUser,
     accessibleStages
   };
