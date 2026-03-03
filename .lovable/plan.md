@@ -1,65 +1,40 @@
 
 
-# Fix: Dashboard Metrics and Live Production Flow
+# Fix: scheduler_append_jobs Should Start From Now, Not Tomorrow
 
-## Problem 1: "Due Today" counts completed jobs
+## Current Bug (Line 48)
 
-The `dueToday` calculation (line 63-68 of `TrackerDashboard.tsx`) does NOT exclude completed jobs, unlike `dueTomorrow`, `dueThisWeek`, and `overdue` which all have `job.status === 'Completed'` checks.
-
-All 29 "Due Today" jobs are actually completed -- they're done, they shouldn't be counted.
-
-## Problem 2: "Critical" is inflated because it includes dueToday
-
-`Critical` is calculated as `overdue + dueToday + (low-progress approaching due date)`. Since `dueToday` is 29 (all completed), critical gets inflated to 31. Additionally, the third condition (low-progress jobs) also doesn't exclude completed jobs and can double-count jobs already in overdue or dueToday.
-
-## Problem 3: Live Production Assembly Line uses random mock data
-
-The `LiveProductionFlow.tsx` component generates **random values** on every render for:
-- `capacity`: `stage.count + Math.floor(Math.random() * 10)` 
-- `utilization`: random math
-- `isBottleneck`: `Math.random() > 0.7` (randomly flags stages as bottlenecks)
-- `nextAvailable`: `Math.random() * 24 * 60 * 60 * 1000`
-
-This means the assembly line shows meaningless, constantly changing data -- random bottleneck alerts, fake capacity percentages, and fake "next available" dates.
-
-## Fix Plan
-
-### 1. Fix `dueToday` to exclude completed jobs
-
-**File:** `src/pages/tracker/TrackerDashboard.tsx` (line 64)
-
-Add `|| job.status === 'Completed'` to the early return, matching the pattern used by all other metrics:
-
-```typescript
-if (!job.due_date || !job.proof_approved_at || job.status === 'Completed') return false;
+```sql
+base_time := public.next_working_start(date_trunc('day', now()) + interval '1 day');
 ```
 
-### 2. Fix `critical` to exclude completed jobs and avoid double-counting
+This always skips today. A job approved at 06:00 or 07:00 gets pushed to tomorrow's 08:00 shift even though today's shift hasn't started yet.
 
-**File:** `src/pages/tracker/TrackerDashboard.tsx` (lines 94-97)
+## The Fix
 
-Add `job.status !== 'Completed'` to the third condition in the critical calculation. This ensures only active low-progress jobs are counted. The overdue and dueToday values feeding into it will already be correct after fix 1.
+Change line 48 to:
 
-### 3. Replace mock data in LiveProductionFlow with real data
+```sql
+base_time := public.next_working_start(now());
+```
 
-**File:** `src/components/tracker/dashboard/factory/LiveProductionFlow.tsx` (lines 18-24)
+The `next_working_start()` function already handles the logic of finding the next valid shift window:
+- If now is 06:00 (before shift), it returns today 08:00
+- If now is 10:00 (during shift), it returns now
+- If now is 18:00 (after shift), it returns tomorrow 08:00
 
-Remove `Math.random()` calls entirely. Replace with meaningful data:
-- Remove fake `capacity` and `utilization` (we don't have real capacity data)
-- Remove random `isBottleneck` -- instead flag stages with the highest job counts
-- Remove fake `nextAvailable` dates
-- Simplify the stage display to show only real data: stage name, job count, and whether it's the busiest stage
+Jobs will simply go behind the last existing slot on each resource, regardless of what day that falls on. The resource tail tracking (lines 94-102) already handles this — it finds the MAX `slot_end_time` per resource and uses that as the starting point. The `base_time` is only the fallback when a resource has no existing slots.
 
-## Files to Modify
+## Ghost Slots Status
 
-| File | Change |
-|------|--------|
-| `src/pages/tracker/TrackerDashboard.tsx` | Add `status !== 'Completed'` check to `dueToday` filter (line 64); fix `critical` third condition (line 94-97) |
-| `src/components/tracker/dashboard/factory/LiveProductionFlow.tsx` | Remove all `Math.random()` mock data; show only real stage counts without fake metrics |
+Confirmed cleared: 0 ghost slots remain. Only 20 active slots in the system.
 
-## Expected Outcome
+## Implementation
 
-- "Due Today" drops from 29 to 0 (all 29 were completed jobs)
-- "Critical" drops from 31 to a realistic number (likely 0-2)
-- Assembly line shows stable, real data without random bottleneck alerts or fake percentages
+1. **Database migration**: ALTER the `scheduler_append_jobs` function, changing only line 48
+2. **Reschedule D430827** after the fix to pull it into today's schedule
+
+## Technical Detail
+
+The `scheduler_reschedule_all_parallel_aware` function (used by "Reschedule All") does NOT have this bug — the edge function passes `now()` as `p_start_from`. Only the append path (used on proof approval) is affected.
 
