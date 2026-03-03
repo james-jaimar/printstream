@@ -34,6 +34,11 @@ const roleOptions: { value: UserRole; label: string; description: string }[] = [
     value: 'admin', 
     label: 'Administrator', 
     description: 'Full system access and user management' 
+  },
+  { 
+    value: 'viewer', 
+    label: 'Viewer', 
+    description: 'Read-only access for sales and external staff' 
   }
 ];
 
