@@ -63,7 +63,7 @@ export const extractStoragePaths = (url: string) => {
 /**
  * Gets a signed URL for accessing a PDF
  */
-export const getSignedUrl = async (url: string | null, expiresIn = 3600): Promise<string | null> => {
+export const getSignedUrl = async (url: string | null, expiresIn = 3600, options?: { download?: boolean }): Promise<string | null> => {
   if (!url) return null;
   
   try {
@@ -87,7 +87,7 @@ export const getSignedUrl = async (url: string | null, expiresIn = 3600): Promis
       const { data, error } = await supabase.storage
         .from(paths.bucket)
         .createSignedUrl(paths.filePath, expiresIn, {
-          download: true,
+          download: options?.download ?? false,
         });
         
       if (error) {
@@ -103,7 +103,7 @@ export const getSignedUrl = async (url: string | null, expiresIn = 3600): Promis
           const { data: altData, error: altError } = await supabase.storage
             .from(alternateBucket)
             .createSignedUrl(paths.filePath, expiresIn, {
-              download: true,
+              download: options?.download ?? false,
             });
             
           if (altError) {

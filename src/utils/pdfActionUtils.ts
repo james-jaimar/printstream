@@ -33,7 +33,7 @@ export const handlePdfAction = async (
     
     // Get signed URL if needed
     const isAlreadySigned = url.includes('token=');
-    const accessUrl = isAlreadySigned ? url : await getSignedUrl(url);
+    const accessUrl = isAlreadySigned ? url : await getSignedUrl(url, 3600, { download: action === 'download' });
     
     if (!accessUrl) {
       throw new Error("Could not generate a valid URL for this PDF");
