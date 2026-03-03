@@ -1,57 +1,75 @@
 
 
-# Fix: Restore Paper Specs on Schedule Board Printing Cards
+# Read-Only Sales User Login
 
-## Root Cause
+## Approach
 
-The schedule reader query (`useScheduleReader.tsx` line 197) does NOT include `paper_specifications` in the production_jobs select:
+Add a new `viewer` role to the existing `user_roles` system. Sales users get this role and can see 5 tracker tabs (Dashboard, Orders, Production, Kanban, Schedule) -- all fully read-only. No new database tables needed, just a new enum value and UI guards.
 
-```
-.select("id, wo_no, customer, finishing_specifications, due_date, original_committed_due_date")
-```
+## Database Migration
 
-Meanwhile:
-- **Priority 1** (`job_print_specifications` table): Currently scheduled printing jobs (D430792, D430796, D430803, D430827) have **0 rows** in this table -- they were never manually assigned specs
-- **Priority 2** (stage instance notes): All printing stage instances have **null** notes -- nothing to parse
+Add `'viewer'` to the `app_role` enum:
 
-The actual paper data exists in the `production_jobs.paper_specifications` JSONB column (populated by the matrix parser), e.g.:
-- D430792: `"Stock - Bond, 80gsm, White, 750x530"`  
-- D430796: `"HI-Q Titan (Gloss), 128gsm, White, 640x915"`
-- D430803: `"HI-Q Titan (Matt), 250gsm, White, 530x750"`
-
-But the code never reads it.
-
-## Fix (single file: `src/hooks/useScheduleReader.tsx`)
-
-### Change 1: Add `paper_specifications` to the job query (line 197)
-
-```
-.select("id, wo_no, customer, finishing_specifications, paper_specifications, due_date, original_committed_due_date")
+```sql
+ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'viewer';
 ```
 
-### Change 2: Add Priority 3 fallback after the notes check (after line 366)
+## Code Changes
 
-When neither `job_print_specifications` nor stage notes have paper data, parse the first key of `paper_specifications` JSONB using regex to extract weight (e.g., "80gsm", "128gsm") and type (e.g., "Bond", "Gloss", "Matt"):
+### 1. Update type definitions
 
-```text
-JSONB key example: "Stock - Bond, 80gsm, White, 750x530"
-Regex extracts:    weight = "80gsm", type = "Bond"
-Display:           "80gsm Bond"
+**`src/types/user-types.ts`** and **`src/hooks/tracker/useUserRole.tsx`**: Add `'viewer'` to `UserRole` type.
 
-JSONB key example: "HI-Q Titan (Gloss), 128gsm, White, 640x915"  
-Regex extracts:    weight = "128gsm", type = "Gloss"
-Display:           "128gsm Gloss"
-```
+### 2. Update `useUserRole` hook
 
-The parsing logic:
-1. Get first key of `paper_specifications` JSONB from the job
-2. Extract weight with regex: `/(\d+gsm)/i`
-3. Extract type by checking for known types: Gloss, Matt, Bond, Silk, Uncoated, FBB, or extract from parentheses like "(Gloss)"
-4. Combine as `"weight type"` for display
+- Add `isViewer: boolean` to `UserRoleResponse`
+- Detect `viewer` role from `user_roles` table (same pattern as admin check)
+- Return `isViewer` derived property: `userRole === 'viewer'`
 
-This matches the existing pattern used by `useJobPaperSpecs` and `SubSpecificationBadge` which already do this fallback elsewhere in the codebase.
+### 3. Update `RoleAwareLayout` routing
 
-## Expected Result
+When `isViewer` is true, redirect `/tracker` to `/tracker/dashboard` (same as admin/manager). No special layout needed -- they use the same `TrackerLayout`.
 
-All scheduled printing stage cards will show paper spec badges like "80gsm Bond", "128gsm Gloss", "250gsm Matt" -- exactly as they did before, using the JSONB data that's already in the database.
+### 4. Update `Index.tsx` routing
+
+Add viewer users to the redirect logic: send them to `/tracker/dashboard` on login.
+
+### 5. Filter navigation tabs for viewers
+
+**`src/components/tracker/DynamicHeader.tsx`**: When `isViewer`, only show tabs: Dashboard, Orders, Production, Kanban, Schedule. Hide: Worksheets, Setup.
+
+### 6. Create a `ReadOnlyGuard` context
+
+**New file: `src/contexts/ReadOnlyContext.tsx`**
+
+A React context that provides `isReadOnly: boolean` based on `isViewer` from `useUserRole`. Wrap the tracker layout with this provider.
+
+### 7. Disable edit actions across the 5 allowed views
+
+Use the `isReadOnly` context to conditionally hide or disable:
+- **Orders (TrackerJobs)**: Hide "New Job", "Upload", "Edit", "Delete" buttons. Disable drag-drop, inline editing.
+- **Production (TrackerProduction)**: Hide stage action buttons (advance, complete, move). Disable status toggles.
+- **Kanban (TrackerKanban)**: Disable drag-and-drop between columns. Hide action menus on cards.
+- **Dashboard (TrackerDashboard)**: Already mostly read-only; hide any action buttons if present.
+- **Schedule (ScheduleBoardPage)**: Disable drag-to-reschedule. Hide scheduling controls.
+
+The pattern: check `const { isReadOnly } = useReadOnly()` in each component, and conditionally render action elements with `{!isReadOnly && <ActionButton />}`.
+
+### 8. User management
+
+Admins can assign the `viewer` role to sales users through the existing user management UI (`TrackerUsers` page). The role dropdown already pulls from `UserRole` type -- adding `'viewer'` there makes it available.
+
+## Summary of files to change
+
+| File | Change |
+|------|--------|
+| Migration SQL | Add `viewer` to `app_role` enum |
+| `src/types/user-types.ts` | Add `'viewer'` to `UserRole` |
+| `src/hooks/tracker/useUserRole.tsx` | Detect viewer role, expose `isViewer` |
+| `src/contexts/ReadOnlyContext.tsx` | New context providing `isReadOnly` |
+| `src/components/tracker/RoleAwareLayout.tsx` | Route viewers to dashboard |
+| `src/pages/Index.tsx` | Redirect viewers to tracker |
+| `src/components/tracker/DynamicHeader.tsx` | Filter tabs for viewers |
+| `src/components/TrackerLayout.tsx` | Wrap with ReadOnlyProvider |
+| Various view components | Guard edit actions with `isReadOnly` |
 
