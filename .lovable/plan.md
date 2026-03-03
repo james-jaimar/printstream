@@ -1,40 +1,57 @@
 
 
-# Fix: scheduler_append_jobs Should Start From Now, Not Tomorrow
+# Fix: Restore Paper Specs on Schedule Board Printing Cards
 
-## Current Bug (Line 48)
+## Root Cause
 
-```sql
-base_time := public.next_working_start(date_trunc('day', now()) + interval '1 day');
+The schedule reader query (`useScheduleReader.tsx` line 197) does NOT include `paper_specifications` in the production_jobs select:
+
+```
+.select("id, wo_no, customer, finishing_specifications, due_date, original_committed_due_date")
 ```
 
-This always skips today. A job approved at 06:00 or 07:00 gets pushed to tomorrow's 08:00 shift even though today's shift hasn't started yet.
+Meanwhile:
+- **Priority 1** (`job_print_specifications` table): Currently scheduled printing jobs (D430792, D430796, D430803, D430827) have **0 rows** in this table -- they were never manually assigned specs
+- **Priority 2** (stage instance notes): All printing stage instances have **null** notes -- nothing to parse
 
-## The Fix
+The actual paper data exists in the `production_jobs.paper_specifications` JSONB column (populated by the matrix parser), e.g.:
+- D430792: `"Stock - Bond, 80gsm, White, 750x530"`  
+- D430796: `"HI-Q Titan (Gloss), 128gsm, White, 640x915"`
+- D430803: `"HI-Q Titan (Matt), 250gsm, White, 530x750"`
 
-Change line 48 to:
+But the code never reads it.
 
-```sql
-base_time := public.next_working_start(now());
+## Fix (single file: `src/hooks/useScheduleReader.tsx`)
+
+### Change 1: Add `paper_specifications` to the job query (line 197)
+
+```
+.select("id, wo_no, customer, finishing_specifications, paper_specifications, due_date, original_committed_due_date")
 ```
 
-The `next_working_start()` function already handles the logic of finding the next valid shift window:
-- If now is 06:00 (before shift), it returns today 08:00
-- If now is 10:00 (during shift), it returns now
-- If now is 18:00 (after shift), it returns tomorrow 08:00
+### Change 2: Add Priority 3 fallback after the notes check (after line 366)
 
-Jobs will simply go behind the last existing slot on each resource, regardless of what day that falls on. The resource tail tracking (lines 94-102) already handles this — it finds the MAX `slot_end_time` per resource and uses that as the starting point. The `base_time` is only the fallback when a resource has no existing slots.
+When neither `job_print_specifications` nor stage notes have paper data, parse the first key of `paper_specifications` JSONB using regex to extract weight (e.g., "80gsm", "128gsm") and type (e.g., "Bond", "Gloss", "Matt"):
 
-## Ghost Slots Status
+```text
+JSONB key example: "Stock - Bond, 80gsm, White, 750x530"
+Regex extracts:    weight = "80gsm", type = "Bond"
+Display:           "80gsm Bond"
 
-Confirmed cleared: 0 ghost slots remain. Only 20 active slots in the system.
+JSONB key example: "HI-Q Titan (Gloss), 128gsm, White, 640x915"  
+Regex extracts:    weight = "128gsm", type = "Gloss"
+Display:           "128gsm Gloss"
+```
 
-## Implementation
+The parsing logic:
+1. Get first key of `paper_specifications` JSONB from the job
+2. Extract weight with regex: `/(\d+gsm)/i`
+3. Extract type by checking for known types: Gloss, Matt, Bond, Silk, Uncoated, FBB, or extract from parentheses like "(Gloss)"
+4. Combine as `"weight type"` for display
 
-1. **Database migration**: ALTER the `scheduler_append_jobs` function, changing only line 48
-2. **Reschedule D430827** after the fix to pull it into today's schedule
+This matches the existing pattern used by `useJobPaperSpecs` and `SubSpecificationBadge` which already do this fallback elsewhere in the codebase.
 
-## Technical Detail
+## Expected Result
 
-The `scheduler_reschedule_all_parallel_aware` function (used by "Reschedule All") does NOT have this bug — the edge function passes `now()` as `p_start_from`. Only the append path (used on proof approval) is affected.
+All scheduled printing stage cards will show paper spec badges like "80gsm Bond", "128gsm Gloss", "250gsm Matt" -- exactly as they did before, using the JSONB data that's already in the database.
 
