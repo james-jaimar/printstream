@@ -76,12 +76,7 @@ export const useBatchAwareProductionJobs = ({
         throw new Error('User not authenticated');
       }
 
-      console.log('🔄 Fetching batch-aware production jobs:', {
-        includeIndividualJobs,
-        includeBatchMasterJobs,
-        statusFilter,
-        batchStatusFilter
-      });
+      // Fetching batch-aware production jobs
 
       // Build the base query
       let query = supabase
@@ -278,31 +273,54 @@ export const useBatchAwareProductionJobs = ({
         });
       }
 
-      // For batch master jobs, get constituent job count
+      // For batch master jobs, get constituent job count using batched queries
       const batchMasterJobs = productionJobs.filter(job => 
         job.wo_no?.startsWith('BATCH-')
       );
 
       const constituentCountLookup = new Map();
       if (batchMasterJobs.length > 0) {
-        for (const batchJob of batchMasterJobs) {
-          const batchName = batchJob.wo_no?.replace('BATCH-', '');
-          if (batchName) {
-            const { data: batch } = await supabase
-              .from('batches')
-              .select('id')
-              .eq('name', batchName)
-              .single();
+        const batchNames = batchMasterJobs
+          .map(job => job.wo_no?.replace('BATCH-', ''))
+          .filter(Boolean) as string[];
 
-            if (batch) {
-              const { data: constituentRefs } = await supabase
-                .from('batch_job_references')
-                .select('production_job_id')
-                .eq('batch_id', batch.id)
-                .eq('status', 'processing');
+        if (batchNames.length > 0) {
+          // Single batched query instead of N individual queries
+          const { data: matchedBatches } = await supabase
+            .from('batches')
+            .select('id, name')
+            .in('name', batchNames);
 
-              constituentCountLookup.set(batchJob.id, constituentRefs?.length || 0);
+          if (matchedBatches && matchedBatches.length > 0) {
+            const matchedBatchIds = matchedBatches.map(b => b.id);
+            
+            // Single query for all constituent refs
+            const { data: allConstituentRefs } = await supabase
+              .from('batch_job_references')
+              .select('batch_id, production_job_id')
+              .in('batch_id', matchedBatchIds)
+              .eq('status', 'processing');
+
+            // Build lookup: batch name -> count
+            const batchNameToId = new Map(matchedBatches.map(b => [b.name, b.id]));
+            const batchIdToCount = new Map<string, number>();
+            
+            if (allConstituentRefs) {
+              allConstituentRefs.forEach(ref => {
+                batchIdToCount.set(ref.batch_id, (batchIdToCount.get(ref.batch_id) || 0) + 1);
+              });
             }
+
+            // Map back to production job IDs
+            batchMasterJobs.forEach(job => {
+              const batchName = job.wo_no?.replace('BATCH-', '');
+              if (batchName) {
+                const batchId = batchNameToId.get(batchName);
+                if (batchId) {
+                  constituentCountLookup.set(job.id, batchIdToCount.get(batchId) || 0);
+                }
+              }
+            });
           }
         }
       }
@@ -362,12 +380,6 @@ export const useBatchAwareProductionJobs = ({
         );
       }
 
-      console.log('✅ Fetched batch-aware production jobs:', {
-        total: filteredJobs.length,
-        batchMasters: filteredJobs.filter(j => j.is_batch_master).length,
-        individualJobs: filteredJobs.filter(j => !j.is_batch_master).length,
-        batchedJobs: filteredJobs.filter(j => j.batch_name && !j.is_batch_master).length
-      });
 
       return filteredJobs;
     },

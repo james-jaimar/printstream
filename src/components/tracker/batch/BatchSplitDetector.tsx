@@ -69,14 +69,6 @@ export const BatchSplitDetector: React.FC<BatchSplitDetectorProps> = ({
 
   const isReadyForSplit = isBatchJob && splitReadiness.ready && !isLoading;
 
-  console.log('🔍 BatchSplitDetector:', {
-    jobId: job.job_id,
-    woNo: job.wo_no,
-    isBatchJob,
-    currentStage: job.current_stage_name,
-    splitReadiness,
-    isReadyForSplit
-  });
 
   return (
     <>

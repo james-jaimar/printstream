@@ -33,12 +33,18 @@ export const BatchSplitButton: React.FC<BatchSplitButtonProps> = ({
     onSplitComplete?.();
   };
 
+  // Short-circuit: skip rendering BatchSplitDetector entirely for non-batch jobs
+  const isBatchJob = job.is_batch_master || job.wo_no?.startsWith('BATCH-') || false;
+  
+  if (!isBatchJob) {
+    return null;
+  }
+
   return (
     <>
       <BatchSplitDetector job={job}>
-        {({ isBatchJob, isReadyForSplit, splitReadiness }) => {
-          // Only show the button if this is a batch job that's ready for splitting
-          if (!isBatchJob || !isReadyForSplit) {
+        {({ isReadyForSplit, splitReadiness }) => {
+          if (!isReadyForSplit) {
             return null;
           }
 
@@ -59,7 +65,6 @@ export const BatchSplitButton: React.FC<BatchSplitButtonProps> = ({
         }}
       </BatchSplitDetector>
 
-      {/* Split Dialog */}
       <BatchSplitDialog
         isOpen={showSplitDialog}
         onClose={() => setShowSplitDialog(false)}

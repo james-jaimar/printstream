@@ -137,7 +137,6 @@ export const useDataManager = () => {
   }, [user?.id, fetchJobs, fetchStages, routeKey]);
 
   const manualRefresh = useCallback(() => {
-    console.log('🔄 Manual refresh triggered');
     loadData(true);
   }, [loadData]);
 
@@ -151,7 +150,6 @@ export const useDataManager = () => {
     // OPTIMIZED: Only set up interval when tab is visible
     if (isVisible) {
       autoRefreshIntervalRef.current = setInterval(() => {
-        console.log('🔄 Auto-refresh triggered (tab visible)');
         loadData(false);
       }, AUTO_REFRESH_INTERVAL);
     }
@@ -170,7 +168,6 @@ export const useDataManager = () => {
 
     if (isVisible) {
       // Tab became visible - refresh data and restart interval
-      console.log('📱 useDataManager: Tab visible - resuming');
       loadData(false);
       
       if (!autoRefreshIntervalRef.current) {
@@ -180,7 +177,6 @@ export const useDataManager = () => {
       }
     } else {
       // Tab hidden - pause interval
-      console.log('📱 useDataManager: Tab hidden - pausing');
       if (autoRefreshIntervalRef.current) {
         clearInterval(autoRefreshIntervalRef.current);
         autoRefreshIntervalRef.current = null;
