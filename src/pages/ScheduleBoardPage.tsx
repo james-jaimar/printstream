@@ -2,18 +2,21 @@ import React from "react";
 import { ScheduleBoard } from "@/components/schedule/ScheduleBoard";
 import { useScheduleReader } from "@/hooks/useScheduleReader";
 import { useUserRole } from "@/hooks/tracker/useUserRole";
+import { useReadOnly } from "@/contexts/ReadOnlyContext";
 import { toast } from "sonner";
 import { getSchedulingValidation } from "@/utils/scheduler";
 
 export default function ScheduleBoardPage() {
   const { scheduleDays, isLoading, fetchSchedule, triggerReschedule } = useScheduleReader();
   const { isAdmin } = useUserRole();
+  const { isReadOnly } = useReadOnly();
 
   const handleRefresh = async () => {
     await fetchSchedule();
   };
 
   const handleReschedule = async () => {
+    if (isReadOnly) return;
     try {
       toast.message("Rebuilding schedule with parallel-aware scheduler…");
 
@@ -22,7 +25,6 @@ export default function ScheduleBoardPage() {
 
       await fetchSchedule();
       
-      // Get post-reschedule validation
       const validationResults = await getSchedulingValidation();
       
       if (validationResults.length > 0) {
@@ -47,8 +49,8 @@ export default function ScheduleBoardPage() {
       scheduleDays={scheduleDays}
       isLoading={isLoading}
       onRefresh={handleRefresh}
-      onReschedule={handleReschedule}
-      isAdminUser={isAdmin}
+      onReschedule={isReadOnly ? undefined : handleReschedule}
+      isAdminUser={isReadOnly ? false : isAdmin}
     />
   );
 }

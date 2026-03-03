@@ -22,7 +22,7 @@ export const DynamicHeader: React.FC<DynamicHeaderProps> = ({
   onTabChange
 }) => {
   const { user, signOut } = useAuth();
-  const { isManager, isAdmin } = useUserRole();
+  const { isManager, isAdmin, isViewer } = useUserRole();
   const { 
     lastUpdated, 
     isRefreshing, 
@@ -34,7 +34,7 @@ export const DynamicHeader: React.FC<DynamicHeaderProps> = ({
   const [showMasterModal, setShowMasterModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState<AccessibleJob | null>(null);
 
-  const tabs = [
+  const allTabs = [
     { id: "dashboard", label: "DASHBOARD" },
     { id: "orders", label: "ORDERS" },
     { id: "production", label: "PRODUCTION" },
@@ -43,6 +43,11 @@ export const DynamicHeader: React.FC<DynamicHeaderProps> = ({
     { id: "worksheets", label: "WORKSHEETS" },
     { id: "setup", label: "SETUP" }
   ];
+
+  // Viewers only see 5 tabs
+  const tabs = isViewer 
+    ? allTabs.filter(t => ['dashboard', 'orders', 'production', 'kanban', 'schedule-board'].includes(t.id))
+    : allTabs;
 
   const handleSignOut = async () => {
     try {
@@ -82,7 +87,7 @@ export const DynamicHeader: React.FC<DynamicHeaderProps> = ({
           </div>
           
           <Tabs value={activeTab} onValueChange={onTabChange} className="w-auto min-h-[36px]">
-            <TabsList className="grid grid-cols-7 w-auto bg-gray-100 px-0 py-0 gap-0 min-h-[36px]">
+            <TabsList className={`grid w-auto bg-gray-100 px-0 py-0 gap-0 min-h-[36px]`} style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
               {tabs.map((tab) => (
                 <TabsTrigger 
                   key={tab.id} 
@@ -108,7 +113,7 @@ export const DynamicHeader: React.FC<DynamicHeaderProps> = ({
           />
           
           {/* Order Search Button */}
-          {(isManager || isAdmin) && (
+          {!isViewer && (isManager || isAdmin) && (
             <Button 
               variant="outline" 
               size="sm" 
@@ -121,7 +126,7 @@ export const DynamicHeader: React.FC<DynamicHeaderProps> = ({
             </Button>
           )}
           
-          {(isManager || isAdmin) && (
+          {!isViewer && (isManager || isAdmin) && (
             <Button variant="outline" size="sm" asChild className="px-2 py-1 text-xs">
               <Link to="/tracker/factory-floor" className="flex items-center gap-1">
                 <Factory size={14} />

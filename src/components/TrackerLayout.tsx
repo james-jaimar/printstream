@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { DynamicHeader } from "./tracker/DynamicHeader";
 import { ContextSidebar } from "./tracker/ContextSidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { ReadOnlyProvider } from "@/contexts/ReadOnlyContext";
 
 const TrackerLayout = () => {
   const { user } = useAuth();
@@ -72,37 +73,39 @@ const TrackerLayout = () => {
   const isOrdersTab = activeTab === 'orders';
 
   return (
-    <div className="flex h-screen bg-gray-50 w-full">
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <DynamicHeader 
-          activeTab={activeTab}
-          onTabChange={handleTabChange}
-        />
-        
-        <div className="flex flex-1 overflow-hidden">
-          {!isKanbanTab && !isDashboardTab && !isOrdersTab && (
-            <ContextSidebar 
-              activeTab={activeTab}
-              onFilterChange={handleFilterChange}
-              productionSidebarData={activeTab === "production" ? productionSidebarData : undefined}
-              onStageSelect={activeTab === "production" ? handleStageSelect : undefined}
-              selectedStageId={activeTab === "production" ? selectedStageId : undefined}
-            />
-          )}
+    <ReadOnlyProvider>
+      <div className="flex h-screen bg-gray-50 w-full">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <DynamicHeader 
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+          />
           
-          <main className={`flex-1 overflow-auto ${activeTab === 'production' ? '' : 'p-6'}`}>
-            <Outlet context={{ 
-              activeTab, 
-              filters,
-              selectedStageId,
-              onStageSelect: handleStageSelect,
-              onFilterChange: handleFilterChange,
-              setSidebarData
-            }} />
-          </main>
+          <div className="flex flex-1 overflow-hidden">
+            {!isKanbanTab && !isDashboardTab && !isOrdersTab && (
+              <ContextSidebar 
+                activeTab={activeTab}
+                onFilterChange={handleFilterChange}
+                productionSidebarData={activeTab === "production" ? productionSidebarData : undefined}
+                onStageSelect={activeTab === "production" ? handleStageSelect : undefined}
+                selectedStageId={activeTab === "production" ? selectedStageId : undefined}
+              />
+            )}
+            
+            <main className={`flex-1 overflow-auto ${activeTab === 'production' ? '' : 'p-6'}`}>
+              <Outlet context={{ 
+                activeTab, 
+                filters,
+                selectedStageId,
+                onStageSelect: handleStageSelect,
+                onFilterChange: handleFilterChange,
+                setSidebarData
+              }} />
+            </main>
+          </div>
         </div>
       </div>
-    </div>
+    </ReadOnlyProvider>
   );
 };
 
