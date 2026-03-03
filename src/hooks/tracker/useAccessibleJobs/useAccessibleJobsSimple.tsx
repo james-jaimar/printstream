@@ -33,12 +33,6 @@ export const useAccessibleJobsSimple = (options: UseAccessibleJobsSimpleOptions 
 
     try {
       setError(null);
-      console.log("🔍 Fetching jobs with simplified approach:", {
-        userId: user.id,
-        permissionType,
-        statusFilter,
-        stageFilter
-      });
 
       const { data, error: fetchError } = await supabase.rpc('get_user_accessible_jobs_with_batch_allocation', {
         p_user_id: user.id,
@@ -52,10 +46,6 @@ export const useAccessibleJobsSimple = (options: UseAccessibleJobsSimpleOptions 
         throw new Error(`Failed to fetch jobs: ${fetchError.message}`);
       }
 
-      console.log("✅ Database function success:", {
-        count: data?.length || 0,
-        permissionType
-      });
 
       if (data && Array.isArray(data)) {
         // Map the data to ensure it matches RawJobData interface
@@ -66,10 +56,10 @@ export const useAccessibleJobsSimple = (options: UseAccessibleJobsSimpleOptions 
         
         // Use centralized processor - this ensures custom workflow dates work consistently
         const processedJobs = processJobsArray(rawJobData);
-        console.log("✅ Simplified jobs loaded with centralized processor:", processedJobs.length);
+        
         setJobs(processedJobs);
       } else {
-        console.log("⚠️ No valid data returned");
+        
         setJobs([]);
       }
     } catch (err) {
@@ -84,7 +74,7 @@ export const useAccessibleJobsSimple = (options: UseAccessibleJobsSimpleOptions 
   }, [user?.id, permissionType, statusFilter, stageFilter]);
 
   const startJob = useCallback(async (jobId: string): Promise<boolean> => {
-    console.log("🚀 Starting job:", jobId);
+    
     // Simple optimistic update
     setJobs(prev => prev.map(job => 
       job.job_id === jobId 
@@ -99,7 +89,7 @@ export const useAccessibleJobsSimple = (options: UseAccessibleJobsSimpleOptions 
   }, [fetchJobs]);
 
   const completeJob = useCallback(async (jobId: string): Promise<boolean> => {
-    console.log("✅ Completing job:", jobId);
+    
     // Simple optimistic update
     setJobs(prev => prev.map(job => 
       job.job_id === jobId 
