@@ -194,7 +194,7 @@ export function useScheduleReader() {
       // 4) job lookup (include due date fields)
       const { data: productionJobs, error: jobsError } = await supabase
         .from("production_jobs")
-        .select("id, wo_no, customer, finishing_specifications, due_date, original_committed_due_date")
+        .select("id, wo_no, customer, finishing_specifications, paper_specifications, due_date, original_committed_due_date")
         .in("id", jobIds);
 
       if (jobsError) {
@@ -362,6 +362,33 @@ export function useScheduleReader() {
                 paper_type: parsedPaper.paperType,
                 paper_weight: parsedPaper.paperWeight
               };
+            }
+          }
+          // Fallback 2: parse from production_jobs.paper_specifications JSONB
+          if (!displaySpec && job?.paper_specifications) {
+            const ps = job.paper_specifications as Record<string, unknown>;
+            const firstKey = Object.keys(ps)[0];
+            if (firstKey) {
+              const weightMatch = firstKey.match(/(\d+gsm)/i);
+              const weight = weightMatch ? weightMatch[1] : undefined;
+              // Extract type from parentheses like "(Gloss)" or known types
+              const parenMatch = firstKey.match(/\((\w+)\)/);
+              const knownTypes = ['Gloss', 'Matt', 'Bond', 'Silk', 'Uncoated', 'FBB', 'Satin'];
+              let type: string | undefined;
+              if (parenMatch) {
+                type = parenMatch[1];
+              } else {
+                for (const kt of knownTypes) {
+                  if (firstKey.toLowerCase().includes(kt.toLowerCase())) {
+                    type = kt;
+                    break;
+                  }
+                }
+              }
+              if (weight || type) {
+                displaySpec = [weight, type].filter(Boolean).join(' ');
+                paperSpecs = { paper_weight: weight, paper_type: type };
+              }
             }
           }
         }
