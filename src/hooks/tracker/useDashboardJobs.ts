@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
 
 interface DashboardJob {
   id: string;
@@ -19,25 +18,18 @@ interface DashboardJob {
 }
 
 export const useDashboardJobs = () => {
-  const { user } = useAuth();
   const [jobs, setJobs] = useState<DashboardJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
 
   const fetchJobs = useCallback(async () => {
-    if (!user?.id) {
-      setIsLoading(false);
-      return;
-    }
-
     try {
       setIsLoading(true);
       setError(null);
 
       const { data, error: fetchError } = await supabase.rpc(
-        'get_dashboard_job_stats' as any,
-        { p_user_id: user.id }
+        'get_dashboard_job_stats' as any
       );
 
       if (fetchError) {
@@ -53,7 +45,7 @@ export const useDashboardJobs = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     fetchJobs();
