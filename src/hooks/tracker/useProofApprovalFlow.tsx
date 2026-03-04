@@ -58,6 +58,23 @@ export const useProofApprovalFlow = () => {
         throw completeError;
       }
 
+      // Invalidate all active proof links so reminder emails stop
+      const { error: proofLinkError } = await supabase
+        .from('proof_links')
+        .update({
+          is_used: true,
+          invalidated_at: new Date().toISOString(),
+          invalidated_by: (await supabase.auth.getUser()).data.user?.id || null
+        })
+        .eq('job_id', jobId)
+        .eq('is_used', false);
+
+      if (proofLinkError) {
+        console.warn('⚠️ [DTP MANUAL] Failed to invalidate proof links:', proofLinkError);
+      } else {
+        console.log(`✅ [DTP MANUAL] Proof links invalidated for job ${jobId}`);
+      }
+
       console.log(`✅ [DTP MANUAL] Proof stage completed for job ${jobId}`);
 
       // STEP 2: Explicitly call scheduler to append job (matching online approval pattern)
