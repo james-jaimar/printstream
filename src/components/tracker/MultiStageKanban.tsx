@@ -15,6 +15,7 @@ import StageColumn from "./multistage-kanban/StageColumn";
 import ColumnViewToggle from "./multistage-kanban/ColumnViewToggle";
 import { arrayMove } from "@/utils/tracker/reorderUtils";
 import { supabase } from "@/integrations/supabase/client";
+import { useUserRole } from "@/hooks/tracker/useUserRole";
 
 // DnD kit
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
@@ -23,8 +24,9 @@ import { MultiStageKanbanColumns } from "./MultiStageKanbanColumns";
 import { MultiStageKanbanColumnsProps } from "./MultiStageKanban.types";
 
 export const MultiStageKanban = () => {
+  const { isViewer } = useUserRole();
   const { jobs, isLoading: jobsLoading, error: jobsError, refreshJobs } = useAccessibleJobs({
-    permissionType: 'manage'
+    permissionType: isViewer ? 'view' : 'manage'
   });
   const { stages } = useProductionStages();
 

@@ -18,6 +18,7 @@ import { TrackerErrorBoundary } from "@/components/tracker/error-boundaries/Trac
 import { DataLoadingFallback } from "@/components/tracker/error-boundaries/DataLoadingFallback";
 import { RefreshIndicator } from "@/components/tracker/RefreshIndicator";
 import JobPartAssignmentManager from "@/components/jobs/JobPartAssignmentManager";
+import { useUserRole } from "@/hooks/tracker/useUserRole";
 // Removed complex workflow utilities - using direct stage fields instead
 import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 
@@ -33,6 +34,7 @@ interface TrackerProductionContext {
 const TrackerProduction = () => {
   const context = useOutletContext<TrackerProductionContext>();
   const isMobile = useIsMobile();
+  const { isViewer } = useUserRole();
   
   // Cache key to force fresh data fetching on mount
   const [cacheKey] = useState(() => Date.now());
@@ -46,7 +48,7 @@ const TrackerProduction = () => {
     refreshJobs,
     invalidateCache
   } = useAccessibleJobs({
-    permissionType: 'manage'
+    permissionType: isViewer ? 'view' : 'manage'
   });
 
   const [sortBy, setSortBy] = useState<'wo_no' | 'due_date'>('wo_no');
