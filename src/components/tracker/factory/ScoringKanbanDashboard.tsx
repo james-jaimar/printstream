@@ -159,13 +159,18 @@ export const ScoringKanbanDashboard: React.FC = () => {
   React.useEffect(() => {
     if (selectedJob && jobs.length > 0) {
       const updatedJob = jobs.find(j => j.job_id === selectedJob.job_id);
-      if (updatedJob && JSON.stringify(updatedJob) !== JSON.stringify(selectedJob)) {
+      if (updatedJob && (
+        updatedJob.status !== selectedJob.status ||
+        updatedJob.current_stage_status !== selectedJob.current_stage_status ||
+        updatedJob.current_stage_id !== selectedJob.current_stage_id ||
+        updatedJob.current_stage_name !== selectedJob.current_stage_name
+      )) {
         setSelectedJob(updatedJob);
       }
     }
   }, [jobs, selectedJob]);
 
-  const handleBarcodeDetected = (barcodeData: string) => {
+  const handleBarcodeDetected = useCallback((barcodeData: string) => {
     if (!selectedJob) return;
     
     const cleanScanned = barcodeData.trim().toUpperCase();
@@ -182,7 +187,7 @@ export const ScoringKanbanDashboard: React.FC = () => {
     } else {
       toast.error(`Wrong barcode scanned. Expected: ${cleanExpected}, Got: ${barcodeData}`);
     }
-  };
+  }, [selectedJob]);
 
   if (isLoading || permissionsLoading) {
     return (
