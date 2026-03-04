@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserStagePermissions } from '@/hooks/tracker/useUserStagePermissions';
 import { toast } from 'sonner';
+import { useStageVisibilityPreferences } from '@/hooks/tracker/useStageVisibilityPreferences';
+import { StageToggleControls } from './StageToggleControls';
 
 interface QueueConfig {
   id: string;
@@ -106,6 +108,8 @@ export const FinishingKanbanDashboard: React.FC = () => {
   }, [showJobModal, selectedJob, jobs, woMatchesBarcode]);
 
   // Dynamically build queue configs from ALL user's accessible stages
+  const { preferences: stagePrefs, toggleStage, moveStage, getVisibleOrderedConfigs, initializeOrder } = useStageVisibilityPreferences(user?.id);
+
   const QUEUE_CONFIGS: QueueConfig[] = useMemo(() => {
     return consolidatedStages.map(stage => ({
       id: stage.stage_id,
@@ -117,6 +121,25 @@ export const FinishingKanbanDashboard: React.FC = () => {
       stageId: stage.stage_id
     }));
   }, [consolidatedStages]);
+
+  // Initialize order when configs change
+  useEffect(() => {
+    if (QUEUE_CONFIGS.length > 0) {
+      initializeOrder(QUEUE_CONFIGS);
+    }
+  }, [QUEUE_CONFIGS, initializeOrder]);
+
+  // Apply visibility + ordering
+  const visibleConfigs = useMemo(() => getVisibleOrderedConfigs(QUEUE_CONFIGS), [QUEUE_CONFIGS, getVisibleOrderedConfigs]);
+
+  // Dynamic grid class based on visible count
+  const gridColsClass = useMemo(() => {
+    const count = visibleConfigs.length;
+    if (count <= 1) return 'grid-cols-1';
+    if (count === 2) return 'grid-cols-1 md:grid-cols-2';
+    if (count === 3) return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
+    return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4';
+  }, [visibleConfigs.length]);
 
   const handleViewModeChange = (mode: 'card' | 'list') => {
     setViewMode(mode);
@@ -231,6 +254,13 @@ export const FinishingKanbanDashboard: React.FC = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-64"
             />
+            <StageToggleControls
+              stages={QUEUE_CONFIGS.map(c => ({ id: c.id, title: c.title, backgroundColor: c.backgroundColor }))}
+              hiddenStageIds={stagePrefs.hiddenStageIds}
+              stageOrder={stagePrefs.stageOrder}
+              onToggleStage={toggleStage}
+              onMoveStage={moveStage}
+            />
             <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
             <Button onClick={handleRefresh} variant="outline" size="sm">
               <RefreshCw className="h-4 w-4" />
@@ -241,15 +271,15 @@ export const FinishingKanbanDashboard: React.FC = () => {
         <div className="flex gap-2 flex-wrap">
           <Badge variant="secondary">Total: {totalJobs}</Badge>
           <Badge variant="secondary">Active: {activeJobs}</Badge>
-          <Badge variant="secondary">Queues: {QUEUE_CONFIGS.length}</Badge>
+          <Badge variant="secondary">Queues: {visibleConfigs.length}/{QUEUE_CONFIGS.length}</Badge>
         </div>
       </div>
 
       <div className="flex-1 overflow-hidden px-3 sm:px-4 pb-3 sm:pb-4">
         {viewMode === 'card' ? (
           <div key="card-view" className="h-full overflow-auto">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 h-full">
-              {QUEUE_CONFIGS.map(config => (
+            <div className={`grid ${gridColsClass} gap-4 h-full`}>
+              {visibleConfigs.map(config => (
                 <div key={config.id} className="flex flex-col min-h-0">
                   <DtpKanbanColumnWithBoundary
                     title={config.title}
@@ -267,8 +297,8 @@ export const FinishingKanbanDashboard: React.FC = () => {
           </div>
         ) : (
           <div key="list-view" className="h-full overflow-auto">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 h-full">
-              {QUEUE_CONFIGS.map(config => {
+            <div className={`grid ${gridColsClass} gap-4 h-full`}>
+              {visibleConfigs.map(config => {
                 const jobsForQueue = queueJobs[config.id] || [];
                 
                 return (
