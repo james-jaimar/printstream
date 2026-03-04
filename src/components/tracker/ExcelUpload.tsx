@@ -301,7 +301,7 @@ export const ExcelUpload = () => {
   };
 
   // Single job processing for paginated dialog
-  const handleSingleJobConfirm = async (woNo: string, userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string}>) => {
+  const handleSingleJobConfirm = async (woNo: string, userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string, mappedStageSpecId?: string, mappedStageSpecName?: string, paperSpecification?: string, partType?: string, quantity?: number}>) => {
     if (!enhancedResult || !user) return;
     
     try {

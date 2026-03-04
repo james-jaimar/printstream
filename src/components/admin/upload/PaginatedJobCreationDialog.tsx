@@ -22,7 +22,7 @@ interface PaginatedJobCreationDialogProps {
   onOpenChange: (open: boolean) => void;
   result: EnhancedJobCreationResult | null;
   isProcessing: boolean;
-  onSingleJobConfirm: (woNo: string, userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string}>) => Promise<void>;
+  onSingleJobConfirm: (woNo: string, userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string, mappedStageSpecId?: string, mappedStageSpecName?: string, paperSpecification?: string, partType?: string, quantity?: number}>) => Promise<void>;
   onComplete: () => void;
 }
 
