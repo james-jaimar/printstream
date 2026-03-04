@@ -1,44 +1,33 @@
 
 
-# Add Queue Toggle + Responsive Layout to All Operator Dashboards
+# Merge Trimming Stages into Single Queue on Finishing Dashboard
 
-The toggle/reorder feature currently only exists on `FinishingKanbanDashboard`. It should be added to all other operator dashboards so every group can customize their view.
+## Problem
+The trimming operator sees 3 separate columns (Book Cutting, Final Trimming, Pre Trim) but doesn't know which job to do first across them. These stages run on the same guillotines and must be worked in order — whichever job's predecessor finished first should be next, regardless of which trimming stage it is.
 
-## Dashboards to Update
+## Solution
+In `FinishingKanbanDashboard.tsx`, detect trimming-related stages and merge them into a single "Trimming" queue column. Jobs from all three stages appear in one unified list, sorted by workflow priority (which already accounts for due date, status urgency, and WO number).
 
-### 1. ScoringKanbanDashboard
-- Already dynamic (`scoringStages` from permissions) -- straightforward integration
-- Add `useStageVisibilityPreferences` + `StageToggleControls` to header
-- Replace hardcoded flex layout with dynamic grid based on visible count
+## Implementation
 
-### 2. PackagingShippingKanbanDashboard
-- Currently hardcoded to 2 columns (Packaging, Shipping)
-- Add toggle controls so operators can hide one if they only work packaging or only shipping
-- Dynamic grid (1 or 2 columns)
+### File: `src/components/tracker/factory/FinishingKanbanDashboard.tsx`
 
-### 3. DtpKanbanDashboard
-- Has 4 hardcoded columns: DTP, Proofing, Batch Allocation, Send to Print
-- Add toggle so DTP operators can hide columns they don't need
-- Dynamic grid based on visible count
+1. **Define trimming keywords** — a constant array: `['book cutting', 'final trimming', 'pre trim', 'trimming']`
 
-### 4. DieCuttingKanbanDashboard
-- Machine-based columns -- different pattern (machines + unassigned)
-- Skip this one -- machines are dynamically managed, not user-toggleable stages
+2. **Merge trimming configs** — after building `QUEUE_CONFIGS` from `consolidatedStages`, detect which configs match trimming keywords. If 2+ match, replace them with a single merged config:
+   - ID: `trimming-merged`
+   - Title: `Trimming`
+   - Icon: Scissors
+   - Store the original stage IDs in a `mergedStageIds` set
 
-## Implementation Pattern (same for each)
+3. **Merge jobs** — in `queueJobs`, for the merged config, collect jobs from ALL original trimming stage IDs into one list. Sort using `sortJobsByWorkflowPriority`.
 
-Each dashboard gets:
-1. Import `useStageVisibilityPreferences` and `StageToggleControls`
-2. Define stage configs array with `id`, `title`, `backgroundColor`
-3. Call `useStageVisibilityPreferences(user?.id)` 
-4. Add `StageToggleControls` next to Refresh/ViewToggle buttons
-5. Filter rendering through `getVisibleOrderedConfigs`
-6. Dynamic grid class based on visible count
+4. **Stage toggle** — the merged "Trimming" appears as one toggle item instead of three. Users can still toggle it on/off.
 
-## Files to Modify
-- `src/components/tracker/factory/ScoringKanbanDashboard.tsx`
-- `src/components/tracker/factory/PackagingShippingKanbanDashboard.tsx`
-- `src/components/tracker/factory/DtpKanbanDashboard.tsx`
+5. **Visual indicator** — show a small badge or subtitle on each job card's stage name so the operator can see which specific trimming operation is needed (e.g., "Book Cutting" vs "Pre Trim") within the unified queue.
 
-No new files needed -- reuses the existing hook and component.
+### No other files need changes
+- The stage toggle hook works with whatever configs it receives
+- The `DtpKanbanColumnWithBoundary` renders whatever jobs it gets
+- Sorting already handles cross-stage priority correctly
 
