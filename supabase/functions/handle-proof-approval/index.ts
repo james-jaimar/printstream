@@ -426,6 +426,12 @@ serve(async (req) => {
             })
             .eq('id', proofLinkId);
           
+          // Update proof_emailed_at on stage instance
+          await supabase
+            .from('job_stage_instances')
+            .update({ proof_emailed_at: new Date().toISOString() })
+            .eq('id', proofLink.stage_instance_id);
+          
           console.log('✅ Proof email resent successfully');
           return new Response(
             JSON.stringify({ success: true, message: 'Email resent successfully' }),
@@ -497,16 +503,20 @@ serve(async (req) => {
       const proofUrl = `${PRODUCTION_DOMAIN}/proof/${token}`;
       const jobDetails = stageInstance.production_jobs;
       
+      // Priority: stage instance email > production job email (matches resend-email logic)
+      const clientEmail = stageInstance.client_email || jobDetails?.contact_email;
+      const clientName = stageInstance.client_name || jobDetails?.customer;
+      
       // Send new email with proper error handling
-      if (jobDetails?.contact_email) {
+      if (clientEmail) {
         try {
           const emailResult = await resend.emails.send({
             from: 'Proofing at Impress Web <proofing@printstream.impressweb.co.za>',
-            to: [jobDetails.contact_email],
+            to: [clientEmail],
             subject: `Updated Proof Link - WO ${jobDetails.wo_no}`,
             html: generateBrandedEmail({
               heading: 'Your proof link has been updated',
-              clientName: jobDetails.customer || 'valued client',
+              clientName: clientName || 'valued client',
               woNumber: jobDetails.wo_no,
               proofUrl,
               message: `A new proof link has been generated for Work Order <strong>${jobDetails.wo_no}</strong>. Please use this updated link to review your proof.`,
@@ -515,6 +525,12 @@ serve(async (req) => {
             attachments: [LOGO_ATTACHMENT]
           });
           console.log('✅ Email sent successfully:', emailResult);
+          
+          // Update proof_emailed_at on stage instance
+          await supabase
+            .from('job_stage_instances')
+            .update({ proof_emailed_at: new Date().toISOString() })
+            .eq('id', stageInstanceId);
         } catch (emailError: any) {
           console.error('❌ Failed to send email:', emailError);
           return new Response(
@@ -530,6 +546,7 @@ serve(async (req) => {
       } else {
         console.warn('⚠️ No client email available for WO', jobDetails?.wo_no);
       }
+
       
       console.log('✅ Proof link regenerated successfully');
       return new Response(
