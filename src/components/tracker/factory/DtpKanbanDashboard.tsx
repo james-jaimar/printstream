@@ -224,11 +224,16 @@ export const DtpKanbanDashboard = () => {
     setScanCompleted(false); // Reset scan state
   }, []);
 
-  // Update selectedJob when jobs change to keep it in sync
+  // Update selectedJob when jobs change - only sync meaningful field changes
   React.useEffect(() => {
     if (selectedJob && jobs.length > 0) {
       const updatedJob = jobs.find(j => j.job_id === selectedJob.job_id);
-      if (updatedJob && JSON.stringify(updatedJob) !== JSON.stringify(selectedJob)) {
+      if (updatedJob && (
+        updatedJob.status !== selectedJob.status ||
+        updatedJob.current_stage_status !== selectedJob.current_stage_status ||
+        updatedJob.current_stage_id !== selectedJob.current_stage_id ||
+        updatedJob.current_stage_name !== selectedJob.current_stage_name
+      )) {
         setSelectedJob(updatedJob);
       }
     }
@@ -247,21 +252,18 @@ export const DtpKanbanDashboard = () => {
     navigate(path);
   }, [navigate]);
 
-  // Global barcode handler - flexible WO number verification (with or without D prefix)
-  const handleBarcodeDetected = (barcodeData: string) => {
+  // Global barcode handler - stable reference via useCallback
+  const handleBarcodeDetected = useCallback((barcodeData: string) => {
     if (!selectedJob) return;
     
     console.log('🔍 Barcode detected in DTP:', barcodeData, 'Expected:', selectedJob.wo_no);
     
-    // Flexible matching - extract numeric portions and compare
     const cleanScanned = barcodeData.trim().toUpperCase();
     const cleanExpected = (selectedJob.wo_no || '').trim().toUpperCase();
     
-    // Extract numbers only (remove any letter prefix like D, W, etc.)
     const scannedNumbers = cleanScanned.replace(/^[A-Z]+/, '').replace(/\D/g, '');
     const expectedNumbers = cleanExpected.replace(/^[A-Z]+/, '').replace(/\D/g, '');
     
-    // Match if numeric portions are equal (handles "427310" matching "D427310")
     const isMatch = scannedNumbers && expectedNumbers && scannedNumbers === expectedNumbers;
     
     if (isMatch) {
@@ -270,7 +272,7 @@ export const DtpKanbanDashboard = () => {
     } else {
       toast.error(`Wrong barcode scanned. Expected: ${cleanExpected}, Got: ${barcodeData}`);
     }
-  };
+  }, [selectedJob]);
 
   if (isLoading) {
     return (

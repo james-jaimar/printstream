@@ -150,24 +150,26 @@ export const PackagingShippingKanbanDashboard = () => {
   React.useEffect(() => {
     if (selectedJob && jobs.length > 0) {
       const updatedJob = jobs.find(j => j.job_id === selectedJob.job_id);
-      if (updatedJob && JSON.stringify(updatedJob) !== JSON.stringify(selectedJob)) {
+      if (updatedJob && (
+        updatedJob.status !== selectedJob.status ||
+        updatedJob.current_stage_status !== selectedJob.current_stage_status ||
+        updatedJob.current_stage_id !== selectedJob.current_stage_id ||
+        updatedJob.current_stage_name !== selectedJob.current_stage_name
+      )) {
         setSelectedJob(updatedJob);
       }
     }
   }, [jobs, selectedJob]);
 
-  const handleBarcodeDetected = (barcodeData: string) => {
+  const handleBarcodeDetected = useCallback((barcodeData: string) => {
     if (!selectedJob) return;
     
-    // Flexible matching - extract numeric portions and compare
     const cleanScanned = barcodeData.trim().toUpperCase();
     const cleanExpected = (selectedJob.wo_no || '').trim().toUpperCase();
     
-    // Extract numbers only (remove any letter prefix like D, W, etc.)
     const scannedNumbers = cleanScanned.replace(/^[A-Z]+/, '').replace(/\D/g, '');
     const expectedNumbers = cleanExpected.replace(/^[A-Z]+/, '').replace(/\D/g, '');
     
-    // Match if numeric portions are equal (handles "427310" matching "D427310")
     const isMatch = scannedNumbers && expectedNumbers && scannedNumbers === expectedNumbers;
     
     if (isMatch) {
@@ -176,7 +178,7 @@ export const PackagingShippingKanbanDashboard = () => {
     } else {
       toast.error(`Wrong barcode scanned. Expected: ${cleanExpected}, Got: ${barcodeData}`);
     }
-  };
+  }, [selectedJob]);
 
   if (isLoading) {
     return (
