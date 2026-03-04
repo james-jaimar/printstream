@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { RefreshCw, Hand, Layers, Circle, Package, FolderOpen, Book, FileText, Scissors } from 'lucide-react';
+import { sortJobsByWorkflowPriority } from '@/utils/tracker/workflowStateUtils';
 import { ViewToggle } from '../common/ViewToggle';
 import { DtpKanbanColumnWithBoundary } from './DtpKanbanColumnWithBoundary';
 import { EnhancedJobDetailsModal } from './EnhancedJobDetailsModal';
@@ -27,7 +28,12 @@ interface QueueConfig {
   backgroundColor: string;
   icon: React.ReactNode;
   stageId: string;
+  /** For merged queues: all original stage IDs that feed into this column */
+  mergedStageIds?: string[];
 }
+
+// Trimming keywords used to detect stages that should be merged
+const TRIMMING_KEYWORDS = ['book cutting', 'final trimming', 'pre trim', 'trimming'];
 
 // Icon mapping for stages
 const getStageIcon = (stageName: string): React.ReactNode => {
@@ -111,7 +117,7 @@ export const FinishingKanbanDashboard: React.FC = () => {
   const { preferences: stagePrefs, toggleStage, moveStage, getVisibleOrderedConfigs, initializeOrder } = useStageVisibilityPreferences(user?.id);
 
   const QUEUE_CONFIGS: QueueConfig[] = useMemo(() => {
-    return consolidatedStages.map(stage => ({
+    const rawConfigs = consolidatedStages.map(stage => ({
       id: stage.stage_id,
       title: stage.stage_name,
       stageName: stage.stage_name,
@@ -120,6 +126,29 @@ export const FinishingKanbanDashboard: React.FC = () => {
       icon: getStageIcon(stage.stage_name),
       stageId: stage.stage_id
     }));
+
+    // Detect trimming stages and merge them
+    const isTrimmingStage = (name: string) =>
+      TRIMMING_KEYWORDS.some(kw => name.toLowerCase().includes(kw));
+
+    const trimmingConfigs = rawConfigs.filter(c => isTrimmingStage(c.stageName));
+    const nonTrimmingConfigs = rawConfigs.filter(c => !isTrimmingStage(c.stageName));
+
+    if (trimmingConfigs.length >= 2) {
+      const mergedConfig: QueueConfig = {
+        id: 'trimming-merged',
+        title: 'Trimming',
+        stageName: 'Trimming',
+        colorClass: 'bg-orange-600',
+        backgroundColor: trimmingConfigs[0].backgroundColor,
+        icon: <Scissors className="h-4 w-4" />,
+        stageId: 'trimming-merged',
+        mergedStageIds: trimmingConfigs.map(c => c.stageId),
+      };
+      return [...nonTrimmingConfigs, mergedConfig];
+    }
+
+    return rawConfigs;
   }, [consolidatedStages]);
 
   // Initialize order when configs change
@@ -210,9 +239,17 @@ export const FinishingKanbanDashboard: React.FC = () => {
 
   const queueJobs = useMemo(() => {
     return QUEUE_CONFIGS.reduce((acc, config) => {
-      acc[config.id] = filteredJobs.filter(job =>
-        job.current_stage_id === config.stageId
-      );
+      if (config.mergedStageIds) {
+        // Merged queue: collect jobs from all constituent stages, sort by priority
+        const mergedJobs = filteredJobs.filter(job =>
+          config.mergedStageIds!.some(sid => job.current_stage_id === sid)
+        );
+        acc[config.id] = sortJobsByWorkflowPriority(mergedJobs);
+      } else {
+        acc[config.id] = filteredJobs.filter(job =>
+          job.current_stage_id === config.stageId
+        );
+      }
       return acc;
     }, {} as Record<string, AccessibleJob[]>);
   }, [filteredJobs, QUEUE_CONFIGS]);
