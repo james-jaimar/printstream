@@ -1,53 +1,52 @@
 
 
-# Fix: RPC Uses Single Paper for All Stages
+# Fix: Paper Specification Notes Not Saved on Printing Stages
 
-## Problem
-The SQL function `initialize_job_stages_with_multi_specs` extracts ONE paper key globally (line 58, `LIMIT 1`) and sets the same `v_paper_note` on every printing stage (line 160-161). For book jobs with Cover + Text (two different papers), both printing stages get the same paper note.
+## Investigation Summary
 
-## What's Already Working
-- The frontend (`p_consolidated_stages` JSON) already passes `paper_specification` per stage (e.g., "FBB 230gsm" for Cover, "Bond 070gsm" for Text)
-- `SubSpecificationBadge` already reads `partAssignment` to pick cover vs text paper
-- `useJobPaperSpecs` reads from notes to display paper — if notes are correct, display will be correct
-- The `job_stage_instances` table already has `part_name` and `notes` columns
+The RPC function `initialize_job_stages_with_multi_specs` is **correct** — it reads `paper_specification` from each stage's consolidated data and writes it to `notes`. The problem is **upstream in the frontend**: the `paperSpecification` field is not reliably reaching the RPC.
 
 ## Root Cause
-Lines 56-62 of the RPC: `SELECT (jsonb_each(pj.paper_specifications)).key INTO v_paper_spec_raw_key ... LIMIT 1`
-Line 160: `IF v_stage_group_id = v_printing_stage_group_id AND v_paper_spec_text IS NOT NULL THEN v_paper_note := 'Paper: ' || v_paper_spec_text;`
 
-This sets the SAME paper note for all printing stages regardless of their part type.
+The data flows through multiple layers with **mismatched type signatures** that, while not stripping properties at runtime in TypeScript, indicate the property was never intended to flow through certain paths:
 
-## Fix — Single Migration (No Schema Changes)
+1. **`PaginatedJobCreationDialog`** correctly extracts `paperSpecification` and `partType` from row mappings (lines 329-330)
+2. **`onSingleJobConfirm` prop type** (line 25) only declares `{groupName, mappedStageId, mappedStageName, category}` — missing `paperSpecification`, `partType`, `quantity`
+3. **`handleSingleJobConfirm`** in both `ExcelUpload.tsx` (line 304) and `QuickEasySyncPanel.tsx` (line 215) has the same narrow type
+4. **`finalizeProductionReadyJobs`** in `enhancedParser.ts` (line 571) has the same narrow type
+5. **`finalizeJobs`** in `enhancedJobCreator.ts` (line 125) has the same narrow type
+6. **`finalizeIndividualJob`** (line 355) and **`processIndividualJobInDatabase`** (line 400) — same narrow type
 
-Update the RPC function to read `paper_specification` from the per-stage consolidated data instead of the global lookup.
+While TypeScript types don't strip properties at runtime, a code change anywhere in this chain that destructures or reconstructs the objects would lose the extra properties. The consistent NULL notes across all recent jobs (since ~Feb 2026) confirms the data is being lost.
 
-**Inside the stage loop** (after line 158), replace the paper note logic:
+## Evidence
+- **Last working job**: D430124 (Jan 31, 2026) — has `notes: "Paper: 160gsm El Toro"`
+- **All recent book jobs** (D430895–D430908): Cover/Text stages exist with correct `part_name`, but `notes` is NULL
+- The RPC is verified correct — it reads per-stage `paper_specification` from consolidated stages JSON
 
-```sql
--- Instead of using global v_paper_spec_text for all printing stages,
--- read per-stage paper_specification from the consolidated stage data
-v_paper_note := NULL;
-IF v_stage_group_id = v_printing_stage_group_id THEN
-  -- Try per-stage paper spec first (from consolidated stages payload)
-  v_paper_note := v_stage_record->'specifications'->0->>'paper_specification';
-  IF v_paper_note IS NOT NULL THEN
-    v_paper_note := 'Paper: ' || v_paper_note;
-  ELSIF v_paper_spec_text IS NOT NULL THEN
-    -- Fallback to global paper spec (single-paper jobs)
-    v_paper_note := 'Paper: ' || v_paper_spec_text;
-  END IF;
-END IF;
-```
+## Fix — Widen Type Signatures Across the Chain
 
-This way:
-- Cover stage gets "Paper: FBB 230gsm" from its own `specifications[0].paper_specification`
-- Text stage gets "Paper: Bond 070gsm" from its own `specifications[0].paper_specification`
-- Single-paper jobs still work via the global fallback
+Update all intermediate type annotations to include `paperSpecification`, `partType`, and `quantity` so the data flows explicitly through every layer:
 
-The global STEP 1 extraction (lines 56-126) can remain as-is for the `job_print_specifications` save in STEP 4 and as fallback.
+### Files to Change
 
-## Files Changed
-1. **New SQL migration** — Update `initialize_job_stages_with_multi_specs` to read per-stage `paper_specification` from `p_consolidated_stages` instead of applying the global paper to all stages
+1. **`src/components/admin/upload/PaginatedJobCreationDialog.tsx`** (line 25)
+   - Widen `onSingleJobConfirm` prop type to include `paperSpecification?`, `partType?`, `quantity?`
 
-No frontend changes needed. No schema changes needed.
+2. **`src/components/tracker/ExcelUpload.tsx`** (line 304)
+   - Widen `handleSingleJobConfirm` parameter type
+
+3. **`src/components/tracker/QuickEasySyncPanel.tsx`** (line 215)
+   - Widen `handleSingleJobConfirm` parameter type
+
+4. **`src/utils/excel/enhancedParser.ts`** (line 571)
+   - Widen `finalizeProductionReadyJobs` parameter type
+
+5. **`src/utils/excel/enhancedJobCreator.ts`** (lines 125, 355, 400)
+   - Widen `finalizeJobs`, `finalizeIndividualJob`, `processIndividualJobInDatabase` parameter types
+   - Remove `(m as any)` casts at line 458 since the type will now include `paperSpecification`
+
+### No DB changes. No RPC changes. No new migrations.
+
+The fix is purely widening TypeScript type annotations so the `paperSpecification` and `partType` fields that the dialog already correctly extracts are explicitly carried through to `initializeJobWorkflowFromMappings`, where they're already correctly consumed and passed to the RPC.
 
