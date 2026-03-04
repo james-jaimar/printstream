@@ -5,6 +5,7 @@ import { useAccessibleJobs } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobActions } from "@/hooks/tracker/useAccessibleJobs/useJobActions";
 import { useAuth } from "@/hooks/useAuth";
 import { useAutoApprovedJobs } from "@/hooks/tracker/useAutoApprovedJobs";
+import { useStageVisibilityPreferences } from "@/hooks/tracker/useStageVisibilityPreferences";
 import { DtpKanbanColumnWithBoundary } from "./DtpKanbanColumnWithBoundary";
 import { DtpJobModal } from "./dtp/DtpJobModal";
 import { DtpDashboardHeader } from "./DtpDashboardHeader";
@@ -15,6 +16,7 @@ import { AutoApprovedPrintQueueList } from "./AutoApprovedPrintQueueList";
 import { TrackerErrorBoundary } from "../error-boundaries/TrackerErrorBoundary";
 import { GlobalBarcodeListener } from "./GlobalBarcodeListener";
 import { ViewToggle } from "../common/ViewToggle";
+import { StageToggleControls } from "./StageToggleControls";
 import { JobListView } from "../common/JobListView";
 import { categorizeJobs, sortJobsByWONumber } from "@/utils/tracker/jobProcessing";
 import { sortJobsByWorkflowPriority, getWorkflowStateColor } from "@/utils/tracker/workflowStateUtils";
@@ -44,7 +46,6 @@ export const DtpKanbanDashboard = () => {
     permissionType: 'view'
   });
 
-  // Use proper job actions that resolve stage instance IDs correctly
   const { 
     startJob, 
     completeJob,
@@ -52,7 +53,6 @@ export const DtpKanbanDashboard = () => {
     hasOptimisticUpdates: hasJobActionUpdates 
   } = useJobActions(refreshJobs);
 
-  // Auto-approved jobs hook for print file dispatch tracking
   const { 
     jobs: autoApprovedJobs,
     isLoading: autoApprovedLoading,
@@ -60,6 +60,39 @@ export const DtpKanbanDashboard = () => {
   } = useAutoApprovedJobs();
 
   const { user } = useAuth();
+
+  // Stage visibility preferences for DTP columns
+  const DTP_STAGE_CONFIGS = useMemo(() => [
+    { id: 'dtp', title: 'DTP Jobs', backgroundColor: '#2563eb' },
+    { id: 'proofing', title: 'Proofing Jobs', backgroundColor: '#9333ea' },
+    { id: 'batch-allocation', title: 'Batch Allocation', backgroundColor: '#ea580c' },
+    { id: 'send-to-print', title: 'Send to Print', backgroundColor: '#16a34a' },
+  ], []);
+
+  const {
+    preferences: dtpPreferences,
+    toggleStage: dtpToggleStage,
+    moveStage: dtpMoveStage,
+    getVisibleOrderedConfigs: dtpGetVisibleOrderedConfigs,
+    initializeOrder: dtpInitializeOrder,
+  } = useStageVisibilityPreferences(user?.id);
+
+  useMemo(() => {
+    dtpInitializeOrder(DTP_STAGE_CONFIGS);
+  }, [DTP_STAGE_CONFIGS, dtpInitializeOrder]);
+
+  const visibleDtpConfigs = useMemo(() =>
+    dtpGetVisibleOrderedConfigs(DTP_STAGE_CONFIGS),
+    [dtpGetVisibleOrderedConfigs, DTP_STAGE_CONFIGS]
+  );
+
+  const dtpGridColsClass = useMemo(() => {
+    const count = visibleDtpConfigs.length;
+    if (count <= 1) return 'grid-cols-1';
+    if (count === 2) return 'grid-cols-1 lg:grid-cols-2';
+    if (count === 3) return 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3';
+    return 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-4';
+  }, [visibleDtpConfigs.length]);
   
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -314,6 +347,13 @@ export const DtpKanbanDashboard = () => {
               proofJobsCount={proofJobs.length}
             />
             <div className="flex-shrink-0 w-full sm:w-auto flex items-center gap-2">
+              <StageToggleControls
+                stages={DTP_STAGE_CONFIGS}
+                hiddenStageIds={dtpPreferences.hiddenStageIds}
+                stageOrder={dtpPreferences.stageOrder}
+                onToggleStage={dtpToggleStage}
+                onMoveStage={dtpMoveStage}
+              />
               <Button
                 variant="outline"
                 size="sm"
@@ -354,160 +394,180 @@ export const DtpKanbanDashboard = () => {
 
       <div className="flex-1 overflow-hidden px-3 sm:px-4 pb-3 sm:pb-4">
         {viewMode === 'card' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 h-full overflow-hidden">
-            <div className="flex-1 min-h-0">
-              <DtpKanbanColumnWithBoundary
-                title="DTP Jobs"
-                jobs={dtpJobs}
-                onStart={openModalForStart}
-                onComplete={openModalForComplete}
-                onJobClick={handleJobClick}
-                colorClass="bg-blue-600"
-                icon={<FileText className="h-4 w-4" />}
-              />
-            </div>
-            
-            <div className="flex-1 min-h-0">
-              <DtpKanbanColumnWithBoundary
-                title="Proofing Jobs"
-                jobs={proofJobs}
-                onStart={openModalForStart}
-                onComplete={openModalForComplete}
-                onJobClick={handleJobClick}
-                colorClass="bg-purple-600"
-                icon={<CheckCircle className="h-4 w-4" />}
-              />
-            </div>
-
-            <div className="flex-1 min-h-0">
-              <DtpKanbanColumnWithBoundary
-                title="Batch Allocation"
-                jobs={batchAllocationJobs}
-                onStart={openModalForStart}
-                onComplete={openModalForComplete}
-                onJobClick={handleJobClick}
-                colorClass="bg-orange-600"
-                icon={<Package className="h-4 w-4" />}
-              />
-            </div>
-
-            <div className="flex-1 min-h-0">
-              <AutoApprovedPrintQueueColumn
-                jobs={filteredAutoApprovedJobs}
-                onJobClick={handleAutoApprovedJobClick}
-                onMarkFilesSent={markFilesSent}
-                showAllJobs={showAllSendToPrint}
-                onToggleShowAll={setShowAllSendToPrint}
-                myJobsCount={myJobsCount}
-                allJobsCount={autoApprovedJobs.length}
-              />
-            </div>
+          <div className={`grid ${dtpGridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
+            {visibleDtpConfigs.map((config) => {
+              if (config.id === 'dtp') {
+                return (
+                  <div key={config.id} className="min-h-0">
+                    <DtpKanbanColumnWithBoundary
+                      title="DTP Jobs"
+                      jobs={dtpJobs}
+                      onStart={openModalForStart}
+                      onComplete={openModalForComplete}
+                      onJobClick={handleJobClick}
+                      colorClass=""
+                      backgroundColor={config.backgroundColor}
+                      icon={<FileText className="h-4 w-4" />}
+                    />
+                  </div>
+                );
+              }
+              if (config.id === 'proofing') {
+                return (
+                  <div key={config.id} className="min-h-0">
+                    <DtpKanbanColumnWithBoundary
+                      title="Proofing Jobs"
+                      jobs={proofJobs}
+                      onStart={openModalForStart}
+                      onComplete={openModalForComplete}
+                      onJobClick={handleJobClick}
+                      colorClass=""
+                      backgroundColor={config.backgroundColor}
+                      icon={<CheckCircle className="h-4 w-4" />}
+                    />
+                  </div>
+                );
+              }
+              if (config.id === 'batch-allocation') {
+                return (
+                  <div key={config.id} className="min-h-0">
+                    <DtpKanbanColumnWithBoundary
+                      title="Batch Allocation"
+                      jobs={batchAllocationJobs}
+                      onStart={openModalForStart}
+                      onComplete={openModalForComplete}
+                      onJobClick={handleJobClick}
+                      colorClass=""
+                      backgroundColor={config.backgroundColor}
+                      icon={<Package className="h-4 w-4" />}
+                    />
+                  </div>
+                );
+              }
+              if (config.id === 'send-to-print') {
+                return (
+                  <div key={config.id} className="min-h-0">
+                    <AutoApprovedPrintQueueColumn
+                      jobs={filteredAutoApprovedJobs}
+                      onJobClick={handleAutoApprovedJobClick}
+                      onMarkFilesSent={markFilesSent}
+                      showAllJobs={showAllSendToPrint}
+                      onToggleShowAll={setShowAllSendToPrint}
+                      myJobsCount={myJobsCount}
+                      allJobsCount={autoApprovedJobs.length}
+                    />
+                  </div>
+                );
+              }
+              return null;
+            })}
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-3 sm:gap-4 h-full overflow-hidden">
-            <div className="flex flex-col space-y-2 min-h-0">
-              <div className="flex-shrink-0 px-3 py-2 bg-blue-600 text-white rounded-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm truncate">DTP Jobs ({dtpJobs.length})</span>
+          <div className={`grid ${dtpGridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
+            {visibleDtpConfigs.map((config) => {
+              if (config.id === 'dtp') {
+                return (
+                  <div key={config.id} className="flex flex-col space-y-2 min-h-0">
+                    <div className="flex-shrink-0 px-3 py-2 text-white rounded-md" style={{ backgroundColor: config.backgroundColor }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 flex-shrink-0" />
+                          <span className="font-medium text-sm truncate">DTP Jobs ({dtpJobs.length})</span>
+                        </div>
+                        <span className="text-xs opacity-80">Sorted by: Priority</span>
+                      </div>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="pr-4">
+                        <JobListView jobs={dtpJobs} onStart={openModalForStart} onComplete={openModalForComplete} onJobClick={handleJobClick} />
+                      </div>
+                    </ScrollArea>
                   </div>
-                  <span className="text-xs opacity-80">Sorted by: Priority</span>
-                </div>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="pr-4">
-                  <JobListView
-                    jobs={dtpJobs}
-                    onStart={openModalForStart}
-                    onComplete={openModalForComplete}
-                    onJobClick={handleJobClick}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
-            
-            <div className="flex flex-col space-y-2 min-h-0">
-              <div className="flex-shrink-0 px-3 py-2 bg-purple-600 text-white rounded-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm truncate">Proofing Jobs ({proofJobs.length})</span>
+                );
+              }
+              if (config.id === 'proofing') {
+                return (
+                  <div key={config.id} className="flex flex-col space-y-2 min-h-0">
+                    <div className="flex-shrink-0 px-3 py-2 text-white rounded-md" style={{ backgroundColor: config.backgroundColor }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 flex-shrink-0" />
+                          <span className="font-medium text-sm truncate">Proofing Jobs ({proofJobs.length})</span>
+                        </div>
+                        <span className="text-xs opacity-80">Sorted by: Priority</span>
+                      </div>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="pr-4">
+                        <JobListView jobs={proofJobs} onStart={openModalForStart} onComplete={openModalForComplete} onJobClick={handleJobClick} />
+                      </div>
+                    </ScrollArea>
                   </div>
-                  <span className="text-xs opacity-80">Sorted by: Priority</span>
-                </div>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="pr-4">
-                  <JobListView
-                    jobs={proofJobs}
-                    onStart={openModalForStart}
-                    onComplete={openModalForComplete}
-                    onJobClick={handleJobClick}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
-
-            <div className="flex flex-col space-y-2 min-h-0">
-              <div className="flex-shrink-0 px-3 py-2 bg-orange-600 text-white rounded-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Package className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm truncate">Batch Allocation ({batchAllocationJobs.length})</span>
+                );
+              }
+              if (config.id === 'batch-allocation') {
+                return (
+                  <div key={config.id} className="flex flex-col space-y-2 min-h-0">
+                    <div className="flex-shrink-0 px-3 py-2 text-white rounded-md" style={{ backgroundColor: config.backgroundColor }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Package className="h-4 w-4 flex-shrink-0" />
+                          <span className="font-medium text-sm truncate">Batch Allocation ({batchAllocationJobs.length})</span>
+                        </div>
+                        <span className="text-xs opacity-80">Sorted by: Priority</span>
+                      </div>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="pr-4">
+                        <JobListView jobs={batchAllocationJobs} onStart={openModalForStart} onComplete={openModalForComplete} onJobClick={handleJobClick} />
+                      </div>
+                    </ScrollArea>
                   </div>
-                  <span className="text-xs opacity-80">Sorted by: Priority</span>
-                </div>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="pr-4">
-                  <JobListView
-                    jobs={batchAllocationJobs}
-                    onStart={openModalForStart}
-                    onComplete={openModalForComplete}
-                    onJobClick={handleJobClick}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
-
-            <div className="flex flex-col space-y-2 min-h-0">
-              <div className="flex-shrink-0 px-3 py-2 bg-green-600 text-white rounded-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Send className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm truncate">
-                      Auto Approved - Send to Print ({filteredAutoApprovedJobs.length})
-                    </span>
+                );
+              }
+              if (config.id === 'send-to-print') {
+                return (
+                  <div key={config.id} className="flex flex-col space-y-2 min-h-0">
+                    <div className="flex-shrink-0 px-3 py-2 text-white rounded-md" style={{ backgroundColor: config.backgroundColor }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Send className="h-4 w-4 flex-shrink-0" />
+                          <span className="font-medium text-sm truncate">
+                            Auto Approved - Send to Print ({filteredAutoApprovedJobs.length})
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch 
+                            checked={showAllSendToPrint}
+                            onCheckedChange={setShowAllSendToPrint}
+                            className="data-[state=checked]:bg-white/30 data-[state=unchecked]:bg-white/20"
+                          />
+                          <span className="text-xs font-medium">
+                            {showAllSendToPrint ? 'All' : 'Mine'}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-white/80 mt-1">
+                        {showAllSendToPrint 
+                          ? `Showing all ${autoApprovedJobs.length} jobs` 
+                          : `My jobs (${myJobsCount} of ${autoApprovedJobs.length})`
+                        }
+                      </p>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="pr-4">
+                        <AutoApprovedPrintQueueList
+                          jobs={filteredAutoApprovedJobs}
+                          onJobClick={handleAutoApprovedJobClick}
+                          onMarkFilesSent={markFilesSent}
+                        />
+                      </div>
+                    </ScrollArea>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Switch 
-                      checked={showAllSendToPrint}
-                      onCheckedChange={setShowAllSendToPrint}
-                      className="data-[state=checked]:bg-white/30 data-[state=unchecked]:bg-white/20"
-                    />
-                    <span className="text-xs font-medium">
-                      {showAllSendToPrint ? 'All' : 'Mine'}
-                    </span>
-                  </div>
-                </div>
-                <p className="text-xs text-white/80 mt-1">
-                  {showAllSendToPrint 
-                    ? `Showing all ${autoApprovedJobs.length} jobs` 
-                    : `My jobs (${myJobsCount} of ${autoApprovedJobs.length})`
-                  }
-                </p>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="pr-4">
-                  <AutoApprovedPrintQueueList
-                    jobs={filteredAutoApprovedJobs}
-                    onJobClick={handleAutoApprovedJobClick}
-                    onMarkFilesSent={markFilesSent}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
+                );
+              }
+              return null;
+            })}
           </div>
         )}
       </div>

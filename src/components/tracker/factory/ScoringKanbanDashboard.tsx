@@ -1,14 +1,16 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { Scissors, FoldVertical, RefreshCw } from "lucide-react";
 import { useAccessibleJobs, AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobActions } from "@/hooks/tracker/useAccessibleJobs/useJobActions";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserStagePermissions } from "@/hooks/tracker/useUserStagePermissions";
+import { useStageVisibilityPreferences } from "@/hooks/tracker/useStageVisibilityPreferences";
 import { DtpKanbanColumnWithBoundary } from "./DtpKanbanColumnWithBoundary";
 import { DtpJobModal } from "./dtp/DtpJobModal";
 import { TrackerErrorBoundary } from "../error-boundaries/TrackerErrorBoundary";
 import { GlobalBarcodeListener } from "./GlobalBarcodeListener";
 import { ViewToggle } from "../common/ViewToggle";
+import { StageToggleControls } from "./StageToggleControls";
 import { JobListView } from "../common/JobListView";
 import { sortJobsByWorkflowPriority } from "@/utils/tracker/workflowStateUtils";
 import { toast } from "sonner";
@@ -56,6 +58,15 @@ export const ScoringKanbanDashboard: React.FC = () => {
     completeJob,
     hasOptimisticUpdates: hasJobActionUpdates 
   } = useJobActions(refreshJobs);
+
+  // Stage visibility preferences
+  const {
+    preferences,
+    toggleStage,
+    moveStage,
+    getVisibleOrderedConfigs,
+    initializeOrder,
+  } = useStageVisibilityPreferences(user?.id);
   
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -72,6 +83,37 @@ export const ScoringKanbanDashboard: React.FC = () => {
       return name.includes('scoring') || name.includes('folding');
     });
   }, [consolidatedStages]);
+
+  // Build stage configs for toggle controls
+  const stageConfigs = useMemo(() => {
+    const colors = ['#9333ea', '#4f46e5', '#7c3aed', '#c026d3'];
+    return scoringStages.map((stage, idx) => ({
+      id: stage.stage_id,
+      title: stage.stage_name,
+      backgroundColor: colors[idx % colors.length],
+    }));
+  }, [scoringStages]);
+
+  // Initialize order when stages load
+  useEffect(() => {
+    if (stageConfigs.length > 0) {
+      initializeOrder(stageConfigs);
+    }
+  }, [stageConfigs, initializeOrder]);
+
+  // Get visible ordered configs
+  const visibleConfigs = useMemo(() => 
+    getVisibleOrderedConfigs(stageConfigs), 
+    [getVisibleOrderedConfigs, stageConfigs]
+  );
+
+  const gridColsClass = useMemo(() => {
+    const count = visibleConfigs.length;
+    if (count <= 1) return 'grid-cols-1';
+    if (count === 2) return 'grid-cols-1 md:grid-cols-2';
+    if (count === 3) return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
+    return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4';
+  }, [visibleConfigs.length]);
 
   // Categorize jobs by stage
   const categorizedJobs = useMemo(() => {
@@ -241,6 +283,13 @@ export const ScoringKanbanDashboard: React.FC = () => {
             <p className="text-sm text-gray-600">{subtitle}</p>
           </div>
           <div className="flex items-center gap-2">
+            <StageToggleControls
+              stages={stageConfigs}
+              hiddenStageIds={preferences.hiddenStageIds}
+              stageOrder={preferences.stageOrder}
+              onToggleStage={toggleStage}
+              onMoveStage={moveStage}
+            />
             <Button
               variant="outline"
               size="sm"
@@ -322,21 +371,22 @@ export const ScoringKanbanDashboard: React.FC = () => {
 
       <div className="flex-1 overflow-hidden px-3 sm:px-4 pb-3 sm:pb-4">
         {viewMode === 'card' ? (
-          <div className={`flex flex-col lg:flex-row gap-3 sm:gap-4 h-full overflow-hidden`}>
-            {scoringStages.map((stage, index) => {
+          <div className={`grid ${gridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
+            {visibleConfigs.map((config) => {
+              const stage = scoringStages.find(s => s.stage_id === config.id);
+              if (!stage) return null;
               const stageJobs = categorizedJobs[stage.stage_id] || [];
-              const colors = ['bg-purple-600', 'bg-indigo-600', 'bg-violet-600', 'bg-fuchsia-600'];
-              const colorClass = colors[index % colors.length];
               
               return (
-                <div key={stage.stage_id} className="flex-1 min-h-0">
+                <div key={stage.stage_id} className="min-h-0">
                   <DtpKanbanColumnWithBoundary
                     title={stage.stage_name}
                     jobs={stageJobs}
                     onStart={openModalForStart}
                     onComplete={openModalForComplete}
                     onJobClick={handleJobClick}
-                    colorClass={colorClass}
+                    colorClass=""
+                    backgroundColor={config.backgroundColor}
                     icon={getScoringIcon(stage.stage_name)}
                   />
                 </div>
@@ -344,15 +394,18 @@ export const ScoringKanbanDashboard: React.FC = () => {
             })}
           </div>
         ) : (
-          <div className={`grid gap-3 sm:gap-4 h-full overflow-hidden ${scoringStages.length === 1 ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}>
-            {scoringStages.map((stage, index) => {
+          <div className={`grid ${gridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
+            {visibleConfigs.map((config) => {
+              const stage = scoringStages.find(s => s.stage_id === config.id);
+              if (!stage) return null;
               const stageJobs = categorizedJobs[stage.stage_id] || [];
-              const colors = ['bg-purple-600', 'bg-indigo-600', 'bg-violet-600', 'bg-fuchsia-600'];
-              const colorClass = colors[index % colors.length];
               
               return (
                 <div key={stage.stage_id} className="flex flex-col space-y-2 min-h-0">
-                  <div className={`flex-shrink-0 px-3 py-2 ${colorClass} text-white rounded-md`}>
+                  <div 
+                    className="flex-shrink-0 px-3 py-2 text-white rounded-md"
+                    style={{ backgroundColor: config.backgroundColor }}
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {getScoringIcon(stage.stage_name)}
