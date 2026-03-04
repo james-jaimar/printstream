@@ -1,29 +1,31 @@
 
 
-# Fix: Live Production Assembly Line Not Working
+# Fix: Dashboard RPC Still Hitting Old Function
 
-## Root Cause
-
-The database function `get_dashboard_job_stats` has a bug in its `current_stages` CTE. It uses `ORDER BY jsi.job_id, jsi.stage_order DESC` with `DISTINCT ON`, which picks the **last** pending stage (e.g., "Shipping") instead of the **first** one (e.g., "DTP").
-
-Result: nearly all non-completed jobs show "Shipping" as their current stage, making the assembly line display a single misleading column instead of distributing jobs across their actual production stages.
-
-**Data proof:**
-- 86 jobs show "Shipping" as current stage, 46 more also "Shipping" -- but in reality these jobs are at DTP, PROOF, Printing, etc.
-- Only 5 jobs have truly active/awaiting_approval stages (all at PROOF stage)
-
-Additionally, the function returns **all 2,000+ completed jobs** (with bogus "Not Started" stage data), which inflates the dataset unnecessarily. The dashboard already filters these out client-side, but they waste bandwidth.
+## Problem
+The migration created a new `get_dashboard_job_stats()` (no args) but the old `get_dashboard_job_stats(p_user_id uuid)` still exists in the database. Postgres function overloading means the client call with `p_user_id` matches the old broken function.
 
 ## Fix
 
-**1. Fix the SQL function** `get_dashboard_job_stats`:
-- Change `ORDER BY jsi.job_id, jsi.stage_order DESC` to `ORDER BY jsi.job_id, jsi.stage_order ASC` -- picks the **first** non-completed stage (the actual current stage)
-- Add `WHERE pj.status != 'Completed'` to exclude completed jobs from the result set (saves returning 2,000+ useless rows)
+### 1. New SQL migration
+Drop the old function signature explicitly, then recreate the fixed one:
+```sql
+DROP FUNCTION IF EXISTS get_dashboard_job_stats(uuid);
+-- Then CREATE OR REPLACE the no-arg version (same as previous migration)
+```
 
-**2. No frontend changes needed** -- the `TrackerDashboard.tsx` stage aggregation logic is correct; it just needs accurate data from the DB.
+### 2. Update client code
+In `src/hooks/tracker/useDashboardJobs.ts`, change the RPC call to pass no arguments:
+```typescript
+const { data, error: fetchError } = await supabase.rpc('get_dashboard_job_stats');
+```
+Remove the `user.id` dependency since the function no longer needs it. The `useAuth` import and early return on `!user?.id` can also be removed (or kept for auth gating).
 
-### Expected Impact
-- Assembly line will correctly show jobs distributed across DTP, PROOF, Printing, Laminating, etc.
-- Response payload drops from ~2,200 rows to ~140 rows
-- Dashboard loads faster with accurate stage distribution
+### 3. Update types
+Clean up the union type in `types.ts` to only have the `Args: never` variant (will happen automatically after migration runs).
+
+### Expected Result
+- Old function dropped, new parameterless function used
+- Assembly line shows actual stage distribution (DTP, PROOF, Printing, etc.) instead of "Not Started" + "Shipping"
+- Completed jobs excluded from response
 
