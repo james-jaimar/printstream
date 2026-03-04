@@ -1,31 +1,43 @@
 
 
-# Fix: Dashboard RPC Still Hitting Old Function
+# Fix: Barcode Scanner Failing After Job Completion
 
 ## Problem
-The migration created a new `get_dashboard_job_stats()` (no args) but the old `get_dashboard_job_stats(p_user_id uuid)` still exists in the database. Postgres function overloading means the client call with `p_user_id` matches the old broken function.
+After completing a DTP stage and moving to the next job, barcode scanning intermittently fails, requiring an F5 refresh. This is an app-side issue, not internet speed.
+
+## Root Cause
+Two related bugs cause the barcode listener to drop scans:
+
+**1. Stale closure / listener re-registration during scan**
+`handleBarcodeDetected` in `DtpKanbanDashboard.tsx` (line 251) is a plain function, not wrapped in `useCallback`. Every re-render creates a new function reference. Since `GlobalBarcodeListener` has `onBarcodeDetected` in its `useEffect` dependency array, each new reference causes:
+- Effect cleanup: removes `keydown` listener, clears barcode buffer
+- Effect setup: adds new listener
+
+If a re-render happens **mid-scan** (scanner sends keystrokes over ~50-100ms), the buffer is cleared and the scan is lost. After completing a job, multiple refetches trigger rapid re-renders (action success callback + realtime subscription + job sync effect), making this very likely.
+
+**2. Job sync effect causes unnecessary re-renders**
+The `useEffect` on lines 228-235 watches `[jobs, selectedJob]` and calls `setSelectedJob(updatedJob)` on every jobs refresh, even when the selected job's data hasn't meaningfully changed (deep JSON comparison is fragile). This adds more re-renders during the critical scan window.
 
 ## Fix
 
-### 1. New SQL migration
-Drop the old function signature explicitly, then recreate the fixed one:
-```sql
-DROP FUNCTION IF EXISTS get_dashboard_job_stats(uuid);
--- Then CREATE OR REPLACE the no-arg version (same as previous migration)
-```
+### File 1: `src/components/tracker/factory/DtpKanbanDashboard.tsx`
 
-### 2. Update client code
-In `src/hooks/tracker/useDashboardJobs.ts`, change the RPC call to pass no arguments:
-```typescript
-const { data, error: fetchError } = await supabase.rpc('get_dashboard_job_stats');
-```
-Remove the `user.id` dependency since the function no longer needs it. The `useAuth` import and early return on `!user?.id` can also be removed (or kept for auth gating).
+- Wrap `handleBarcodeDetected` in `useCallback` with `[selectedJob]` dependency, so it only changes when `selectedJob` changes (not on every render)
+- Make `GlobalBarcodeListener` **always active** (not just when modal is open), so it can also detect barcodes to auto-open the correct job -- matching the pattern already used in `FinishingKanbanDashboard` and `SchedulerAwareOperatorDashboard`
+- Stabilize the job sync effect to only update when the job's stage status actually changes (compare specific fields instead of full JSON)
 
-### 3. Update types
-Clean up the union type in `types.ts` to only have the `Args: never` variant (will happen automatically after migration runs).
+### File 2: `src/components/tracker/factory/GlobalBarcodeListener.tsx`
 
-### Expected Result
-- Old function dropped, new parameterless function used
-- Assembly line shows actual stage distribution (DTP, PROOF, Printing, etc.) instead of "Not Started" + "Shipping"
-- Completed jobs excluded from response
+- Use a `ref` for the `onBarcodeDetected` callback instead of putting it in the `useEffect` dependency array. This prevents the listener from being torn down and re-registered on every callback change, preserving the barcode buffer mid-scan. The ref always points to the latest callback.
+
+### File 3: Apply same `useCallback` fix to other dashboards
+- `ScoringKanbanDashboard.tsx`
+- `PackagingShippingKanbanDashboard.tsx`
+
+These use the same pattern and have the same bug.
+
+## Expected Result
+- Barcode scans no longer dropped during re-renders
+- No F5 refresh needed between jobs
+- Smoother operator workflow with faster modal transitions
 
