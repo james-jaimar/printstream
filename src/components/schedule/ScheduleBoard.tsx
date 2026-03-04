@@ -23,7 +23,7 @@ interface ScheduleBoardProps {
   scheduleDays: ScheduleDayData[];
   isLoading: boolean;
   onRefresh: () => void;
-  onReschedule: () => void;
+  onReschedule?: () => void;
   isAdminUser?: boolean;
 }
 
