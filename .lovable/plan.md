@@ -1,52 +1,50 @@
 
 
-# Fix: Paper Specification Notes Not Saved on Printing Stages
+# Add Queue Visibility Toggle + Responsive Layout to Operator Dashboard
 
-## Investigation Summary
+## What the user wants
+The T250 operator sees 5 queues (Hunkeler, Large Format, 7900, HP 12000, T250) but only needs 2 (T250 + Hunkeler). They want to:
+1. Toggle off queues they don't need — persistent per user via localStorage
+2. Remaining queues fill the screen responsively (2 queues = 2 equal columns filling full width)
+3. Ability to reorder columns left/right
 
-The RPC function `initialize_job_stages_with_multi_specs` is **correct** — it reads `paper_specification` from each stage's consolidated data and writes it to `notes`. The problem is **upstream in the frontend**: the `paperSpecification` field is not reliably reaching the RPC.
+## Current state
+- `FinishingKanbanDashboard.tsx` dynamically builds `QUEUE_CONFIGS` from `consolidatedStages` (user's permitted stages)
+- Grid is hardcoded to `grid-cols-1 md:grid-cols-2 xl:grid-cols-4` — doesn't adapt to visible queue count
+- `QueueToggleControls.tsx` exists but is hardcoded to 3 print queues only — not used here
+- `useFactoryFloorPreferences.ts` exists with generic stage hide/show logic via localStorage — can be reused
 
-## Root Cause
+## Plan
 
-The data flows through multiple layers with **mismatched type signatures** that, while not stripping properties at runtime in TypeScript, indicate the property was never intended to flow through certain paths:
+### 1. Create `StageToggleControls` component
+A new generic version of `QueueToggleControls` that works with dynamic stage lists (not hardcoded). It will:
+- Accept the full list of `QUEUE_CONFIGS` as a prop
+- Use localStorage key `operator-stage-preferences-{userId}` for per-user persistence
+- Show switches for each stage with drag handles for reordering (up/down arrows to keep it simple)
+- Return the filtered and ordered list of visible stage IDs
 
-1. **`PaginatedJobCreationDialog`** correctly extracts `paperSpecification` and `partType` from row mappings (lines 329-330)
-2. **`onSingleJobConfirm` prop type** (line 25) only declares `{groupName, mappedStageId, mappedStageName, category}` — missing `paperSpecification`, `partType`, `quantity`
-3. **`handleSingleJobConfirm`** in both `ExcelUpload.tsx` (line 304) and `QuickEasySyncPanel.tsx` (line 215) has the same narrow type
-4. **`finalizeProductionReadyJobs`** in `enhancedParser.ts` (line 571) has the same narrow type
-5. **`finalizeJobs`** in `enhancedJobCreator.ts` (line 125) has the same narrow type
-6. **`finalizeIndividualJob`** (line 355) and **`processIndividualJobInDatabase`** (line 400) — same narrow type
+### 2. Add toggle + reorder hook: `useStageVisibilityPreferences`
+New hook that manages:
+- `hiddenStageIds: string[]` — which stages are hidden
+- `stageOrder: string[]` — custom ordering of stages (left to right)
+- Persisted to localStorage keyed by user ID
+- Returns `getVisibleOrderedConfigs(configs)` that filters hidden and sorts by custom order
 
-While TypeScript types don't strip properties at runtime, a code change anywhere in this chain that destructures or reconstructs the objects would lose the extra properties. The consistent NULL notes across all recent jobs (since ~Feb 2026) confirms the data is being lost.
+### 3. Update `FinishingKanbanDashboard.tsx`
+- Import and use the new hook + toggle component
+- Add the toggle button to the header (next to search/refresh)
+- Filter `QUEUE_CONFIGS` through the hook to get only visible, ordered queues
+- Replace hardcoded `grid-cols-4` with dynamic grid classes based on visible count:
+  - 1 queue: `grid-cols-1`
+  - 2 queues: `grid-cols-2`
+  - 3 queues: `grid-cols-3`
+  - 4+: `grid-cols-4`
+- Apply this to both card and list view grids
 
-## Evidence
-- **Last working job**: D430124 (Jan 31, 2026) — has `notes: "Paper: 160gsm El Toro"`
-- **All recent book jobs** (D430895–D430908): Cover/Text stages exist with correct `part_name`, but `notes` is NULL
-- The RPC is verified correct — it reads per-stage `paper_specification` from consolidated stages JSON
+### Files to create
+- `src/hooks/tracker/useStageVisibilityPreferences.ts`
+- `src/components/tracker/factory/StageToggleControls.tsx`
 
-## Fix — Widen Type Signatures Across the Chain
-
-Update all intermediate type annotations to include `paperSpecification`, `partType`, and `quantity` so the data flows explicitly through every layer:
-
-### Files to Change
-
-1. **`src/components/admin/upload/PaginatedJobCreationDialog.tsx`** (line 25)
-   - Widen `onSingleJobConfirm` prop type to include `paperSpecification?`, `partType?`, `quantity?`
-
-2. **`src/components/tracker/ExcelUpload.tsx`** (line 304)
-   - Widen `handleSingleJobConfirm` parameter type
-
-3. **`src/components/tracker/QuickEasySyncPanel.tsx`** (line 215)
-   - Widen `handleSingleJobConfirm` parameter type
-
-4. **`src/utils/excel/enhancedParser.ts`** (line 571)
-   - Widen `finalizeProductionReadyJobs` parameter type
-
-5. **`src/utils/excel/enhancedJobCreator.ts`** (lines 125, 355, 400)
-   - Widen `finalizeJobs`, `finalizeIndividualJob`, `processIndividualJobInDatabase` parameter types
-   - Remove `(m as any)` casts at line 458 since the type will now include `paperSpecification`
-
-### No DB changes. No RPC changes. No new migrations.
-
-The fix is purely widening TypeScript type annotations so the `paperSpecification` and `partType` fields that the dialog already correctly extracts are explicitly carried through to `initializeJobWorkflowFromMappings`, where they're already correctly consumed and passed to the RPC.
+### Files to modify
+- `src/components/tracker/factory/FinishingKanbanDashboard.tsx` — integrate toggle + dynamic grid
 
