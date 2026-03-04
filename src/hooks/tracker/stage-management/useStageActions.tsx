@@ -126,6 +126,23 @@ export const useStageActions = () => {
 
       if (error) throw error;
 
+      // Invalidate active proof links so reminder emails stop
+      if (isProofStage && stageInfo?.job_id) {
+        const { error: proofLinkError } = await supabase
+          .from('proof_links')
+          .update({
+            is_used: true,
+            invalidated_at: new Date().toISOString(),
+            invalidated_by: user?.id || null
+          })
+          .eq('job_id', stageInfo.job_id)
+          .eq('is_used', false);
+
+        if (proofLinkError) {
+          console.warn('⚠️ Failed to invalidate proof links:', proofLinkError);
+        }
+      }
+
       // If this was a proof stage completion, trigger queue-based due date calculation
       if (isProofStage && stageInfo?.job_id) {
         try {
@@ -207,6 +224,23 @@ export const useStageActions = () => {
 
       if (completeError) {
         throw new Error(`Failed to complete current stage: ${completeError.message}`);
+      }
+
+      // Invalidate active proof links so reminder emails stop
+      if (isProofStage && currentStageInstance?.job_id) {
+        const { error: proofLinkError } = await supabase
+          .from('proof_links')
+          .update({
+            is_used: true,
+            invalidated_at: new Date().toISOString(),
+            invalidated_by: user?.id || null
+          })
+          .eq('job_id', currentStageInstance.job_id)
+          .eq('is_used', false);
+
+        if (proofLinkError) {
+          console.warn('⚠️ Failed to invalidate proof links:', proofLinkError);
+        }
       }
 
       // If this was a proof stage completion, trigger queue-based due date calculation
