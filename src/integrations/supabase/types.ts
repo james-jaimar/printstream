@@ -5211,24 +5211,43 @@ export type Database = {
           properties: Json
         }[]
       }
-      get_dashboard_job_stats: {
-        Args: { p_user_id: string }
-        Returns: {
-          category: string
-          category_color: string
-          current_stage_color: string
-          current_stage_name: string
-          current_stage_status: string
-          customer: string
-          display_stage_name: string
-          due_date: string
-          id: string
-          proof_approved_at: string
-          status: string
-          wo_no: string
-          workflow_progress: number
-        }[]
-      }
+      get_dashboard_job_stats:
+        | {
+            Args: never
+            Returns: {
+              category: string
+              category_color: string
+              current_stage_color: string
+              current_stage_name: string
+              current_stage_status: string
+              customer: string
+              display_stage_name: string
+              due_date: string
+              id: string
+              proof_approved_at: string
+              status: string
+              wo_no: string
+              workflow_progress: number
+            }[]
+          }
+        | {
+            Args: { p_user_id: string }
+            Returns: {
+              category: string
+              category_color: string
+              current_stage_color: string
+              current_stage_name: string
+              current_stage_status: string
+              customer: string
+              display_stage_name: string
+              due_date: string
+              id: string
+              proof_approved_at: string
+              status: string
+              wo_no: string
+              workflow_progress: number
+            }[]
+          }
       get_department_job_queue: {
         Args: { p_department_id: string }
         Returns: {
