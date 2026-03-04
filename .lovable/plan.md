@@ -1,40 +1,13 @@
 
+# Hide "Reschedule All" Button for Viewer Role
 
-# Fix: Viewer role sees no orders in Orders, Production, Kanban
-
-## Root Cause
-
-All three pages use `useAccessibleJobs({ permissionType: 'manage' })`:
-
-- **Orders** (`ProductionManagerView.tsx` line 25): `permissionType: 'manage'`
-- **Production** (`TrackerProduction.tsx` line 49): `permissionType: 'manage'`
-- **Kanban** (`MultiStageKanban`, `EnhancedProductionKanban`, `ProductionKanban`): all `permissionType: 'manage'`
-
-The DB function `get_user_accessible_jobs_with_batch_allocation` checks stage permissions (`can_manage`) for the user. A viewer has no `can_manage` on any stage, so it returns zero jobs.
-
-Schedule works because `useScheduleReader` queries `job_stage_instances` directly, bypassing the permission-gated RPC.
+## Problem
+The "Reschedule All" button is always rendered in `ScheduleWorkflowHeader`, regardless of user role. While `ScheduleBoardPage` passes `onReschedule` as `undefined` for read-only users, the header component ignores this and always shows the button.
 
 ## Fix
 
-For each of these components, detect if the user is a viewer and downgrade `permissionType` to `'view'`:
+**Two files to change:**
 
-### Files to change
+1. **`src/components/schedule/ScheduleBoard.tsx`** — Make `onReschedule` optional in the interface (`onReschedule?: () => void`) and only pass it to the header when defined.
 
-| File | Current | Fix |
-|------|---------|-----|
-| `src/components/tracker/views/ProductionManagerView.tsx` | `permissionType: 'manage'` | Use `'view'` for viewers |
-| `src/pages/tracker/TrackerProduction.tsx` | `permissionType: 'manage'` | Use `'view'` for viewers |
-| `src/components/tracker/ProductionKanban.tsx` | `permissionType: 'manage'` | Use `'view'` for viewers |
-| `src/components/tracker/EnhancedProductionKanban.tsx` | `permissionType: 'manage'` | Use `'view'` for viewers |
-| `src/components/tracker/MultiStageKanban.tsx` | `permissionType: 'manage'` | Use `'view'` for viewers |
-| `src/components/tracker/modals/OrderSearchModal.tsx` | `permissionType: 'manage'` | Use `'view'` for viewers |
-
-Each file will add:
-```typescript
-const { isViewer } = useUserRole();
-// ...
-useAccessibleJobs({ permissionType: isViewer ? 'view' : 'manage' })
-```
-
-Most of these files already import `useUserRole` or have access to `isReadOnly` context, so the change is minimal.
-
+2. **`src/components/schedule/header/ScheduleWorkflowHeader.tsx`** — Make `onReschedule` optional in the interface, and conditionally render the "Reschedule All" button only when `onReschedule` is provided (same pattern already used for `onPrinterReassignment`).
