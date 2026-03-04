@@ -4,11 +4,13 @@ import { useUserRole } from "@/hooks/tracker/useUserRole";
 import { useAccessibleJobs } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobActions } from "@/hooks/tracker/useAccessibleJobs/useJobActions";
 import { useAuth } from "@/hooks/useAuth";
+import { useStageVisibilityPreferences } from "@/hooks/tracker/useStageVisibilityPreferences";
 import { DtpKanbanColumnWithBoundary } from "./DtpKanbanColumnWithBoundary";
 import { DtpJobModal } from "./dtp/DtpJobModal";
 import { TrackerErrorBoundary } from "../error-boundaries/TrackerErrorBoundary";
 import { GlobalBarcodeListener } from "./GlobalBarcodeListener";
 import { ViewToggle } from "../common/ViewToggle";
+import { StageToggleControls } from "./StageToggleControls";
 import { JobListView } from "../common/JobListView";
 import { sortJobsByWorkflowPriority, getWorkflowStateColor } from "@/utils/tracker/workflowStateUtils";
 import { calculateDashboardMetrics } from "@/hooks/tracker/useAccessibleJobs/dashboardUtils";
@@ -24,7 +26,7 @@ import { Badge } from "@/components/ui/badge";
 
 export const PackagingShippingKanbanDashboard = () => {
   const { accessibleStages } = useUserRole();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const navigate = useNavigate();
   
   const { 
@@ -44,6 +46,35 @@ export const PackagingShippingKanbanDashboard = () => {
     optimisticUpdates,
     hasOptimisticUpdates: hasJobActionUpdates 
   } = useJobActions(refreshJobs);
+
+  // Stage visibility preferences
+  const PACKAGING_CONFIGS = useMemo(() => [
+    { id: 'packaging', title: 'Packaging', backgroundColor: '#2563eb' },
+    { id: 'shipping', title: 'Shipping', backgroundColor: '#16a34a' },
+  ], []);
+
+  const {
+    preferences,
+    toggleStage,
+    moveStage,
+    getVisibleOrderedConfigs,
+    initializeOrder,
+  } = useStageVisibilityPreferences(user?.id);
+
+  useMemo(() => {
+    initializeOrder(PACKAGING_CONFIGS);
+  }, [PACKAGING_CONFIGS, initializeOrder]);
+
+  const visibleConfigs = useMemo(() =>
+    getVisibleOrderedConfigs(PACKAGING_CONFIGS),
+    [getVisibleOrderedConfigs, PACKAGING_CONFIGS]
+  );
+
+  const gridColsClass = useMemo(() => {
+    const count = visibleConfigs.length;
+    if (count <= 1) return 'grid-cols-1';
+    return 'grid-cols-1 md:grid-cols-2';
+  }, [visibleConfigs.length]);
   
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -222,6 +253,13 @@ export const PackagingShippingKanbanDashboard = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <StageToggleControls
+              stages={PACKAGING_CONFIGS}
+              hiddenStageIds={preferences.hiddenStageIds}
+              stageOrder={preferences.stageOrder}
+              onToggleStage={toggleStage}
+              onMoveStage={moveStage}
+            />
             <Button
               variant="outline"
               size="sm"
@@ -312,76 +350,64 @@ export const PackagingShippingKanbanDashboard = () => {
 
       <div className="flex-1 overflow-hidden px-3 sm:px-4 pb-3 sm:pb-4">
         {viewMode === 'card' ? (
-          <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 h-full overflow-hidden">
-            <div className="flex-1 min-h-0">
-              <DtpKanbanColumnWithBoundary
-                title="Packaging"
-                jobs={packagingJobs}
-                onStart={openModalForStart}
-                onComplete={openModalForComplete}
-                onJobClick={handleJobClick}
-                colorClass="bg-blue-600"
-                icon={<Package className="h-4 w-4" />}
-              />
-            </div>
-            
-            <div className="flex-1 min-h-0">
-              <DtpKanbanColumnWithBoundary
-                title="Shipping"
-                jobs={shippingJobs}
-                onStart={openModalForStart}
-                onComplete={openModalForComplete}
-                onJobClick={handleJobClick}
-                colorClass="bg-green-600"
-                icon={<Truck className="h-4 w-4" />}
-              />
-            </div>
+          <div className={`grid ${gridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
+            {visibleConfigs.map((config) => {
+              const jobsForColumn = config.id === 'packaging' ? packagingJobs : shippingJobs;
+              const icon = config.id === 'packaging' 
+                ? <Package className="h-4 w-4" /> 
+                : <Truck className="h-4 w-4" />;
+              
+              return (
+                <div key={config.id} className="min-h-0">
+                  <DtpKanbanColumnWithBoundary
+                    title={config.title}
+                    jobs={jobsForColumn}
+                    onStart={openModalForStart}
+                    onComplete={openModalForComplete}
+                    onJobClick={handleJobClick}
+                    colorClass=""
+                    backgroundColor={config.backgroundColor}
+                    icon={icon}
+                  />
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 sm:gap-4 h-full overflow-hidden">
-            <div className="flex flex-col space-y-2 min-h-0">
-              <div className="flex-shrink-0 px-3 py-2 bg-blue-600 text-white rounded-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Package className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm truncate">Packaging ({packagingJobs.length})</span>
+          <div className={`grid ${gridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
+            {visibleConfigs.map((config) => {
+              const jobsForColumn = config.id === 'packaging' ? packagingJobs : shippingJobs;
+              const icon = config.id === 'packaging' 
+                ? <Package className="h-4 w-4 flex-shrink-0" /> 
+                : <Truck className="h-4 w-4 flex-shrink-0" />;
+              
+              return (
+                <div key={config.id} className="flex flex-col space-y-2 min-h-0">
+                  <div 
+                    className="flex-shrink-0 px-3 py-2 text-white rounded-md"
+                    style={{ backgroundColor: config.backgroundColor }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {icon}
+                        <span className="font-medium text-sm truncate">{config.title} ({jobsForColumn.length})</span>
+                      </div>
+                      <span className="text-xs opacity-80">Sorted by: Priority</span>
+                    </div>
                   </div>
-                  <span className="text-xs opacity-80">Sorted by: Priority</span>
+                  <ScrollArea className="flex-1">
+                    <div className="pr-4">
+                      <JobListView
+                        jobs={jobsForColumn}
+                        onStart={openModalForStart}
+                        onComplete={openModalForComplete}
+                        onJobClick={handleJobClick}
+                      />
+                    </div>
+                  </ScrollArea>
                 </div>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="pr-4">
-                  <JobListView
-                    jobs={packagingJobs}
-                    onStart={openModalForStart}
-                    onComplete={openModalForComplete}
-                    onJobClick={handleJobClick}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
-            
-            <div className="flex flex-col space-y-2 min-h-0">
-              <div className="flex-shrink-0 px-3 py-2 bg-green-600 text-white rounded-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Truck className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm truncate">Shipping ({shippingJobs.length})</span>
-                  </div>
-                  <span className="text-xs opacity-80">Sorted by: Priority</span>
-                </div>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="pr-4">
-                  <JobListView
-                    jobs={shippingJobs}
-                    onStart={openModalForStart}
-                    onComplete={openModalForComplete}
-                    onJobClick={handleJobClick}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
+              );
+            })}
           </div>
         )}
       </div>
