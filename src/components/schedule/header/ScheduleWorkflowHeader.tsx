@@ -10,7 +10,7 @@ interface ScheduleWorkflowHeaderProps {
   selectedStageName?: string | null;
   isLoading: boolean;
   onRefresh: () => void;
-  onReschedule: () => void;
+  onReschedule?: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onPrinterReassignment?: () => void;
@@ -88,15 +88,17 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
             <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button
-            onClick={confirmAndReschedule}
-            disabled={isLoading}
-            size="sm"
-            className="flex items-center gap-2"
-          >
-            <Zap className="h-4 w-4" />
-            Reschedule All
-          </Button>
+          {onReschedule && (
+            <Button
+              onClick={confirmAndReschedule}
+              disabled={isLoading}
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <Zap className="h-4 w-4" />
+              Reschedule All
+            </Button>
+          )}
           {onPrinterReassignment && (
             <Button
               onClick={onPrinterReassignment}
