@@ -7,6 +7,7 @@ import { Loader2, AlertTriangle, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { useAccessibleJobs, AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useProductionStages } from "@/hooks/tracker/useProductionStages";
+import { useUserRole } from "@/hooks/tracker/useUserRole";
 import { EnhancedJobCard } from "./EnhancedJobCard";
 
 interface JobWithStages extends AccessibleJob {
@@ -93,8 +94,9 @@ const StageColumn = ({ stage, jobs, onJobUpdate }: {
 };
 
 export const EnhancedProductionKanban = () => {
+  const { isViewer } = useUserRole();
   const { jobs, isLoading, error, refreshJobs } = useAccessibleJobs({
-    permissionType: 'manage'
+    permissionType: isViewer ? 'view' : 'manage'
   });
   const { stages } = useProductionStages();
 

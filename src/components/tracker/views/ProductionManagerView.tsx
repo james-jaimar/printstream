@@ -21,12 +21,12 @@ export const ProductionManagerView = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'wo_no' | 'due_date'>('due_date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const { isViewer, isAdmin } = useUserRole();
   const { jobs, isLoading, error, startJob, completeJob, refreshJobs, invalidateCache } = useAccessibleJobs({
-    permissionType: 'manage',
+    permissionType: isViewer ? 'view' : 'manage',
     statusFilter
   });
   const { categories } = useCategories();
-  const { isAdmin } = useUserRole();
   const { isReadOnly } = useReadOnly();
   const [refreshing, setRefreshing] = useState(false);
   const [showLostJobRecovery, setShowLostJobRecovery] = useState(false);
