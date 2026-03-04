@@ -122,7 +122,7 @@ export class EnhancedJobCreator {
   /**
    * Finalize prepared jobs by saving them to the database - SERIALIZED VERSION
    */
-  async finalizeJobs(preparedResult: EnhancedJobCreationResult, userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string}>): Promise<EnhancedJobCreationResult> {
+  async finalizeJobs(preparedResult: EnhancedJobCreationResult, userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string, mappedStageSpecId?: string, mappedStageSpecName?: string, paperSpecification?: string, partType?: string, quantity?: number}>): Promise<EnhancedJobCreationResult> {
     this.logger.addDebugInfo(`🔄 Finalizing ${preparedResult.stats.total} prepared jobs SERIALLY to avoid concurrency issues`);
 
     const finalResult: EnhancedJobCreationResult = {
@@ -352,7 +352,7 @@ export class EnhancedJobCreator {
     assignment: any, 
     preparedResult: EnhancedJobCreationResult, 
     finalResult: EnhancedJobCreationResult,
-    userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string}>,
+    userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string, mappedStageSpecId?: string, mappedStageSpecName?: string, paperSpecification?: string, partType?: string, quantity?: number}>,
     maxRetries: number = 3
   ): Promise<void> {
     let lastError: Error | null = null;
@@ -397,7 +397,7 @@ export class EnhancedJobCreator {
     assignment: any, 
     preparedResult: EnhancedJobCreationResult, 
     finalResult: EnhancedJobCreationResult,
-    userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string}>
+    userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string, mappedStageSpecId?: string, mappedStageSpecName?: string, paperSpecification?: string, partType?: string, quantity?: number}>
   ): Promise<void> {
     const originalJob = assignment.originalJob;
     if (!originalJob) {
@@ -455,8 +455,8 @@ export class EnhancedJobCreator {
         // Extract unique paper specifications from printing stages
         const paperSpecsSet = new Set<string>();
         userApprovedMappings
-          .filter(m => m.category === 'printing' && (m as any).paperSpecification)
-          .forEach(m => paperSpecsSet.add((m as any).paperSpecification));
+          .filter(m => m.category === 'printing' && m.paperSpecification)
+          .forEach(m => paperSpecsSet.add(m.paperSpecification!));
         
         if (paperSpecsSet.size > 0) {
           this.logger.addDebugInfo(`🔍 Found ${paperSpecsSet.size} unique paper specs in user mappings: ${Array.from(paperSpecsSet).join(', ')}`);

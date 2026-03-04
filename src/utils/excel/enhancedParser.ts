@@ -568,7 +568,7 @@ export const finalizeProductionReadyJobs = async (
   preparedResult: any,
   logger: ExcelImportDebugger,
   currentUserId: string,
-  userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string}>
+  userApprovedMappings?: Array<{groupName: string, mappedStageId: string, mappedStageName: string, category: string, mappedStageSpecId?: string, mappedStageSpecName?: string, paperSpecification?: string, partType?: string, quantity?: number}>
 ): Promise<any> => {
   logger.addDebugInfo(`Finalizing ${preparedResult.stats.total} prepared jobs for user ${currentUserId}`);
   
