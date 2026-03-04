@@ -1,42 +1,29 @@
 
 
-# Fix: Proof Reminder Emails Continue After Manual Approval
+# Fix: Invalidate 7 Orphaned Proof Links
 
-## Problem
-When a proof stage is manually approved (via the DTP dashboard or stage actions), the system sets `proof_approved_manually_at` on the `job_stage_instances` table but does **not** invalidate the corresponding `proof_links` record. The `proof-reminder` edge function queries for proof links where `is_used = false` and `invalidated_at IS NULL`, so it keeps sending reminder emails to clients even after the proof has already been approved internally.
+## What happened
+These 7 proof links were created before the code fix we just deployed. The manual approval path didn't invalidate them, so they remain `is_used = false` with no `invalidated_at`.
 
-The **online** approval path (client clicks the proof link) correctly sets `is_used = true` on the proof link. The bug is only in the manual/internal approval paths.
+## Data fix needed
+Run a single UPDATE to invalidate all proof links where the associated stage instance is already completed:
 
-## Affected Code Paths (3 places)
-1. `src/hooks/tracker/useProofApprovalFlow.tsx` — `completeProofStage()` (line 42)
-2. `src/hooks/tracker/stage-management/useStageActions.tsx` — `completeStage()` (line 109-118)
-3. `src/hooks/tracker/stage-management/useStageActions.tsx` — `completeStageAndSkipConditional()` (line 191-200)
-
-## Fix
-After each manual proof stage completion (where `isProofStage` is true), add a query to invalidate all active proof links for that job:
-
-```typescript
-await supabase
-  .from('proof_links')
-  .update({
-    is_used: true,
-    invalidated_at: new Date().toISOString(),
-    invalidated_by: user?.id || null
-  })
-  .eq('job_id', jobId)
-  .eq('is_used', false);
+```sql
+UPDATE proof_links
+SET 
+  is_used = true,
+  invalidated_at = NOW()
+WHERE is_used = false
+  AND invalidated_at IS NULL
+  AND stage_instance_id IN (
+    SELECT jsi.id 
+    FROM job_stage_instances jsi 
+    WHERE jsi.status = 'completed'
+  );
 ```
 
-This matches the existing pattern used in the online approval flow (handle-proof-approval/index.ts lines 457-463 and 550-554).
+This catches all 7 records (and any others we might have missed). Going forward, the code fix already deployed will prevent new orphans.
 
-### File 1: `useProofApprovalFlow.tsx`
-- After the stage is marked completed (line 55), add proof link invalidation using `stageId` to look up the `job_id`, or use the `jobId` parameter directly since it's already available.
-
-### File 2: `useStageActions.tsx` (both functions)
-- After the stage update succeeds and `isProofStage` is true, invalidate proof links for the job. The `jobId` is available as a parameter in `completeStageAndSkipConditional`, and from `stageInfo.job_id` in `completeStage`.
-
-## Expected Result
-- Manual proof approvals immediately stop all pending reminder emails
-- No more "phantom" reminders after internal approval
-- No changes needed to the `proof-reminder` edge function itself
+## Implementation
+Single database update via the insert/update tool -- no code changes needed.
 
