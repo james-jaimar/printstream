@@ -15,6 +15,7 @@ import { BatchAllocationManagement } from "@/components/admin/BatchAllocationMan
 import { ProofLinkManagement } from "@/components/admin/ProofLinkManagement";
 import ExcelMapping from "@/pages/admin/ExcelMapping";
 import { QueueMergeGroupsManagement } from "@/components/tracker/admin/QueueMergeGroupsManagement";
+import { ScheduleHealthCard } from "@/components/tracker/admin/ScheduleHealthCard";
 import { PremiumUserManagement } from "@/components/users/PremiumUserManagement";
 import { UserManagementProvider } from "@/contexts/UserManagementContext";
 
@@ -29,6 +30,8 @@ export default function TrackerAdmin() {
           Manage production stages, categories, permissions, specifications, and system diagnostics
         </p>
       </div>
+
+      <ScheduleHealthCard />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-13">
