@@ -13,6 +13,8 @@ import { ViewToggle } from "../common/ViewToggle";
 import { StageToggleControls } from "./StageToggleControls";
 import { JobListView } from "../common/JobListView";
 import { sortJobsByWorkflowPriority } from "@/utils/tracker/workflowStateUtils";
+import { useQueueMergeGroups } from "@/hooks/tracker/useQueueMergeGroups";
+import { applyQueueMerging, MergeableQueueConfig } from "@/utils/tracker/queueMergeUtils";
 import { toast } from "sonner";
 import { JobListLoading, JobErrorState } from "../common/JobLoadingStates";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -41,6 +43,7 @@ const getScoringIconLarge = (stageName: string): React.ReactNode => {
 export const ScoringKanbanDashboard: React.FC = () => {
   const { user } = useAuth();
   const { consolidatedStages, isLoading: permissionsLoading } = useUserStagePermissions(user?.id);
+  const { mergeGroups, isLoading: mergeGroupsLoading } = useQueueMergeGroups();
   
   const { 
     jobs, 
@@ -84,15 +87,20 @@ export const ScoringKanbanDashboard: React.FC = () => {
     });
   }, [consolidatedStages]);
 
-  // Build stage configs for toggle controls
+  // Build stage configs for toggle controls, applying merge groups
   const stageConfigs = useMemo(() => {
     const colors = ['#9333ea', '#4f46e5', '#7c3aed', '#c026d3'];
-    return scoringStages.map((stage, idx) => ({
+    const rawConfigs: (MergeableQueueConfig & { backgroundColor: string })[] = scoringStages.map((stage, idx) => ({
       id: stage.stage_id,
       title: stage.stage_name,
+      stageName: stage.stage_name,
+      colorClass: '',
       backgroundColor: colors[idx % colors.length],
+      icon: getScoringIcon(stage.stage_name),
+      stageId: stage.stage_id,
     }));
-  }, [scoringStages]);
+    return applyQueueMerging(rawConfigs, mergeGroups);
+  }, [scoringStages, mergeGroups]);
 
   // Initialize order when stages load
   useEffect(() => {
@@ -115,9 +123,9 @@ export const ScoringKanbanDashboard: React.FC = () => {
     return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4';
   }, [visibleConfigs.length]);
 
-  // Categorize jobs by stage
+  // Categorize jobs by stage (supports merged queues)
   const categorizedJobs = useMemo(() => {
-    if (!jobs || jobs.length === 0 || scoringStages.length === 0) {
+    if (!jobs || jobs.length === 0 || stageConfigs.length === 0) {
       return {};
     }
 
@@ -134,15 +142,20 @@ export const ScoringKanbanDashboard: React.FC = () => {
         });
       }
 
-      // Categorize by each scoring stage
       const result: Record<string, AccessibleJob[]> = {};
       
-      scoringStages.forEach(stage => {
-        const stageJobs = filtered.filter(job => {
-          const stageName = job.current_stage_name?.toLowerCase() || '';
-          return stageName === stage.stage_name.toLowerCase();
-        });
-        result[stage.stage_id] = sortJobsByWorkflowPriority(stageJobs);
+      stageConfigs.forEach(config => {
+        if (config.mergedStageIds) {
+          const mergedJobs = filtered.filter(job =>
+            config.mergedStageIds!.some(sid => job.current_stage_id === sid)
+          );
+          result[config.id] = sortJobsByWorkflowPriority(mergedJobs);
+        } else {
+          const stageJobs = filtered.filter(job =>
+            job.current_stage_id === config.stageId
+          );
+          result[config.id] = sortJobsByWorkflowPriority(stageJobs);
+        }
       });
       
       return result;
@@ -151,7 +164,7 @@ export const ScoringKanbanDashboard: React.FC = () => {
       toast.error("Error processing jobs data");
       return {};
     }
-  }, [jobs, searchQuery, scoringStages]);
+  }, [jobs, searchQuery, stageConfigs]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -231,7 +244,7 @@ export const ScoringKanbanDashboard: React.FC = () => {
     }
   }, [selectedJob]);
 
-  if (isLoading || permissionsLoading) {
+  if (isLoading || permissionsLoading || mergeGroupsLoading) {
     return (
       <JobListLoading 
         message="Loading scoring & folding jobs..."
@@ -251,10 +264,10 @@ export const ScoringKanbanDashboard: React.FC = () => {
     );
   }
 
-  // Calculate totals
-  const totalsByStage = scoringStages.map(stage => ({
-    stage,
-    count: categorizedJobs[stage.stage_id]?.length || 0
+  // Calculate totals using stageConfigs (which may include merged groups)
+  const totalsByStage = stageConfigs.map(config => ({
+    config,
+    count: categorizedJobs[config.id]?.length || 0
   }));
   
   const totalJobs = totalsByStage.reduce((sum, t) => sum + t.count, 0);
@@ -265,7 +278,7 @@ export const ScoringKanbanDashboard: React.FC = () => {
   }).length;
 
   // Build subtitle
-  const subtitleParts = totalsByStage.filter(t => t.count > 0).map(t => `${t.count} ${t.stage.stage_name}`);
+  const subtitleParts = totalsByStage.filter(t => t.count > 0).map(t => `${t.count} ${t.config.title}`);
   const subtitle = subtitleParts.length > 0 
     ? `Showing ${subtitleParts.join(' and ')} jobs`
     : 'No jobs found';
@@ -319,16 +332,16 @@ export const ScoringKanbanDashboard: React.FC = () => {
         </div>
 
         {/* Summary Cards - Dynamic based on stages */}
-        <div className={`grid gap-3 ${scoringStages.length <= 2 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-' + Math.min(scoringStages.length + 2, 6)}`}>
-          {totalsByStage.map(({ stage, count }) => (
-            <Card key={stage.stage_id}>
+        <div className={`grid gap-3 ${stageConfigs.length <= 2 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-' + Math.min(stageConfigs.length + 2, 6)}`}>
+          {totalsByStage.map(({ config, count }) => (
+            <Card key={config.id}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">{stage.stage_name}</p>
+                    <p className="text-sm text-gray-600">{config.title}</p>
                     <p className="text-2xl font-bold">{count}</p>
                   </div>
-                  {getScoringIconLarge(stage.stage_name)}
+                  {getScoringIconLarge(config.title)}
                 </div>
               </CardContent>
             </Card>
@@ -373,21 +386,19 @@ export const ScoringKanbanDashboard: React.FC = () => {
         {viewMode === 'card' ? (
           <div className={`grid ${gridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
             {visibleConfigs.map((config) => {
-              const stage = scoringStages.find(s => s.stage_id === config.id);
-              if (!stage) return null;
-              const stageJobs = categorizedJobs[stage.stage_id] || [];
+              const stageJobs = categorizedJobs[config.id] || [];
               
               return (
-                <div key={stage.stage_id} className="min-h-0">
+                <div key={config.id} className="min-h-0">
                   <DtpKanbanColumnWithBoundary
-                    title={stage.stage_name}
+                    title={config.title}
                     jobs={stageJobs}
                     onStart={openModalForStart}
                     onComplete={openModalForComplete}
                     onJobClick={handleJobClick}
                     colorClass=""
                     backgroundColor={config.backgroundColor}
-                    icon={getScoringIcon(stage.stage_name)}
+                    icon={config.icon || getScoringIcon(config.title)}
                   />
                 </div>
               );
@@ -396,20 +407,18 @@ export const ScoringKanbanDashboard: React.FC = () => {
         ) : (
           <div className={`grid ${gridColsClass} gap-3 sm:gap-4 h-full overflow-hidden`}>
             {visibleConfigs.map((config) => {
-              const stage = scoringStages.find(s => s.stage_id === config.id);
-              if (!stage) return null;
-              const stageJobs = categorizedJobs[stage.stage_id] || [];
+              const stageJobs = categorizedJobs[config.id] || [];
               
               return (
-                <div key={stage.stage_id} className="flex flex-col space-y-2 min-h-0">
+                <div key={config.id} className="flex flex-col space-y-2 min-h-0">
                   <div 
                     className="flex-shrink-0 px-3 py-2 text-white rounded-md"
                     style={{ backgroundColor: config.backgroundColor }}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        {getScoringIcon(stage.stage_name)}
-                        <span className="font-medium text-sm truncate">{stage.stage_name} ({stageJobs.length})</span>
+                        {config.icon || getScoringIcon(config.title)}
+                        <span className="font-medium text-sm truncate">{config.title} ({stageJobs.length})</span>
                       </div>
                       <span className="text-xs opacity-80">Sorted by: Priority</span>
                     </div>

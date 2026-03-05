@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail } from "lucide-react";
+import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge } from "lucide-react";
 import { ProductionStagesManagement } from "@/components/tracker/admin/ProductionStagesManagement";
 import { CategoriesManagement } from "@/components/tracker/admin/CategoriesManagement";
 import { UserGroupsManagement } from "@/components/tracker/admin/UserGroupsManagement";
@@ -14,6 +14,7 @@ import { PrintSpecificationsManagement } from "@/components/admin/PrintSpecifica
 import { BatchAllocationManagement } from "@/components/admin/BatchAllocationManagement";
 import { ProofLinkManagement } from "@/components/admin/ProofLinkManagement";
 import ExcelMapping from "@/pages/admin/ExcelMapping";
+import { QueueMergeGroupsManagement } from "@/components/tracker/admin/QueueMergeGroupsManagement";
 import { PremiumUserManagement } from "@/components/users/PremiumUserManagement";
 import { UserManagementProvider } from "@/contexts/UserManagementContext";
 
@@ -30,7 +31,7 @@ export default function TrackerAdmin() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-12">
+        <TabsList className="grid w-full grid-cols-13">
           <TabsTrigger value="users" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             Users
@@ -78,6 +79,10 @@ export default function TrackerAdmin() {
           <TabsTrigger value="proof-links" className="flex items-center gap-2">
             <Mail className="h-4 w-4" />
             Proof Links
+          </TabsTrigger>
+          <TabsTrigger value="queue-merging" className="flex items-center gap-2">
+            <GitMerge className="h-4 w-4" />
+            Queue Merging
           </TabsTrigger>
         </TabsList>
 
@@ -129,6 +134,10 @@ export default function TrackerAdmin() {
 
         <TabsContent value="proof-links">
           <ProofLinkManagement />
+        </TabsContent>
+
+        <TabsContent value="queue-merging">
+          <QueueMergeGroupsManagement />
         </TabsContent>
       </Tabs>
     </div>
