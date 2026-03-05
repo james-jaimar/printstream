@@ -19,21 +19,10 @@ import { useUserStagePermissions } from '@/hooks/tracker/useUserStagePermissions
 import { toast } from 'sonner';
 import { useStageVisibilityPreferences } from '@/hooks/tracker/useStageVisibilityPreferences';
 import { StageToggleControls } from './StageToggleControls';
+import { useQueueMergeGroups } from '@/hooks/tracker/useQueueMergeGroups';
+import { applyQueueMerging, MergeableQueueConfig } from '@/utils/tracker/queueMergeUtils';
 
-interface QueueConfig {
-  id: string;
-  title: string;
-  stageName: string;
-  colorClass: string;
-  backgroundColor: string;
-  icon: React.ReactNode;
-  stageId: string;
-  /** For merged queues: all original stage IDs that feed into this column */
-  mergedStageIds?: string[];
-}
-
-// Trimming keywords used to detect stages that should be merged
-const TRIMMING_KEYWORDS = ['book cutting', 'final trimming', 'pre trim', 'trimming'];
+interface QueueConfig extends MergeableQueueConfig {}
 
 // Icon mapping for stages
 const getStageIcon = (stageName: string): React.ReactNode => {
@@ -47,7 +36,7 @@ const getStageIcon = (stageName: string): React.ReactNode => {
   if (name.includes('wire') && name.includes('bind')) return <Book className="h-4 w-4" />;
   if (name.includes('binding')) return <Book className="h-4 w-4" />;
   if (name.includes('scoring') || name.includes('folding')) return <FileText className="h-4 w-4" />;
-  if (name.includes('cutting') || name.includes('die')) return <Scissors className="h-4 w-4" />;
+  if (name.includes('cutting') || name.includes('die') || name.includes('trim')) return <Scissors className="h-4 w-4" />;
   return <Layers className="h-4 w-4" />;
 };
 
@@ -63,6 +52,7 @@ export const FinishingKanbanDashboard: React.FC = () => {
   const [scanCompleted, setScanCompleted] = useState(false);
 
   const { consolidatedStages, isLoading: permissionsLoading } = useUserStagePermissions(user?.id);
+  const { mergeGroups, isLoading: mergeGroupsLoading } = useQueueMergeGroups();
   
   const { jobs, isLoading, error, refreshJobs } = useAccessibleJobs({
     permissionType: 'work'
@@ -113,11 +103,10 @@ export const FinishingKanbanDashboard: React.FC = () => {
     }
   }, [showJobModal, selectedJob, jobs, woMatchesBarcode]);
 
-  // Dynamically build queue configs from ALL user's accessible stages
   const { preferences: stagePrefs, toggleStage, moveStage, getVisibleOrderedConfigs, initializeOrder } = useStageVisibilityPreferences(user?.id);
 
   const QUEUE_CONFIGS: QueueConfig[] = useMemo(() => {
-    const rawConfigs = consolidatedStages.map(stage => ({
+    const rawConfigs: QueueConfig[] = consolidatedStages.map(stage => ({
       id: stage.stage_id,
       title: stage.stage_name,
       stageName: stage.stage_name,
@@ -127,38 +116,16 @@ export const FinishingKanbanDashboard: React.FC = () => {
       stageId: stage.stage_id
     }));
 
-    // Detect trimming stages and merge them
-    const isTrimmingStage = (name: string) =>
-      TRIMMING_KEYWORDS.some(kw => name.toLowerCase().includes(kw));
+    // Apply DB-driven queue merging
+    return applyQueueMerging(rawConfigs, mergeGroups);
+  }, [consolidatedStages, mergeGroups]);
 
-    const trimmingConfigs = rawConfigs.filter(c => isTrimmingStage(c.stageName));
-    const nonTrimmingConfigs = rawConfigs.filter(c => !isTrimmingStage(c.stageName));
-
-    if (trimmingConfigs.length >= 2) {
-      const mergedConfig: QueueConfig = {
-        id: 'trimming-merged',
-        title: 'Trimming',
-        stageName: 'Trimming',
-        colorClass: 'bg-orange-600',
-        backgroundColor: trimmingConfigs[0].backgroundColor,
-        icon: <Scissors className="h-4 w-4" />,
-        stageId: 'trimming-merged',
-        mergedStageIds: trimmingConfigs.map(c => c.stageId),
-      };
-      return [...nonTrimmingConfigs, mergedConfig];
-    }
-
-    return rawConfigs;
-  }, [consolidatedStages]);
-
-  // Initialize order when configs change
   useEffect(() => {
     if (QUEUE_CONFIGS.length > 0) {
       initializeOrder(QUEUE_CONFIGS);
     }
   }, [QUEUE_CONFIGS, initializeOrder]);
 
-  // Apply visibility + ordering
   const visibleConfigs = useMemo(() => getVisibleOrderedConfigs(QUEUE_CONFIGS), [QUEUE_CONFIGS, getVisibleOrderedConfigs]);
 
   // Dynamic grid class based on visible count
@@ -240,7 +207,6 @@ export const FinishingKanbanDashboard: React.FC = () => {
   const queueJobs = useMemo(() => {
     return QUEUE_CONFIGS.reduce((acc, config) => {
       if (config.mergedStageIds) {
-        // Merged queue: collect jobs from all constituent stages, sort by priority
         const mergedJobs = filteredJobs.filter(job =>
           config.mergedStageIds!.some(sid => job.current_stage_id === sid)
         );
@@ -257,7 +223,7 @@ export const FinishingKanbanDashboard: React.FC = () => {
   const totalJobs = filteredJobs.length;
   const activeJobs = filteredJobs.filter(job => job.current_stage_status === 'active').length;
 
-  if (isLoading || permissionsLoading) {
+  if (isLoading || permissionsLoading || mergeGroupsLoading) {
     return <JobListLoading />;
   }
 

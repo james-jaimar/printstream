@@ -3359,6 +3359,63 @@ export type Database = {
         }
         Relationships: []
       }
+      queue_merge_group_stages: {
+        Row: {
+          id: string
+          merge_group_id: string
+          production_stage_id: string
+        }
+        Insert: {
+          id?: string
+          merge_group_id: string
+          production_stage_id: string
+        }
+        Update: {
+          id?: string
+          merge_group_id?: string
+          production_stage_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "queue_merge_group_stages_merge_group_id_fkey"
+            columns: ["merge_group_id"]
+            isOneToOne: false
+            referencedRelation: "queue_merge_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "queue_merge_group_stages_production_stage_id_fkey"
+            columns: ["production_stage_id"]
+            isOneToOne: false
+            referencedRelation: "production_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      queue_merge_groups: {
+        Row: {
+          created_at: string | null
+          display_color: string | null
+          id: string
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          display_color?: string | null
+          id?: string
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          display_color?: string | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       quickeasy_sync_runs: {
         Row: {
           duration_ms: number | null
