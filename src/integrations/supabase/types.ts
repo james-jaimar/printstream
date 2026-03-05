@@ -5354,6 +5354,7 @@ export type Database = {
           start_time: string
         }[]
       }
+      get_schedule_health: { Args: never; Returns: Json }
       get_stage_next_available_time: {
         Args: { p_stage_id: string }
         Returns: string
@@ -5671,6 +5672,7 @@ export type Database = {
       }
       planned_minutes_for_jsi: { Args: { p_jsi_id: string }; Returns: number }
       process_due_date_recalculation_queue: { Args: never; Returns: number }
+      purge_ghost_slots: { Args: never; Returns: number }
       reassign_jobs_to_category: {
         Args: {
           p_from_category_id: string
