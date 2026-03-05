@@ -1,77 +1,66 @@
 
 
-# Admin-Configurable Queue Merging System
+# Purge Ghost Slots and Harden the System for Production
 
 ## Problem
-Trimming stage merging is hardcoded via `TRIMMING_KEYWORDS` in `FinishingKanbanDashboard.tsx`. The same need exists for finishing stages and potentially other departments. This should be admin-configurable, not hardcoded.
+There are **18 ghost slots** in `stage_time_slots` — records linked to `job_stage_instances` that are already `completed` but whose slots were never cleaned up (likely created before the cleanup trigger was installed). All 18 have future dates, meaning they are actively blocking resources (UV Varnishing, Gathering, Pre Trim, Shipping) and pushing new jobs days into the future.
 
-## Solution
-A new Supabase table stores "merge groups" — named collections of production stage IDs that should appear as a single queue. All dashboards query this table and apply merging dynamically, replacing the hardcoded trimming logic.
+The existing trigger (`trg_cleanup_stage_time_slots`) only fires on status changes going *forward* — it can't retroactively fix slots from stages that were completed before the trigger existed.
 
-## Database
+## Plan
 
-### New table: `queue_merge_groups`
+### 1. Immediate Purge — Delete all ghost slots now
+Run a one-time DELETE via the insert tool (data operation, not migration):
+
 ```sql
-create table public.queue_merge_groups (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,              -- e.g. "Trimming", "Finishing"
-  display_color text default '#ea580c',
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
+DELETE FROM stage_time_slots
+WHERE stage_instance_id IN (
+  SELECT id FROM job_stage_instances WHERE status = 'completed'
+)
+AND COALESCE(is_completed, false) = false;
+```
 
-create table public.queue_merge_group_stages (
-  id uuid primary key default gen_random_uuid(),
-  merge_group_id uuid references queue_merge_groups(id) on delete cascade not null,
-  production_stage_id uuid references production_stages(id) on delete cascade not null,
-  unique (merge_group_id, production_stage_id)
+This removes all 18 orphaned future slots immediately.
+
+### 2. Harden the Trigger — Also clean up `is_completed = true` slots for completed stages
+The current trigger only deletes slots where `is_completed = false`. Update it to delete **all** slots for a completed stage instance (the completed stage no longer needs any time reservation):
+
+```sql
+-- On UPDATE to completed: delete ALL remaining slots, not just non-completed ones
+DELETE FROM stage_time_slots
+WHERE stage_instance_id = NEW.id;
+```
+
+This is cleaner — a completed stage has no reason to hold any future slots.
+
+### 3. Add a Scheduled Integrity Sweep (Cron)
+Create a lightweight SQL function `purge_ghost_slots()` that runs periodically (e.g., every 6 hours via pg_cron) to catch any edge cases:
+
+```sql
+DELETE FROM stage_time_slots
+WHERE stage_instance_id IN (
+  SELECT id FROM job_stage_instances WHERE status = 'completed'
 );
 ```
-RLS: authenticated users can SELECT; admins/managers can INSERT/UPDATE/DELETE.
 
-### Seed data
-Migrate existing trimming config: create a "Trimming" merge group and insert the stage IDs for Book Cutting, Final Trimming, and Pre Trim.
+This acts as a safety net in case any slots slip through (race conditions, bulk updates, etc.).
 
-## New Hook: `useQueueMergeGroups`
-- Fetches all merge groups with their stage IDs from Supabase
-- Returns `mergeGroups: { id, name, displayColor, stageIds: string[] }[]`
-- Used by all operator dashboards
+### 4. Admin Diagnostic View
+Add a small "Schedule Health" card in the TrackerAdmin page showing:
+- Count of ghost slots (slots linked to completed stages)
+- Count of orphan slots (slots with no matching stage instance)
+- A "Purge Now" button that runs the cleanup manually
 
-## New Admin Component: `QueueMergeGroupsManagement`
-- Lives in `src/components/tracker/admin/`
-- New tab "Queue Merging" on TrackerAdmin page
-- UI: list of merge groups, each showing its name + member stages
-- Add/edit/delete groups
-- Stage picker: multi-select from all `production_stages` to assign to a group
-- Shows which stages are already in other groups (prevent duplicates)
+This gives visibility into schedule integrity without needing to run SQL queries.
 
-## Dashboard Changes (all dashboards)
+### 5. Reschedule After Purge
+After purging, the user should trigger a reschedule to recalculate resource tails correctly. D430824 should move significantly earlier once the ghost slots on Pre Trim, Gathering, etc. are removed.
 
-### Generic merge utility: `applyQueueMerging`
-A shared function in `src/utils/tracker/queueMergeUtils.ts`:
-```typescript
-function applyQueueMerging(configs: QueueConfig[], mergeGroups): QueueConfig[]
-```
-- For each merge group, finds matching configs by stage ID
-- If 2+ match, replaces them with a single merged config (mergedStageIds set)
-- Returns the updated config array
+## Files
 
-### Files to update
-1. **FinishingKanbanDashboard.tsx** — remove `TRIMMING_KEYWORDS` and hardcoded merge logic; call `applyQueueMerging(rawConfigs, mergeGroups)` instead
-2. **ScoringKanbanDashboard.tsx** — add `useQueueMergeGroups` + `applyQueueMerging` to stage config building
-3. **DtpKanbanDashboard.tsx** — same pattern
-4. **PackagingShippingKanbanDashboard.tsx** — same pattern
-5. **TrackerAdmin.tsx** — add "Queue Merging" tab
-
-### Job aggregation
-The existing `mergedStageIds` pattern in `queueJobs` already handles merged queues correctly. Since all dashboards already support this field on `QueueConfig`, no changes needed to job filtering logic — just ensure each dashboard checks `config.mergedStageIds` when building job lists (Finishing already does; others need the same `if/else`).
-
-## Files Summary
-- **Create**: `queue_merge_groups` + `queue_merge_group_stages` tables (migration)
-- **Create**: `src/hooks/tracker/useQueueMergeGroups.ts`
-- **Create**: `src/utils/tracker/queueMergeUtils.ts`
-- **Create**: `src/components/tracker/admin/QueueMergeGroupsManagement.tsx`
-- **Modify**: `TrackerAdmin.tsx` (add tab)
-- **Modify**: `FinishingKanbanDashboard.tsx` (remove hardcoded trimming, use DB-driven merge)
-- **Modify**: `ScoringKanbanDashboard.tsx`, `DtpKanbanDashboard.tsx`, `PackagingShippingKanbanDashboard.tsx` (add merge support)
+- **Data operation**: One-time purge of 18 ghost slots (insert tool)
+- **Migration**: Updated trigger function + `purge_ghost_slots()` function
+- **Migration**: pg_cron schedule for periodic sweep
+- **New**: `src/components/tracker/admin/ScheduleHealthCard.tsx` — diagnostic UI
+- **Modified**: `src/pages/tracker/TrackerAdmin.tsx` — add health card
 
