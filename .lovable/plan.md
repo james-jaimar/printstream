@@ -1,78 +1,55 @@
 
 
-# Fix Mapping Library: Server-Side Pagination, Search & Filtering
+# Fix Paper Specification Pipeline: Mapping Not Reaching Schedule Board
 
-## Problem
-The Mapping Library loads mappings with a single `supabase.select()` which returns max 1000 rows (Supabase default). There are actually **4,114 mappings** in the database. This causes:
-- Stats showing 2000 instead of 4114 (the 2000 was likely from an earlier state)
-- Paper Specifications filter showing 0 results (the 323 paper spec mappings fall outside the first 1000 rows returned)
-- Search failing to find known references that exist beyond the 1000-row cutoff
+## Problem Traced
 
-## Solution
-Move from client-side filtering to **server-side filtering with pagination**.
+For job D430816, the full data flow is:
 
-### 1. Server-Side Stats Query
-Replace the client-side stats calculation with a dedicated lightweight query:
+1. **Excel text**: `"Distak Semi Gloss, 80gsm, White, 1000x700"`
+2. **Mapping exists** in `excel_import_mappings`: maps to `paper_type = "Paper Adhesive"` + `paper_weight = "080gsm"` (correct)
+3. **JSONB saved** to `production_jobs.paper_specifications`: raw text stored correctly
+4. **`job_print_specifications` table**: **EMPTY** for this job — the mapping was never written
+5. **Schedule board fallback**: parses JSONB with regex, extracts "80gsm" + "Gloss" (partial match from "Semi Gloss") → displays "80gsm Gloss" (wrong)
 
-```sql
-SELECT 
-  count(*) as total,
-  count(*) FILTER (WHERE is_verified) as verified,
-  count(*) FILTER (WHERE mapping_type = 'production_stage') as production_stages,
-  count(*) FILTER (WHERE mapping_type = 'paper_specification') as paper_specs,
-  count(*) FILTER (WHERE mapping_type = 'delivery_specification') as delivery_specs
-FROM excel_import_mappings
+## Root Cause
+
+Neither job creator automatically looks up `excel_import_mappings` to resolve paper specs into `job_print_specifications`. The `enhancedJobCreator` only does this if `userApprovedMappings` explicitly contains a `paperSpecification` field — which depends on the UI flow. The `DirectJobCreator` tries to match against `print_specifications.name` directly, but raw Excel text like "Distak Semi Gloss, 80gsm, White, 1000x700" never matches.
+
+## Fix (Two Parts)
+
+### Part 1: Auto-resolve paper specs during job creation
+
+Add a shared utility function that runs after a job is created. It reads the job's `paper_specifications` JSONB keys, looks them up in `excel_import_mappings` (where `mapping_type = 'paper_specification'`), and saves the resolved `paper_type_specification_id` / `paper_weight_specification_id` to `job_print_specifications`.
+
+**New file**: `src/services/PaperSpecAutoResolver.ts`
+```text
+- Takes job_id and paper_specifications JSONB
+- For each key in the JSONB object:
+  - Query excel_import_mappings WHERE excel_text = key AND mapping_type = 'paper_specification'
+  - If found and has paper_type_specification_id / paper_weight_specification_id:
+    - Upsert into job_print_specifications with categories 'paper_type' and 'paper_weight'
+- Skip if job_print_specifications already has entries (don't overwrite)
 ```
 
-This will be called via `supabase.rpc()` using a new database function `get_mapping_library_stats()`.
+**Modified**: `src/services/DirectJobCreator.ts` — call auto-resolver after job creation (line ~164)
+**Modified**: `src/utils/excel/enhancedJobCreator.ts` — call auto-resolver as fallback after the userApprovedMappings block (line ~549)
 
-### 2. Server-Side Filtered Query with Pagination
-Replace the single `loadMappings()` call with a parameterized query that applies filters at the database level:
+### Part 2: Fix JSONB fallback parser
 
-- **Search**: Use `.ilike('excel_text', '%term%')` or `.or()` to search across excel_text and joined table names
-- **Type filter**: Use `.eq('mapping_type', type)` when not "all"
-- **Verification filter**: Use `.eq('is_verified', true/false)` when not "all"
-- **Pagination**: Use `.range(offset, offset + pageSize - 1)` with a page size of 50
-- Request `count: 'exact'` to get total filtered count for pagination controls
+In `src/hooks/useScheduleReader.tsx` (lines 376-386), the `knownTypes` matching extracts "Gloss" from "Semi Gloss". Fix by using word-boundary matching to avoid partial matches.
 
-### 3. Pagination UI
-Add simple pagination controls below the table:
-- Page indicator: "Showing 1-50 of 323"
-- Previous / Next buttons
-- Reset to page 1 when filters change
-
-### 4. Files Modified
-
-**New migration**: `get_mapping_library_stats` SQL function  
-**Modified**: `src/components/admin/MappingLibrary.tsx`
-- Remove full client-side data load
-- Add server-side filtering with debounced search
-- Add pagination state and controls
-- Stats loaded from dedicated RPC function
-
-### 5. Technical Detail
-
-The `loadMappings` function will be refactored to accept filter params:
-
-```typescript
-const loadMappings = async (page: number, search: string, typeFilter: string, verifiedFilter: string) => {
-  let query = supabase
-    .from('excel_import_mappings')
-    .select('*, production_stages!...(...), ...', { count: 'exact' });
-  
-  if (typeFilter !== 'all') query = query.eq('mapping_type', typeFilter);
-  if (verifiedFilter === 'verified') query = query.eq('is_verified', true);
-  if (verifiedFilter === 'unverified') query = query.eq('is_verified', false);
-  if (search) query = query.ilike('excel_text', `%${search}%`);
-  
-  const pageSize = 50;
-  query = query.range(page * pageSize, (page + 1) * pageSize - 1)
-    .order('created_at', { ascending: false });
-  
-  const { data, count } = await query;
-  // count gives total matching rows for pagination
-};
+```text
+Current:  firstKey.toLowerCase().includes(kt.toLowerCase())
+Fixed:    new RegExp(`\\b${kt}\\b`, 'i').test(firstKey)
+          — BUT also exclude "Semi Gloss" from matching "Gloss"
+          — Add "Semi Gloss" and "Adhesive" to knownTypes list
+          — Check longer compound types before shorter ones
 ```
 
-Search input will be debounced (300ms) to avoid excessive queries while typing.
+### Files Modified
+- **New**: `src/services/PaperSpecAutoResolver.ts`
+- **Edit**: `src/services/DirectJobCreator.ts` — integrate auto-resolver
+- **Edit**: `src/utils/excel/enhancedJobCreator.ts` — integrate auto-resolver as fallback
+- **Edit**: `src/hooks/useScheduleReader.tsx` — fix JSONB fallback type extraction
 
