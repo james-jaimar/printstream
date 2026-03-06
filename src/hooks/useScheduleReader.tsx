@@ -373,13 +373,17 @@ export function useScheduleReader() {
               const weight = weightMatch ? weightMatch[1] : undefined;
               // Extract type from parentheses like "(Gloss)" or known types
               const parenMatch = firstKey.match(/\((\w+)\)/);
-              const knownTypes = ['Gloss', 'Matt', 'Bond', 'Silk', 'Uncoated', 'FBB', 'Satin'];
+              // Order matters: longer compound types must come before shorter ones
+              // to prevent "Semi Gloss" from matching "Gloss"
+              const knownTypes = ['Semi Gloss', 'Paper Adhesive', 'Adhesive', 'Gloss', 'Matt', 'Bond', 'Silk', 'Uncoated', 'FBB', 'Satin'];
               let type: string | undefined;
               if (parenMatch) {
                 type = parenMatch[1];
               } else {
                 for (const kt of knownTypes) {
-                  if (firstKey.toLowerCase().includes(kt.toLowerCase())) {
+                  // Use word-boundary matching to avoid partial matches
+                  const regex = new RegExp(`\\b${kt.replace(/\s+/g, '\\s+')}\\b`, 'i');
+                  if (regex.test(firstKey)) {
                     type = kt;
                     break;
                   }

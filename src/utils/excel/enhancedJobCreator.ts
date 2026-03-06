@@ -7,6 +7,7 @@ import { generateQRCodeData, generateQRCodeImage } from '@/utils/qrCodeGenerator
 import { CoverTextWorkflowService } from '@/services/coverTextWorkflowService';
 import { TimingCalculationService } from '@/services/timingCalculationService';
 import { initializeJobWorkflow } from '@/utils/jobWorkflowInitializer';
+import { autoResolvePaperSpecifications } from '@/services/PaperSpecAutoResolver';
 // ProductionScheduler removed - now using DynamicDueDateService for workload-aware scheduling
 
 export interface EnhancedJobCreationResult {
@@ -547,6 +548,9 @@ export class EnhancedJobCreator {
         this.logger.addDebugInfo(`❌ Error processing paper specifications: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+
+    // 5b. Auto-resolve paper specs from JSONB as fallback (if userApprovedMappings didn't provide them)
+    await autoResolvePaperSpecifications(insertedJob.id, insertedJob.paper_specifications, this.logger);
 
     // 6. Initialize workflow using the new unified workflow initializer
     try {

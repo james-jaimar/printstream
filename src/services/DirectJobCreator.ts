@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { ParsedJob } from '@/utils/excel/types';
 import type { ExcelImportDebugger } from '@/utils/excel/debugger';
 import { generateQRCodeData, generateQRCodeImage } from '@/utils/qrCodeGenerator';
+import { autoResolvePaperSpecifications } from '@/services/PaperSpecAutoResolver';
 
 export interface DirectJobResult {
   success: boolean;
@@ -162,6 +163,9 @@ export class DirectJobCreator {
 
     // Initialize custom workflow from row mappings
     await this.initializeWorkflowFromMappings(finalJob, rowMappings);
+
+    // Auto-resolve paper specifications from JSONB via excel_import_mappings
+    await autoResolvePaperSpecifications(finalJob.id, finalJob.paper_specifications as Record<string, any> | null, this.logger);
 
     // Generate QR code image if enabled
     if (this.generateQRCodes && finalJob.qr_code_data) {
