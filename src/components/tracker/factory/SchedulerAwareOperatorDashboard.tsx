@@ -103,15 +103,24 @@ export const SchedulerAwareOperatorDashboard: React.FC<SchedulerAwareOperatorDas
         )
       );
       
-      // If operator has die cutting stages, redirect to die cutting
-      if (hasDieCuttingStages && !hasDtpStages && !hasPackagingStages) {
-        console.log('🔄 Redirecting operator to /tracker/die-cutting');
+      // Check if user has stages beyond die cutting, DTP, and packaging
+      const hasOtherStages = accessibleStages.some(stage => {
+        const name = stage.stage_name.toLowerCase();
+        const isDieCutting = DIE_CUTTING_PATTERNS.some(p => name.includes(p));
+        const isDtp = DTP_PATTERNS.some(p => name.includes(p));
+        const isPackaging = PACKAGING_PATTERNS.some(p => name.includes(p));
+        return !isDieCutting && !isDtp && !isPackaging;
+      });
+      
+      // Only redirect to die-cutting machine dashboard if die cutting is the ONLY stage type
+      if (hasDieCuttingStages && !hasOtherStages && !hasDtpStages && !hasPackagingStages) {
+        console.log('🔄 Redirecting operator to /tracker/die-cutting (exclusive die cutting access)');
         navigate('/tracker/die-cutting', { replace: true });
         return;
       }
       
-      // If operator has NO DTP stages and NO Packaging stages, redirect to finishing (multi-column view)
-      if (!hasDtpStages && !hasPackagingStages && !hasDieCuttingStages) {
+      // If operator has no DTP/packaging stages, redirect to finishing (multi-column view)
+      if (!hasDtpStages && !hasPackagingStages) {
         console.log('🔄 Redirecting operator to /tracker/finishing (multi-column view)');
         navigate('/tracker/finishing', { replace: true });
         return;
