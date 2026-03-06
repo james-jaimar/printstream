@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,9 +7,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BatchMappingOperations } from "./mapping/BatchMappingOperations";
-import { Search, Download, Upload, Trash2, Edit, CheckCircle, AlertCircle, Filter } from "lucide-react";
+import { Search, Download, Trash2, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+
+const PAGE_SIZE = 50;
 
 interface Mapping {
   id: string;
@@ -34,66 +36,71 @@ interface Mapping {
   delivery_method_spec?: { name: string; display_name: string; category: string };
 }
 
+interface Stats {
+  total: number;
+  verified: number;
+  unverified: number;
+  production_stages: number;
+  paper_specs: number;
+  delivery_specs: number;
+}
+
 export const MappingLibrary: React.FC = () => {
   const [mappings, setMappings] = useState<Mapping[]>([]);
-  const [filteredMappings, setFilteredMappings] = useState<Mapping[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [mappingTypeFilter, setMappingTypeFilter] = useState("all");
   const [verificationFilter, setVerificationFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
-  const [stats, setStats] = useState({
-    total: 0,
-    verified: 0,
-    unverified: 0,
-    avgConfidence: 0,
-    productionStages: 0,
-    paperSpecs: 0,
-    deliverySpecs: 0
+  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState<Stats>({
+    total: 0, verified: 0, unverified: 0, production_stages: 0, paper_specs: 0, delivery_specs: 0
   });
   const { toast } = useToast();
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
 
+  // Debounce search input
   useEffect(() => {
-    loadMappings();
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(debounceTimer.current);
+  }, [searchTerm]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [mappingTypeFilter, verificationFilter]);
+
+  // Load stats once on mount
+  useEffect(() => {
+    loadStats();
   }, []);
 
+  // Load mappings when filters/page change
   useEffect(() => {
-    let filtered = mappings;
-    
-    // Filter by mapping type
-    if (mappingTypeFilter !== "all") {
-      filtered = filtered.filter(mapping => mapping.mapping_type === mappingTypeFilter);
+    loadMappings();
+  }, [page, debouncedSearch, mappingTypeFilter, verificationFilter]);
+
+  const loadStats = async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_mapping_library_stats');
+      if (error) throw error;
+      if (data) {
+        setStats(data as unknown as Stats);
+      }
+    } catch (error: any) {
+      console.error('Error loading stats:', error);
     }
-    
-    // Filter by verification status
-    if (verificationFilter !== "all") {
-      filtered = filtered.filter(mapping => {
-        if (verificationFilter === "verified") return mapping.is_verified;
-        if (verificationFilter === "unverified") return !mapping.is_verified;
-        return true;
-      });
-    }
-    
-    // Filter by search term
-    if (searchTerm) {
-      filtered = filtered.filter(mapping =>
-        mapping.excel_text.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.production_stages?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.stage_specifications?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.print_specifications?.display_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.paper_type_spec?.display_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.paper_weight_spec?.display_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.delivery_method_spec?.display_name?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    
-    setFilteredMappings(filtered);
-  }, [searchTerm, mappingTypeFilter, verificationFilter, mappings]);
+  };
 
   const loadMappings = async () => {
     try {
       setIsLoading(true);
-      
-      const { data, error } = await supabase
+
+      let query = supabase
         .from('excel_import_mappings')
         .select(`
           *,
@@ -124,34 +131,32 @@ export const MappingLibrary: React.FC = () => {
             display_name,
             category
           )
-        `)
-        .order('created_at', { ascending: false });
+        `, { count: 'exact' });
+
+      // Server-side filters
+      if (mappingTypeFilter !== 'all') {
+        query = query.eq('mapping_type', mappingTypeFilter as 'production_stage' | 'paper_specification' | 'delivery_specification' | 'print_specification');
+      }
+      if (verificationFilter === 'verified') {
+        query = query.eq('is_verified', true);
+      } else if (verificationFilter === 'unverified') {
+        query = query.eq('is_verified', false);
+      }
+      if (debouncedSearch) {
+        query = query.ilike('excel_text', `%${debouncedSearch}%`);
+      }
+
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data, error, count } = await query
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
       if (error) throw error;
 
       setMappings(data || []);
-      
-      // Calculate stats
-      const totalMappings = data?.length || 0;
-      const verifiedMappings = data?.filter(m => m.is_verified).length || 0;
-      const avgConfidence = totalMappings > 0 
-        ? Math.round(data!.reduce((sum, m) => sum + (m.confidence_score || 0), 0) / totalMappings)
-        : 0;
-      
-      const productionStageCount = data?.filter(m => m.mapping_type === 'production_stage').length || 0;
-      const paperSpecCount = data?.filter(m => m.mapping_type === 'paper_specification').length || 0;
-      const deliverySpecCount = data?.filter(m => m.mapping_type === 'delivery_specification').length || 0;
-
-      setStats({
-        total: totalMappings,
-        verified: verifiedMappings,
-        unverified: totalMappings - verifiedMappings,
-        avgConfidence,
-        productionStages: productionStageCount,
-        paperSpecs: paperSpecCount,
-        deliverySpecs: deliverySpecCount
-      });
-
+      setTotalCount(count || 0);
     } catch (error: any) {
       console.error('Error loading mappings:', error);
       toast({
@@ -173,15 +178,15 @@ export const MappingLibrary: React.FC = () => {
 
       if (error) throw error;
 
-      setMappings(prev => prev.map(m => 
+      setMappings(prev => prev.map(m =>
         m.id === mappingId ? { ...m, is_verified: !currentlyVerified } : m
       ));
+      loadStats();
 
       toast({
         title: currentlyVerified ? "Mapping Unverified" : "Mapping Verified",
         description: `Mapping has been ${currentlyVerified ? 'unverified' : 'verified'}`,
       });
-
     } catch (error: any) {
       toast({
         title: "Error Updating Mapping",
@@ -201,12 +206,13 @@ export const MappingLibrary: React.FC = () => {
       if (error) throw error;
 
       setMappings(prev => prev.filter(m => m.id !== mappingId));
-      
+      setTotalCount(prev => prev - 1);
+      loadStats();
+
       toast({
         title: "Mapping Deleted",
         description: "Mapping has been removed from the library",
       });
-
     } catch (error: any) {
       toast({
         title: "Error Deleting Mapping",
@@ -230,8 +236,8 @@ export const MappingLibrary: React.FC = () => {
       is_verified: m.is_verified
     }));
 
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
-      type: 'application/json' 
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: 'application/json'
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -241,17 +247,18 @@ export const MappingLibrary: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const showingFrom = totalCount === 0 ? 0 : page * PAGE_SIZE + 1;
+  const showingTo = Math.min((page + 1) * PAGE_SIZE, totalCount);
+
+  const handleRefresh = () => {
+    loadStats();
+    loadMappings();
+  };
 
   return (
     <div className="space-y-6">
-      {/* Enhanced Stats Cards */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-4">
@@ -267,19 +274,19 @@ export const MappingLibrary: React.FC = () => {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-blue-600">{stats.productionStages}</div>
+            <div className="text-2xl font-bold text-blue-600">{stats.production_stages}</div>
             <div className="text-sm text-muted-foreground">Production Stages</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-purple-600">{stats.paperSpecs}</div>
+            <div className="text-2xl font-bold text-purple-600">{stats.paper_specs}</div>
             <div className="text-sm text-muted-foreground">Paper Specifications</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-orange-600">{stats.deliverySpecs}</div>
+            <div className="text-2xl font-bold text-orange-600">{stats.delivery_specs}</div>
             <div className="text-sm text-muted-foreground">Delivery & Collection</div>
           </CardContent>
         </Card>
@@ -307,7 +314,7 @@ export const MappingLibrary: React.FC = () => {
                     <Download className="h-4 w-4 mr-2" />
                     Export
                   </Button>
-                  <Button onClick={loadMappings} variant="outline" size="sm">
+                  <Button onClick={handleRefresh} variant="outline" size="sm">
                     Refresh
                   </Button>
                 </div>
@@ -320,7 +327,7 @@ export const MappingLibrary: React.FC = () => {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search mappings by Excel text, stage, or specification..."
+                      placeholder="Search mappings by Excel text..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-10"
@@ -349,6 +356,11 @@ export const MappingLibrary: React.FC = () => {
                   </Select>
                 </div>
 
+                {/* Results count */}
+                <div className="text-sm text-muted-foreground">
+                  {isLoading ? 'Loading...' : `Showing ${showingFrom}–${showingTo} of ${totalCount} mappings`}
+                </div>
+
                 {/* Mappings Table */}
                 <div className="rounded-md border">
                   <Table>
@@ -364,16 +376,22 @@ export const MappingLibrary: React.FC = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredMappings.length === 0 ? (
+                      {isLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+                          </TableCell>
+                        </TableRow>
+                      ) : mappings.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                            {searchTerm || mappingTypeFilter !== "all" || verificationFilter !== "all" 
-                              ? "No mappings match your filters" 
+                            {debouncedSearch || mappingTypeFilter !== "all" || verificationFilter !== "all"
+                              ? "No mappings match your filters"
                               : "No mappings found"}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredMappings.map((mapping) => (
+                        mappings.map((mapping) => (
                           <TableRow key={mapping.id}>
                             <TableCell className="font-medium max-w-xs truncate">
                               {mapping.excel_text}
@@ -385,10 +403,10 @@ export const MappingLibrary: React.FC = () => {
                             </TableCell>
                             <TableCell>
                               {mapping.production_stages ? (
-                                <Badge 
-                                  style={{ 
+                                <Badge
+                                  style={{
                                     backgroundColor: mapping.production_stages.color + '20',
-                                    color: mapping.production_stages.color 
+                                    color: mapping.production_stages.color
                                   }}
                                 >
                                   {mapping.production_stages.name}
@@ -431,12 +449,12 @@ export const MappingLibrary: React.FC = () => {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Badge 
+                              <Badge
                                 variant={
-                                  (mapping.confidence_score || 0) >= 80 
-                                    ? "default" 
-                                    : (mapping.confidence_score || 0) >= 60 
-                                    ? "secondary" 
+                                  (mapping.confidence_score || 0) >= 80
+                                    ? "default"
+                                    : (mapping.confidence_score || 0) >= 60
+                                    ? "secondary"
                                     : "destructive"
                                 }
                               >
@@ -480,13 +498,42 @@ export const MappingLibrary: React.FC = () => {
                     </TableBody>
                   </Table>
                 </div>
+
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="text-sm text-muted-foreground">
+                      Page {page + 1} of {totalPages}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage(p => p - 1)}
+                        disabled={page === 0}
+                      >
+                        <ChevronLeft className="h-4 w-4 mr-1" />
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage(p => p + 1)}
+                        disabled={page >= totalPages - 1}
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="operations">
-          <BatchMappingOperations onOperationComplete={loadMappings} />
+          <BatchMappingOperations onOperationComplete={handleRefresh} />
         </TabsContent>
       </Tabs>
     </div>

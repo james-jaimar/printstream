@@ -5338,6 +5338,7 @@ export type Database = {
           specification_id: string
         }[]
       }
+      get_mapping_library_stats: { Args: never; Returns: Json }
       get_next_active_stage: {
         Args: { p_job_id: string; p_job_table_name: string }
         Returns: string
