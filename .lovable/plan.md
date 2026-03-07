@@ -1,50 +1,55 @@
 
 
-# Replace Horizontal Tabs with Collapsible Sidebar in Tracker Admin
+# Fix Paper Specification Pipeline: Mapping Not Reaching Schedule Board
 
-## Problem
-The Setup page has 14 tabs crammed into a horizontal row that overflows and wraps. It's messy and will only get worse as more settings are added.
+## Problem Traced
 
-## Solution
-Replace the horizontal `Tabs` layout with a collapsible left sidebar navigation inside `TrackerAdmin.tsx`. The sidebar uses the existing Shadcn `Sidebar` component (`src/components/ui/sidebar.tsx`) which supports expanding/collapsing with an icon-only mini mode.
+For job D430816, the full data flow is:
 
-## Layout
+1. **Excel text**: `"Distak Semi Gloss, 80gsm, White, 1000x700"`
+2. **Mapping exists** in `excel_import_mappings`: maps to `paper_type = "Paper Adhesive"` + `paper_weight = "080gsm"` (correct)
+3. **JSONB saved** to `production_jobs.paper_specifications`: raw text stored correctly
+4. **`job_print_specifications` table**: **EMPTY** for this job — the mapping was never written
+5. **Schedule board fallback**: parses JSONB with regex, extracts "80gsm" + "Gloss" (partial match from "Semi Gloss") → displays "80gsm Gloss" (wrong)
 
+## Root Cause
+
+Neither job creator automatically looks up `excel_import_mappings` to resolve paper specs into `job_print_specifications`. The `enhancedJobCreator` only does this if `userApprovedMappings` explicitly contains a `paperSpecification` field — which depends on the UI flow. The `DirectJobCreator` tries to match against `print_specifications.name` directly, but raw Excel text like "Distak Semi Gloss, 80gsm, White, 1000x700" never matches.
+
+## Fix (Two Parts)
+
+### Part 1: Auto-resolve paper specs during job creation
+
+Add a shared utility function that runs after a job is created. It reads the job's `paper_specifications` JSONB keys, looks them up in `excel_import_mappings` (where `mapping_type = 'paper_specification'`), and saves the resolved `paper_type_specification_id` / `paper_weight_specification_id` to `job_print_specifications`.
+
+**New file**: `src/services/PaperSpecAutoResolver.ts`
 ```text
-┌──────────────────────────────────────────────────┐
-│  Production Tracker Admin  +  Schedule Health    │
-├────────┬─────────────────────────────────────────┤
-│ ☰      │                                         │
-│ Users  │   [Active panel content]                 │
-│ Excel  │                                         │
-│ Diag   │                                         │
-│ Stages │                                         │
-│ Cats   │                                         │
-│ Specs  │                                         │
-│ Batch  │                                         │
-│ Hols   │                                         │
-│ Perms  │                                         │
-│ Groups │                                         │
-│ Print  │                                         │
-│ Proofs │                                         │
-│ Merge  │                                         │
-│ Paper  │                                         │
-├────────┴─────────────────────────────────────────┤
+- Takes job_id and paper_specifications JSONB
+- For each key in the JSONB object:
+  - Query excel_import_mappings WHERE excel_text = key AND mapping_type = 'paper_specification'
+  - If found and has paper_type_specification_id / paper_weight_specification_id:
+    - Upsert into job_print_specifications with categories 'paper_type' and 'paper_weight'
+- Skip if job_print_specifications already has entries (don't overwrite)
 ```
 
-When collapsed, the sidebar shrinks to icon-only (3rem wide). A toggle button at the top lets you expand/collapse it.
+**Modified**: `src/services/DirectJobCreator.ts` — call auto-resolver after job creation (line ~164)
+**Modified**: `src/utils/excel/enhancedJobCreator.ts` — call auto-resolver as fallback after the userApprovedMappings block (line ~549)
 
-## Implementation
+### Part 2: Fix JSONB fallback parser
 
-**File: `src/pages/tracker/TrackerAdmin.tsx`** (rewrite)
+In `src/hooks/useScheduleReader.tsx` (lines 376-386), the `knownTypes` matching extracts "Gloss" from "Semi Gloss". Fix by using word-boundary matching to avoid partial matches.
 
-1. Wrap the page content in `SidebarProvider` + `Sidebar` (collapsible="icon")
-2. Move the 14 nav items into `SidebarMenu` with `SidebarMenuButton` entries, each with icon + label
-3. Use local state (`activeSection`) to track which section is shown — clicking a sidebar item sets it
-4. Highlight the active item
-5. Render the corresponding content panel to the right of the sidebar
-6. Keep the header (title + ScheduleHealthCard) above the sidebar+content area
-7. Add a `SidebarTrigger` button at the top of the sidebar for collapse/expand
+```text
+Current:  firstKey.toLowerCase().includes(kt.toLowerCase())
+Fixed:    new RegExp(`\\b${kt}\\b`, 'i').test(firstKey)
+          — BUT also exclude "Semi Gloss" from matching "Gloss"
+          — Add "Semi Gloss" and "Adhesive" to knownTypes list
+          — Check longer compound types before shorter ones
+```
 
-No new files needed. No route changes. Just a layout refactor of `TrackerAdmin.tsx` using the existing sidebar component.
+### Files Modified
+- **New**: `src/services/PaperSpecAutoResolver.ts`
+- **Edit**: `src/services/DirectJobCreator.ts` — integrate auto-resolver
+- **Edit**: `src/utils/excel/enhancedJobCreator.ts` — integrate auto-resolver as fallback
+- **Edit**: `src/hooks/useScheduleReader.tsx` — fix JSONB fallback type extraction
 
