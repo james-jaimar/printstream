@@ -113,9 +113,6 @@ export default function TrackerAdmin() {
         <p className="text-muted-foreground">
           Manage production stages, categories, permissions, specifications, and system diagnostics
         </p>
-        <div className="mt-4">
-          <ScheduleHealthCard />
-        </div>
       </div>
 
       <div className="flex flex-1 min-h-0">
