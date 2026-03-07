@@ -5,6 +5,7 @@ import type { ParsedJob } from '@/utils/excel/types';
 import type { ExcelImportDebugger } from '@/utils/excel/debugger';
 import { generateQRCodeData, generateQRCodeImage } from '@/utils/qrCodeGenerator';
 import { autoResolvePaperSpecifications } from '@/services/PaperSpecAutoResolver';
+import { autoResolvePaperSize } from '@/services/PaperSizeDefaultResolver';
 
 export interface DirectJobResult {
   success: boolean;
