@@ -46,6 +46,7 @@ interface NavEntry {
 }
 
 const NAV_ITEMS: NavEntry[] = [
+  { key: "schedule-health", label: "Schedule Health", icon: HeartPulse, group: "Overview" },
   { key: "users", label: "Users", icon: Users, group: "People & Access" },
   { key: "permissions", label: "Permissions", icon: Users, group: "People & Access" },
   { key: "user-groups", label: "User Groups", icon: Building2, group: "People & Access" },
