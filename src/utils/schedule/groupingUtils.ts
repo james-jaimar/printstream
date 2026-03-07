@@ -8,6 +8,18 @@ export interface GroupPreview {
   originalIndex: number;
 }
 
+/** Shared helper: returns a consistent grouping key for paper + size */
+export const getStageGroupKey = (stage: ScheduledStageData): string => {
+  const paperSpec = stage.paper_display || 'Unknown Paper';
+  const paperSize = stage.hp12000_paper_size || 'Unknown Size';
+  return `${paperSpec} - ${paperSize}`;
+};
+
+/** Shared helper: returns a consistent grouping key for paper only */
+export const getStagePaperKey = (stage: ScheduledStageData): string => {
+  return stage.paper_display || 'Unknown Paper';
+};
+
 // Extract lamination specification from finishing_specifications JSONB
 export const extractLaminationSpec = (finishingSpecs: any): string => {
   if (!finishingSpecs || typeof finishingSpecs !== 'object') {
@@ -49,7 +61,7 @@ export const groupStagesByPaper = (stages: ScheduledStageData[]): { grouped: Sch
     // Group by paper type, but keep cover/text stages together
     const jobPaperGroups = new Map<string, ScheduledStageData[]>();
     jobStages.forEach(stage => {
-      const paperSpec = stage.paper_display || 'Unknown Paper';
+      const paperSpec = getStagePaperKey(stage);
       if (!jobPaperGroups.has(paperSpec)) {
         jobPaperGroups.set(paperSpec, []);
       }
@@ -193,12 +205,10 @@ export const groupStagesByPaperAndSize = (stages: ScheduledStageData[]): { group
     // Sort stages within job by stage_order to maintain proper sequence
     jobStages.sort((a, b) => (a.stage_order || 0) - (b.stage_order || 0));
     
-    // Group by paper type + paper size combination
+    // Group by paper type + paper size combination using shared helper
     const jobPaperGroups = new Map<string, ScheduledStageData[]>();
     jobStages.forEach(stage => {
-      const paperSpec = stage.paper_display || 'Unknown Paper';
-      const paperSize = stage.hp12000_paper_size || 'Unknown Size';
-      const combinedSpec = `${paperSpec} - ${paperSize}`;
+      const combinedSpec = getStageGroupKey(stage);
       
       if (!jobPaperGroups.has(combinedSpec)) {
         jobPaperGroups.set(combinedSpec, []);

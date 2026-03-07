@@ -2,7 +2,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Calendar, Zap, Search, ArrowLeftRight } from "lucide-react";
+import { RefreshCw, Calendar, Zap, Search, ArrowLeftRight, Layers } from "lucide-react";
 import type { ScheduleDayData } from "@/hooks/useScheduleReader";
 
 interface ScheduleWorkflowHeaderProps {
@@ -14,6 +14,7 @@ interface ScheduleWorkflowHeaderProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onPrinterReassignment?: () => void;
+  onMultiShiftGrouping?: () => void;
 }
 
 export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
@@ -24,7 +25,8 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
   onReschedule,
   searchQuery,
   onSearchChange,
-  onPrinterReassignment
+  onPrinterReassignment,
+  onMultiShiftGrouping
 }) => {
   const totalStages = scheduleDays.reduce((total, day) => total + day.total_stages, 0);
   const totalMinutes = scheduleDays.reduce((total, day) => total + day.total_minutes, 0);
@@ -108,6 +110,17 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
             >
               <ArrowLeftRight className="h-4 w-4" />
               Move Printers
+            </Button>
+          )}
+          {onMultiShiftGrouping && (
+            <Button
+              onClick={onMultiShiftGrouping}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <Layers className="h-4 w-4" />
+              Multi-Shift Grouping
             </Button>
           )}
         </div>
