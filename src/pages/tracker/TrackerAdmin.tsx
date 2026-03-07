@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge } from "lucide-react";
+import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler } from "lucide-react";
 import { ProductionStagesManagement } from "@/components/tracker/admin/ProductionStagesManagement";
 import { CategoriesManagement } from "@/components/tracker/admin/CategoriesManagement";
 import { UserGroupsManagement } from "@/components/tracker/admin/UserGroupsManagement";
@@ -15,6 +15,7 @@ import { BatchAllocationManagement } from "@/components/admin/BatchAllocationMan
 import { ProofLinkManagement } from "@/components/admin/ProofLinkManagement";
 import ExcelMapping from "@/pages/admin/ExcelMapping";
 import { QueueMergeGroupsManagement } from "@/components/tracker/admin/QueueMergeGroupsManagement";
+import { PaperSizeDefaultsManager } from "@/components/settings/PaperSizeDefaultsManager";
 import { ScheduleHealthCard } from "@/components/tracker/admin/ScheduleHealthCard";
 import { PremiumUserManagement } from "@/components/users/PremiumUserManagement";
 import { UserManagementProvider } from "@/contexts/UserManagementContext";
@@ -87,6 +88,10 @@ export default function TrackerAdmin() {
             <GitMerge className="h-4 w-4" />
             Queue Merging
           </TabsTrigger>
+          <TabsTrigger value="paper-sizes" className="flex items-center gap-2">
+            <Ruler className="h-4 w-4" />
+            Paper Sizes
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -141,6 +146,10 @@ export default function TrackerAdmin() {
 
         <TabsContent value="queue-merging">
           <QueueMergeGroupsManagement />
+        </TabsContent>
+
+        <TabsContent value="paper-sizes">
+          <PaperSizeDefaultsManager />
         </TabsContent>
       </Tabs>
     </div>
