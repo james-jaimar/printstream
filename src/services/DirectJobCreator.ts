@@ -168,6 +168,9 @@ export class DirectJobCreator {
     // Auto-resolve paper specifications from JSONB via excel_import_mappings
     await autoResolvePaperSpecifications(finalJob.id, finalJob.paper_specifications as Record<string, any> | null, this.logger);
 
+    // Auto-resolve HP12000 paper size from paper_size_defaults
+    await autoResolvePaperSize(finalJob.id, this.logger);
+
     // Generate QR code image if enabled
     if (this.generateQRCodes && finalJob.qr_code_data) {
       try {
