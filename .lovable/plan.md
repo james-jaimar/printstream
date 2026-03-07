@@ -1,55 +1,46 @@
 
 
-# Fix Paper Specification Pipeline: Mapping Not Reaching Schedule Board
-
-## Problem Traced
-
-For job D430816, the full data flow is:
-
-1. **Excel text**: `"Distak Semi Gloss, 80gsm, White, 1000x700"`
-2. **Mapping exists** in `excel_import_mappings`: maps to `paper_type = "Paper Adhesive"` + `paper_weight = "080gsm"` (correct)
-3. **JSONB saved** to `production_jobs.paper_specifications`: raw text stored correctly
-4. **`job_print_specifications` table**: **EMPTY** for this job — the mapping was never written
-5. **Schedule board fallback**: parses JSONB with regex, extracts "80gsm" + "Gloss" (partial match from "Semi Gloss") → displays "80gsm Gloss" (wrong)
+# Fix: Admin Sidebar Overlaying the Entire Page
 
 ## Root Cause
 
-Neither job creator automatically looks up `excel_import_mappings` to resolve paper specs into `job_print_specifications`. The `enhancedJobCreator` only does this if `userApprovedMappings` explicitly contains a `paperSpecification` field — which depends on the UI flow. The `DirectJobCreator` tries to match against `print_specifications.name` directly, but raw Excel text like "Distak Semi Gloss, 80gsm, White, 1000x700" never matches.
+The Shadcn `Sidebar` component uses `position: fixed; inset-y: 0; height: 100svh` (lines 225, 235 of sidebar.tsx). It's designed to be a **full-page, app-level** sidebar — not something nestled inside a content area below a header. No amount of className overrides on `SidebarProvider` will fix this because the inner `Sidebar` div is hardcoded as `fixed inset-y-0 h-svh`.
 
-## Fix (Two Parts)
+## Solution
 
-### Part 1: Auto-resolve paper specs during job creation
+**Don't use the Shadcn Sidebar component here.** Instead, build a simple custom collapsible panel using basic flex layout + state. This keeps it contained within the admin content area, respecting the header and parent layout naturally.
 
-Add a shared utility function that runs after a job is created. It reads the job's `paper_specifications` JSONB keys, looks them up in `excel_import_mappings` (where `mapping_type = 'paper_specification'`), and saves the resolved `paper_type_specification_id` / `paper_weight_specification_id` to `job_print_specifications`.
+## Implementation
 
-**New file**: `src/services/PaperSpecAutoResolver.ts`
-```text
-- Takes job_id and paper_specifications JSONB
-- For each key in the JSONB object:
-  - Query excel_import_mappings WHERE excel_text = key AND mapping_type = 'paper_specification'
-  - If found and has paper_type_specification_id / paper_weight_specification_id:
-    - Upsert into job_print_specifications with categories 'paper_type' and 'paper_weight'
-- Skip if job_print_specifications already has entries (don't overwrite)
-```
+**File: `src/pages/tracker/TrackerAdmin.tsx`** — rewrite the sidebar as a simple collapsible div:
 
-**Modified**: `src/services/DirectJobCreator.ts` — call auto-resolver after job creation (line ~164)
-**Modified**: `src/utils/excel/enhancedJobCreator.ts` — call auto-resolver as fallback after the userApprovedMappings block (line ~549)
-
-### Part 2: Fix JSONB fallback parser
-
-In `src/hooks/useScheduleReader.tsx` (lines 376-386), the `knownTypes` matching extracts "Gloss" from "Semi Gloss". Fix by using word-boundary matching to avoid partial matches.
+1. Remove all imports from `@/components/ui/sidebar`
+2. Replace `AdminSidebar` with a plain `div` that:
+   - Has a fixed width (e.g. `w-56`) when expanded, `w-14` when collapsed (icon-only)
+   - Uses `overflow-y-auto` to scroll within its container
+   - Renders grouped nav items with icons + labels (hidden when collapsed)
+   - Highlights the active item
+3. Add a local `collapsed` state + toggle button (using `PanelLeft` icon)
+4. Keep the same `activeSection` state and `SectionContent` switch — no changes there
+5. Layout structure:
 
 ```text
-Current:  firstKey.toLowerCase().includes(kt.toLowerCase())
-Fixed:    new RegExp(`\\b${kt}\\b`, 'i').test(firstKey)
-          — BUT also exclude "Semi Gloss" from matching "Gloss"
-          — Add "Semi Gloss" and "Adhesive" to knownTypes list
-          — Check longer compound types before shorter ones
+<div flex flex-col h-full>
+  <!-- Header area (title + health card) — unchanged -->
+  <div flex flex-1 min-h-0>
+    <!-- Collapsible nav panel (plain div, not fixed) -->
+    <aside w-56/w-14 border-r overflow-y-auto transition-all>
+      [toggle button]
+      [grouped nav items]
+    </aside>
+    <!-- Content area -->
+    <main flex-1 overflow-y-auto p-6>
+      [section heading]
+      [SectionContent]
+    </main>
+  </div>
+</div>
 ```
 
-### Files Modified
-- **New**: `src/services/PaperSpecAutoResolver.ts`
-- **Edit**: `src/services/DirectJobCreator.ts` — integrate auto-resolver
-- **Edit**: `src/utils/excel/enhancedJobCreator.ts` — integrate auto-resolver as fallback
-- **Edit**: `src/hooks/useScheduleReader.tsx` — fix JSONB fallback type extraction
+This is a straightforward flex layout — no fixed positioning, no viewport-height issues, fully contained within the parent.
 
