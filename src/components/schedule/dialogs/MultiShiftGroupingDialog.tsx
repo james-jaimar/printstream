@@ -72,7 +72,7 @@ export function MultiShiftGroupingDialog({
   const [orderedGroups, setOrderedGroups] = useState<PaperGroup[]>([]);
 
   // Build groups when stages change
-  useMemo(() => {
+  useEffect(() => {
     const groupMap = new Map<string, ScheduledStageData[]>();
     hp12000Stages.forEach(stage => {
       const key = getStageGroupKey(stage);
