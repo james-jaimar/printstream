@@ -15,6 +15,7 @@ import { BatchAllocationManagement } from "@/components/admin/BatchAllocationMan
 import { ProofLinkManagement } from "@/components/admin/ProofLinkManagement";
 import ExcelMapping from "@/pages/admin/ExcelMapping";
 import { QueueMergeGroupsManagement } from "@/components/tracker/admin/QueueMergeGroupsManagement";
+import { PaperSizeDefaultsManager } from "@/components/settings/PaperSizeDefaultsManager";
 import { ScheduleHealthCard } from "@/components/tracker/admin/ScheduleHealthCard";
 import { PremiumUserManagement } from "@/components/users/PremiumUserManagement";
 import { UserManagementProvider } from "@/contexts/UserManagementContext";
