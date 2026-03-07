@@ -216,7 +216,8 @@ const Settings = () => {
         </CardContent>
       </Card>
       
-      {/* Additional settings sections can be added here */}
+      {/* Paper Size Defaults for HP12000 */}
+      <PaperSizeDefaultsManager />
     </div>
   );
 };
