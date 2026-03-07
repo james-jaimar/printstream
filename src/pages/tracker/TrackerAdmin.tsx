@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 
 type SectionKey =
+  | "schedule-health"
   | "users"
   | "excel-mapping"
   | "workflow-diagnostics"
