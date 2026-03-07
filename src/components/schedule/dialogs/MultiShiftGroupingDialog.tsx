@@ -10,13 +10,29 @@ import {
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { GripVertical, ArrowUp, ArrowDown, Layers, Clock, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { ScheduleDayData, ScheduledStageData } from "@/hooks/useScheduleReader";
 import { getStageGroupKey, isHP12000Stage } from "@/utils/schedule/groupingUtils";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface MultiShiftGroupingDialogProps {
   open: boolean;
@@ -32,7 +48,104 @@ interface PaperGroup {
   jobs: string[];
 }
 
+interface GroupWithBreaks extends PaperGroup {
+  cumulativeStart: number;
+  cumulativeEnd: number;
+  dayIndex: number;
+  crossesDayBoundary: boolean;
+  dayBreakAfter?: number;
+}
+
 const SHIFT_MINUTES = 480; // 8 hours
+
+// Sortable group row component
+function SortableGroupRow({
+  group,
+  index,
+  totalGroups,
+  onMoveUp,
+  onMoveDown,
+}: {
+  group: GroupWithBreaks;
+  index: number;
+  totalGroups: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: group.key });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 rounded-md border bg-card p-2.5 transition-colors ${
+        isDragging ? 'opacity-50 shadow-lg z-50' : 'hover:bg-accent/50'
+      }`}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+      >
+        <GripVertical className="h-4 w-4" />
+      </div>
+      
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm truncate">{group.key}</span>
+          <Badge variant="secondary" className="text-[10px]">
+            {group.stages.length} {group.stages.length === 1 ? 'job' : 'jobs'}
+          </Badge>
+          <Badge variant="outline" className="text-[10px]">
+            {group.totalMinutes}min
+          </Badge>
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+          {group.jobs.join(', ')}
+        </div>
+      </div>
+
+      {/* Cumulative time indicator */}
+      <div className="text-[10px] text-muted-foreground text-right flex-shrink-0 w-16">
+        {Math.floor(group.cumulativeEnd / 60)}h{group.cumulativeEnd % 60 > 0 ? ` ${group.cumulativeEnd % 60}m` : ''}
+      </div>
+
+      {/* Move buttons */}
+      <div className="flex flex-col gap-0.5 flex-shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onMoveUp}
+          disabled={index === 0}
+        >
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onMoveDown}
+          disabled={index === totalGroups - 1}
+        >
+          <ArrowDown className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function MultiShiftGroupingDialog({
   open,
@@ -92,6 +205,23 @@ export function MultiShiftGroupingDialog({
     setOrderedGroups(groups);
   }, [hp12000Stages]);
 
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setOrderedGroups((items) => {
+        const oldIndex = items.findIndex((item) => item.key === active.id);
+        const newIndex = items.findIndex((item) => item.key === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
   // Calculate cumulative minutes and day breaks
   const groupsWithBreaks = useMemo(() => {
     let cumulative = 0;
@@ -125,7 +255,7 @@ export function MultiShiftGroupingDialog({
     setOrderedGroups(newGroups);
   };
 
-  // Apply the grouping: update scheduled times, then trigger full reschedule
+  // Apply the grouping
   const handleApply = async () => {
     const ok = window.confirm(
       `This will reorder ${hp12000Stages.length} HP12000 stages across ${numDays} days and trigger a full reschedule of all downstream stages. Continue?`
@@ -134,10 +264,8 @@ export function MultiShiftGroupingDialog({
 
     setIsApplying(true);
     try {
-      // Build ordered stage list from groups
       const orderedStages: ScheduledStageData[] = [];
       orderedGroups.forEach(group => {
-        // Sort stages within group by WO number for consistency
         const sorted = [...group.stages].sort((a, b) => {
           const woComp = a.job_wo_no.localeCompare(b.job_wo_no);
           if (woComp !== 0) return woComp;
@@ -146,7 +274,6 @@ export function MultiShiftGroupingDialog({
         orderedStages.push(...sorted);
       });
 
-      // Pack stages into day buckets respecting shift capacity
       const dayDates = selectedDays.map(d => d.date);
       let currentDay = 0;
       let usedMinutes = 0;
@@ -156,7 +283,6 @@ export function MultiShiftGroupingDialog({
       for (const stage of orderedStages) {
         const duration = stage.estimated_duration_minutes;
         
-        // If this stage would overflow and we have more days, move to next day
         if (usedMinutes + duration > SHIFT_MINUTES && currentDay < numDays - 1) {
           currentDay++;
           usedMinutes = 0;
@@ -172,7 +298,6 @@ export function MultiShiftGroupingDialog({
         const startAt = `${date}T${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`;
         const endAt = `${date}T${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
 
-        // Strip -carry suffix if present
         const cleanId = stage.id.replace('-carry', '');
         updates.push({ id: cleanId, start_at: startAt, end_at: endAt });
         usedMinutes += duration;
@@ -180,7 +305,6 @@ export function MultiShiftGroupingDialog({
 
       toast.message(`Updating ${updates.length} HP12000 stages…`);
 
-      // Batch update scheduled times
       for (const update of updates) {
         const { error } = await supabase
           .from('job_stage_instances')
@@ -199,7 +323,6 @@ export function MultiShiftGroupingDialog({
 
       toast.message("HP12000 stages updated. Running full reschedule for downstream stages…");
 
-      // Trigger full reschedule to cascade downstream
       const { error: rescheduleError } = await supabase.functions.invoke('simple-scheduler', {
         body: {
           commit: true,
@@ -218,8 +341,6 @@ export function MultiShiftGroupingDialog({
       }
 
       onOpenChange(false);
-      
-      // Give the scheduler a moment to finish, then refresh
       setTimeout(() => onComplete(), 2000);
     } catch (err: any) {
       console.error("Multi-shift grouping failed:", err);
@@ -280,86 +401,59 @@ export function MultiShiftGroupingDialog({
 
         <Separator />
 
-        {/* Group List */}
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="space-y-1 pr-4 py-2">
+        {/* Group List - native scroll */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="space-y-1 pr-2 py-2">
             {groupsWithBreaks.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
                 No HP12000 stages found in the selected days
               </div>
             ) : (
-              groupsWithBreaks.map((group, index) => (
-                <React.Fragment key={group.key}>
-                  {/* Day break indicator */}
-                  {index > 0 && groupsWithBreaks[index - 1].dayBreakAfter !== undefined && (
-                    <div className="flex items-center gap-2 py-1.5 px-2">
-                      <Separator className="flex-1" />
-                      <Badge variant="outline" className="text-[10px] font-medium whitespace-nowrap">
-                        Day {groupsWithBreaks[index - 1].dayBreakAfter! + 1} — {selectedDays[groupsWithBreaks[index - 1].dayBreakAfter!]?.day_name} {selectedDays[groupsWithBreaks[index - 1].dayBreakAfter!]?.date}
-                      </Badge>
-                      <Separator className="flex-1" />
-                    </div>
-                  )}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={groupsWithBreaks.map(g => g.key)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {groupsWithBreaks.map((group, index) => (
+                    <React.Fragment key={group.key}>
+                      {/* Day break indicator */}
+                      {index > 0 && groupsWithBreaks[index - 1].dayBreakAfter !== undefined && (
+                        <div className="flex items-center gap-2 py-1.5 px-2">
+                          <Separator className="flex-1" />
+                          <Badge variant="outline" className="text-[10px] font-medium whitespace-nowrap">
+                            Day {groupsWithBreaks[index - 1].dayBreakAfter! + 1} — {selectedDays[groupsWithBreaks[index - 1].dayBreakAfter!]?.day_name} {selectedDays[groupsWithBreaks[index - 1].dayBreakAfter!]?.date}
+                          </Badge>
+                          <Separator className="flex-1" />
+                        </div>
+                      )}
 
-                  {/* First day indicator */}
-                  {index === 0 && (
-                    <div className="flex items-center gap-2 py-1 px-2">
-                      <Badge variant="outline" className="text-[10px] font-medium">
-                        Day 1 — {selectedDays[0]?.day_name} {selectedDays[0]?.date}
-                      </Badge>
-                    </div>
-                  )}
+                      {/* First day indicator */}
+                      {index === 0 && (
+                        <div className="flex items-center gap-2 py-1 px-2">
+                          <Badge variant="outline" className="text-[10px] font-medium">
+                            Day 1 — {selectedDays[0]?.day_name} {selectedDays[0]?.date}
+                          </Badge>
+                        </div>
+                      )}
 
-                  <div className="flex items-center gap-2 rounded-md border bg-card p-2.5 hover:bg-accent/50 transition-colors">
-                    <GripVertical className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm truncate">{group.key}</span>
-                        <Badge variant="secondary" className="text-[10px]">
-                          {group.stages.length} {group.stages.length === 1 ? 'job' : 'jobs'}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px]">
-                          {group.totalMinutes}min
-                        </Badge>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {group.jobs.join(', ')}
-                      </div>
-                    </div>
-
-                    {/* Cumulative time indicator */}
-                    <div className="text-[10px] text-muted-foreground text-right flex-shrink-0 w-16">
-                      {Math.floor(group.cumulativeEnd / 60)}h{group.cumulativeEnd % 60 > 0 ? ` ${group.cumulativeEnd % 60}m` : ''}
-                    </div>
-
-                    {/* Move buttons */}
-                    <div className="flex flex-col gap-0.5 flex-shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5"
-                        onClick={() => moveGroup(index, 'up')}
-                        disabled={index === 0}
-                      >
-                        <ArrowUp className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5"
-                        onClick={() => moveGroup(index, 'down')}
-                        disabled={index === orderedGroups.length - 1}
-                      >
-                        <ArrowDown className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </React.Fragment>
-              ))
+                      <SortableGroupRow
+                        group={group}
+                        index={index}
+                        totalGroups={orderedGroups.length}
+                        onMoveUp={() => moveGroup(index, 'up')}
+                        onMoveDown={() => moveGroup(index, 'down')}
+                      />
+                    </React.Fragment>
+                  ))}
+                </SortableContext>
+              </DndContext>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         <Separator />
 
