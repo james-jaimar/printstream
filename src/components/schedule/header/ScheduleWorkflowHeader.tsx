@@ -112,6 +112,17 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
               Move Printers
             </Button>
           )}
+          {onMultiShiftGrouping && (
+            <Button
+              onClick={onMultiShiftGrouping}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <Layers className="h-4 w-4" />
+              Multi-Shift Grouping
+            </Button>
+          )}
         </div>
       </div>
 
