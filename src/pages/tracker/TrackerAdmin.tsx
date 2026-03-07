@@ -88,6 +88,10 @@ export default function TrackerAdmin() {
             <GitMerge className="h-4 w-4" />
             Queue Merging
           </TabsTrigger>
+          <TabsTrigger value="paper-sizes" className="flex items-center gap-2">
+            <Ruler className="h-4 w-4" />
+            Paper Sizes
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
