@@ -1,6 +1,6 @@
 
 import React, { useState } from "react";
-import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler, PanelLeft } from "lucide-react";
+import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler, PanelLeft, HeartPulse } from "lucide-react";
 import { ProductionStagesManagement } from "@/components/tracker/admin/ProductionStagesManagement";
 import { CategoriesManagement } from "@/components/tracker/admin/CategoriesManagement";
 import { UserGroupsManagement } from "@/components/tracker/admin/UserGroupsManagement";
