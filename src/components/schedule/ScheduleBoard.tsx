@@ -52,6 +52,7 @@ export function ScheduleBoard({
   const [expediteOpen, setExpediteOpen] = useState(false);
   const [expediteStage, setExpediteStage] = useState<ScheduledStageData | null>(null);
   const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
+  const [showMultiShiftGrouping, setShowMultiShiftGrouping] = useState(false);
 
   // Filter schedule days to only show the current week (Monday to Friday)
   const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }); // Monday
