@@ -183,6 +183,7 @@ export function ScheduleBoard({
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onPrinterReassignment={isAdminUser ? () => setShowPrinterReassignment(true) : undefined}
+          onMultiShiftGrouping={isAdminUser ? () => setShowMultiShiftGrouping(true) : undefined}
         />
         
         {/* Week Navigation */}
