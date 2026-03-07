@@ -160,7 +160,7 @@ export default function TrackerAdmin() {
         </div>
       </div>
 
-      <SidebarProvider defaultOpen={true}>
+      <SidebarProvider defaultOpen={true} className="min-h-0 flex-1">
         <div className="flex flex-1 min-h-0 w-full">
           <AdminSidebar activeSection={activeSection} onSelect={setActiveSection} />
           <main className="flex-1 overflow-y-auto p-6 pt-2">
