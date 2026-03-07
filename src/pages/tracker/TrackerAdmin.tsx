@@ -1,6 +1,6 @@
 
 import React, { useState } from "react";
-import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler } from "lucide-react";
+import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler, PanelLeft } from "lucide-react";
 import { ProductionStagesManagement } from "@/components/tracker/admin/ProductionStagesManagement";
 import { CategoriesManagement } from "@/components/tracker/admin/CategoriesManagement";
 import { UserGroupsManagement } from "@/components/tracker/admin/UserGroupsManagement";
@@ -17,20 +17,9 @@ import { PaperSizeDefaultsManager } from "@/components/settings/PaperSizeDefault
 import { ScheduleHealthCard } from "@/components/tracker/admin/ScheduleHealthCard";
 import { PremiumUserManagement } from "@/components/users/PremiumUserManagement";
 import { UserManagementProvider } from "@/contexts/UserManagementContext";
-import {
-  SidebarProvider,
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarGroupContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 
 type SectionKey =
   | "users"
@@ -74,42 +63,6 @@ const NAV_ITEMS: NavEntry[] = [
 
 const GROUPS = ["People & Access", "Production Config", "Hardware & Links", "Data & Tools"];
 
-function AdminSidebar({ activeSection, onSelect }: { activeSection: SectionKey; onSelect: (key: SectionKey) => void }) {
-  const { state } = useSidebar();
-  const collapsed = state === "collapsed";
-
-  return (
-    <Sidebar collapsible="icon" className="border-r">
-      <SidebarContent>
-        {GROUPS.map((group) => {
-          const items = NAV_ITEMS.filter((i) => i.group === group);
-          return (
-            <SidebarGroup key={group}>
-              <SidebarGroupLabel>{group}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {items.map((item) => (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        onClick={() => onSelect(item.key)}
-                        isActive={activeSection === item.key}
-                        tooltip={item.label}
-                      >
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.label}</span>}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          );
-        })}
-      </SidebarContent>
-    </Sidebar>
-  );
-}
-
 function SectionContent({ activeSection }: { activeSection: SectionKey }) {
   switch (activeSection) {
     case "users":
@@ -147,6 +100,7 @@ function SectionContent({ activeSection }: { activeSection: SectionKey }) {
 
 export default function TrackerAdmin() {
   const [activeSection, setActiveSection] = useState<SectionKey>("users");
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
     <div className="flex flex-col h-full">
@@ -160,20 +114,79 @@ export default function TrackerAdmin() {
         </div>
       </div>
 
-      <SidebarProvider defaultOpen={true} className="min-h-0 flex-1">
-        <div className="flex flex-1 min-h-0 w-full">
-          <AdminSidebar activeSection={activeSection} onSelect={setActiveSection} />
-          <main className="flex-1 overflow-y-auto p-6 pt-2">
-            <div className="flex items-center gap-2 mb-4">
-              <SidebarTrigger />
-              <h2 className="text-xl font-semibold">
-                {NAV_ITEMS.find((i) => i.key === activeSection)?.label}
-              </h2>
+      <div className="flex flex-1 min-h-0">
+        <TooltipProvider delayDuration={0}>
+          <aside
+            className={cn(
+              "border-r border-border bg-muted/30 overflow-y-auto transition-all duration-200 shrink-0",
+              collapsed ? "w-14" : "w-56"
+            )}
+          >
+            <div className="p-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCollapsed(!collapsed)}
+                className="w-full flex justify-center"
+              >
+                <PanelLeft className={cn("h-4 w-4 transition-transform", collapsed && "rotate-180")} />
+              </Button>
             </div>
-            <SectionContent activeSection={activeSection} />
-          </main>
-        </div>
-      </SidebarProvider>
+
+            {GROUPS.map((group) => {
+              const items = NAV_ITEMS.filter((i) => i.group === group);
+              return (
+                <div key={group} className="mb-2">
+                  {!collapsed && (
+                    <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      {group}
+                    </div>
+                  )}
+                  {collapsed && <div className="mx-2 my-1 border-t border-border" />}
+                  <div className="px-2 space-y-0.5">
+                    {items.map((item) => {
+                      const isActive = activeSection === item.key;
+                      const button = (
+                        <button
+                          key={item.key}
+                          onClick={() => setActiveSection(item.key)}
+                          className={cn(
+                            "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+                            isActive
+                              ? "bg-primary text-primary-foreground"
+                              : "text-foreground hover:bg-accent hover:text-accent-foreground",
+                            collapsed && "justify-center px-0"
+                          )}
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          {!collapsed && <span>{item.label}</span>}
+                        </button>
+                      );
+
+                      if (collapsed) {
+                        return (
+                          <Tooltip key={item.key}>
+                            <TooltipTrigger asChild>{button}</TooltipTrigger>
+                            <TooltipContent side="right">{item.label}</TooltipContent>
+                          </Tooltip>
+                        );
+                      }
+                      return button;
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </aside>
+        </TooltipProvider>
+
+        <main className="flex-1 overflow-y-auto p-6 pt-2">
+          <h2 className="text-xl font-semibold mb-4">
+            {NAV_ITEMS.find((i) => i.key === activeSection)?.label}
+          </h2>
+          <SectionContent activeSection={activeSection} />
+        </main>
+      </div>
     </div>
   );
 }
