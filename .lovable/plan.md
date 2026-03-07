@@ -1,55 +1,64 @@
 
 
-# Fix Paper Specification Pipeline: Mapping Not Reaching Schedule Board
+# Multi-Shift Production Grouping Tool — Updated Plan
 
-## Problem Traced
+## Your concern (valid)
+When HP12000 printing stages move to different days, all downstream stages (lamination, cutting, binding, etc.) must shift accordingly. **This is already handled** by the existing `scheduler_reschedule_all_parallel_aware` SQL function — it schedules ALL stages across ALL resources respecting predecessor dependencies.
 
-For job D430816, the full data flow is:
+## How it works
 
-1. **Excel text**: `"Distak Semi Gloss, 80gsm, White, 1000x700"`
-2. **Mapping exists** in `excel_import_mappings`: maps to `paper_type = "Paper Adhesive"` + `paper_weight = "080gsm"` (correct)
-3. **JSONB saved** to `production_jobs.paper_specifications`: raw text stored correctly
-4. **`job_print_specifications` table**: **EMPTY** for this job — the mapping was never written
-5. **Schedule board fallback**: parses JSONB with regex, extracts "80gsm" + "Gloss" (partial match from "Semi Gloss") → displays "80gsm Gloss" (wrong)
+The tool does NOT need to manually cascade downstream stages. The flow is:
 
-## Root Cause
+1. Admin selects HP12000 + 3 days → sees all printing stages grouped by paper/size
+2. Admin reorders groups (drag-drop) → confirms
+3. System writes new `scheduled_start_at` / `scheduled_end_at` for HP12000 stages only, packed sequentially across the selected days (respecting 480 min/day capacity)
+4. System triggers a **full reschedule** via `simple_scheduler_wrapper('reschedule_all')` — this automatically cascades all downstream stages (lamination, cutting, binding) to respect the new HP12000 ordering
+5. Refresh the board
 
-Neither job creator automatically looks up `excel_import_mappings` to resolve paper specs into `job_print_specifications`. The `enhancedJobCreator` only does this if `userApprovedMappings` explicitly contains a `paperSpecification` field — which depends on the UI flow. The `DirectJobCreator` tries to match against `print_specifications.name` directly, but raw Excel text like "Distak Semi Gloss, 80gsm, White, 1000x700" never matches.
+The full reschedule already handles:
+- Predecessor constraints (binding waits for both cover + text printing)
+- Resource capacity (laminator won't be overloaded)
+- Weekend skipping
+- Gap filling
 
-## Fix (Two Parts)
+## Implementation
 
-### Part 1: Auto-resolve paper specs during job creation
+### Files (same as previous plan, with cascade clarification)
 
-Add a shared utility function that runs after a job is created. It reads the job's `paper_specifications` JSONB keys, looks them up in `excel_import_mappings` (where `mapping_type = 'paper_specification'`), and saves the resolved `paper_type_specification_id` / `paper_weight_specification_id` to `job_print_specifications`.
+**New**: `src/components/schedule/dialogs/MultiShiftGroupingDialog.tsx`
+- Fetches HP12000 stages across N consecutive days from `scheduleDays`
+- Groups by paper + size using existing `groupStagesByPaperAndSize()`
+- Drag-reorderable group cards with cumulative minute indicators and day-break markers
+- On confirm:
+  1. Packs stages sequentially into day buckets (480 min each)
+  2. Updates each stage's `scheduled_start_at` / `scheduled_end_at` via direct Supabase update
+  3. Calls `simple_scheduler_wrapper('reschedule_all')` to cascade all downstream stages
+  4. Refreshes schedule board
 
-**New file**: `src/services/PaperSpecAutoResolver.ts`
+**Modified**: `src/components/schedule/ScheduleBoard.tsx`
+- Add "Multi-Shift Grouping" button (admin-only) in header
+- Pass required props to dialog
+
+**Modified**: `src/utils/schedule/groupingUtils.ts`
+- Extract shared `getStageGroupKey()` helper for consistent grouping
+
+### Cascade approach
+
 ```text
-- Takes job_id and paper_specifications JSONB
-- For each key in the JSONB object:
-  - Query excel_import_mappings WHERE excel_text = key AND mapping_type = 'paper_specification'
-  - If found and has paper_type_specification_id / paper_weight_specification_id:
-    - Upsert into job_print_specifications with categories 'paper_type' and 'paper_weight'
-- Skip if job_print_specifications already has entries (don't overwrite)
+Admin reorders HP12000 groups across 3 days
+         ↓
+Write new times for HP12000 stages only
+         ↓
+Call simple_scheduler_wrapper('reschedule_all')
+         ↓
+SQL scheduler automatically repositions:
+  - Lamination stages (after their printing predecessor)
+  - Cutting stages (after lamination)
+  - Binding stages (after all parts complete)
+  - etc.
+         ↓
+Board refresh shows complete updated schedule
 ```
 
-**Modified**: `src/services/DirectJobCreator.ts` — call auto-resolver after job creation (line ~164)
-**Modified**: `src/utils/excel/enhancedJobCreator.ts` — call auto-resolver as fallback after the userApprovedMappings block (line ~549)
-
-### Part 2: Fix JSONB fallback parser
-
-In `src/hooks/useScheduleReader.tsx` (lines 376-386), the `knownTypes` matching extracts "Gloss" from "Semi Gloss". Fix by using word-boundary matching to avoid partial matches.
-
-```text
-Current:  firstKey.toLowerCase().includes(kt.toLowerCase())
-Fixed:    new RegExp(`\\b${kt}\\b`, 'i').test(firstKey)
-          — BUT also exclude "Semi Gloss" from matching "Gloss"
-          — Add "Semi Gloss" and "Adhesive" to knownTypes list
-          — Check longer compound types before shorter ones
-```
-
-### Files Modified
-- **New**: `src/services/PaperSpecAutoResolver.ts`
-- **Edit**: `src/services/DirectJobCreator.ts` — integrate auto-resolver
-- **Edit**: `src/utils/excel/enhancedJobCreator.ts` — integrate auto-resolver as fallback
-- **Edit**: `src/hooks/useScheduleReader.tsx` — fix JSONB fallback type extraction
+This is fully doable — no nightmare. The heavy lifting (cascading) is already built into your scheduler.
 
