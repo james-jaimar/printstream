@@ -1,6 +1,6 @@
 
 import React, { useState } from "react";
-import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler, PanelLeft } from "lucide-react";
+import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler, PanelLeft, HeartPulse } from "lucide-react";
 import { ProductionStagesManagement } from "@/components/tracker/admin/ProductionStagesManagement";
 import { CategoriesManagement } from "@/components/tracker/admin/CategoriesManagement";
 import { UserGroupsManagement } from "@/components/tracker/admin/UserGroupsManagement";
@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 
 type SectionKey =
+  | "schedule-health"
   | "users"
   | "excel-mapping"
   | "workflow-diagnostics"
@@ -45,6 +46,7 @@ interface NavEntry {
 }
 
 const NAV_ITEMS: NavEntry[] = [
+  { key: "schedule-health", label: "Schedule Health", icon: HeartPulse, group: "Overview" },
   { key: "users", label: "Users", icon: Users, group: "People & Access" },
   { key: "permissions", label: "Permissions", icon: Users, group: "People & Access" },
   { key: "user-groups", label: "User Groups", icon: Building2, group: "People & Access" },
@@ -61,10 +63,12 @@ const NAV_ITEMS: NavEntry[] = [
   { key: "workflow-diagnostics", label: "Diagnostics", icon: Wrench, group: "Data & Tools" },
 ];
 
-const GROUPS = ["People & Access", "Production Config", "Hardware & Links", "Data & Tools"];
+const GROUPS = ["Overview", "People & Access", "Production Config", "Hardware & Links", "Data & Tools"];
 
 function SectionContent({ activeSection }: { activeSection: SectionKey }) {
   switch (activeSection) {
+    case "schedule-health":
+      return <ScheduleHealthCard />;
     case "users":
       return <UserManagementProvider><PremiumUserManagement /></UserManagementProvider>;
     case "excel-mapping":
@@ -99,7 +103,7 @@ function SectionContent({ activeSection }: { activeSection: SectionKey }) {
 }
 
 export default function TrackerAdmin() {
-  const [activeSection, setActiveSection] = useState<SectionKey>("users");
+  const [activeSection, setActiveSection] = useState<SectionKey>("schedule-health");
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -109,9 +113,6 @@ export default function TrackerAdmin() {
         <p className="text-muted-foreground">
           Manage production stages, categories, permissions, specifications, and system diagnostics
         </p>
-        <div className="mt-4">
-          <ScheduleHealthCard />
-        </div>
       </div>
 
       <div className="flex flex-1 min-h-0">
