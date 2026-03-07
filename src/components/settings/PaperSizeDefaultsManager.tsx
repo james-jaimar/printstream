@@ -67,7 +67,7 @@ export function PaperSizeDefaultsManager() {
 
     const insertData: any = {
       paper_weight_id: newWeightId,
-      paper_type_id: newTypeId || null,
+      paper_type_id: newTypeId && newTypeId !== '__none__' ? newTypeId : null,
       default_paper_size_id: newSizeId,
     };
 
