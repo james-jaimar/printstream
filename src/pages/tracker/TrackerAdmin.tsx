@@ -1,7 +1,5 @@
 
 import React, { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Settings, Users, Building2, Printer, BarChart3, Wrench, Calendar, Package, Layers, FileSpreadsheet, Mail, GitMerge, Ruler } from "lucide-react";
 import { ProductionStagesManagement } from "@/components/tracker/admin/ProductionStagesManagement";
 import { CategoriesManagement } from "@/components/tracker/admin/CategoriesManagement";
@@ -19,139 +17,163 @@ import { PaperSizeDefaultsManager } from "@/components/settings/PaperSizeDefault
 import { ScheduleHealthCard } from "@/components/tracker/admin/ScheduleHealthCard";
 import { PremiumUserManagement } from "@/components/users/PremiumUserManagement";
 import { UserManagementProvider } from "@/contexts/UserManagementContext";
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
-export default function TrackerAdmin() {
-  const [activeTab, setActiveTab] = useState("users");
+type SectionKey =
+  | "users"
+  | "excel-mapping"
+  | "workflow-diagnostics"
+  | "stages"
+  | "categories"
+  | "specifications"
+  | "batch-allocation"
+  | "holidays"
+  | "permissions"
+  | "user-groups"
+  | "printers"
+  | "proof-links"
+  | "queue-merging"
+  | "paper-sizes";
+
+interface NavEntry {
+  key: SectionKey;
+  label: string;
+  icon: React.ElementType;
+  group: string;
+}
+
+const NAV_ITEMS: NavEntry[] = [
+  { key: "users", label: "Users", icon: Users, group: "People & Access" },
+  { key: "permissions", label: "Permissions", icon: Users, group: "People & Access" },
+  { key: "user-groups", label: "User Groups", icon: Building2, group: "People & Access" },
+  { key: "stages", label: "Stages", icon: Settings, group: "Production Config" },
+  { key: "categories", label: "Categories", icon: BarChart3, group: "Production Config" },
+  { key: "specifications", label: "Specifications", icon: Layers, group: "Production Config" },
+  { key: "batch-allocation", label: "Batching", icon: Package, group: "Production Config" },
+  { key: "queue-merging", label: "Queue Merging", icon: GitMerge, group: "Production Config" },
+  { key: "paper-sizes", label: "Paper Sizes", icon: Ruler, group: "Production Config" },
+  { key: "printers", label: "Printers", icon: Printer, group: "Hardware & Links" },
+  { key: "proof-links", label: "Proof Links", icon: Mail, group: "Hardware & Links" },
+  { key: "excel-mapping", label: "Excel Mapping", icon: FileSpreadsheet, group: "Data & Tools" },
+  { key: "holidays", label: "Holidays", icon: Calendar, group: "Data & Tools" },
+  { key: "workflow-diagnostics", label: "Diagnostics", icon: Wrench, group: "Data & Tools" },
+];
+
+const GROUPS = ["People & Access", "Production Config", "Hardware & Links", "Data & Tools"];
+
+function AdminSidebar({ activeSection, onSelect }: { activeSection: SectionKey; onSelect: (key: SectionKey) => void }) {
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
+    <Sidebar collapsible="icon" className="border-r">
+      <SidebarContent>
+        {GROUPS.map((group) => {
+          const items = NAV_ITEMS.filter((i) => i.group === group);
+          return (
+            <SidebarGroup key={group}>
+              <SidebarGroupLabel>{group}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {items.map((item) => (
+                    <SidebarMenuItem key={item.key}>
+                      <SidebarMenuButton
+                        onClick={() => onSelect(item.key)}
+                        isActive={activeSection === item.key}
+                        tooltip={item.label}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.label}</span>}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          );
+        })}
+      </SidebarContent>
+    </Sidebar>
+  );
+}
+
+function SectionContent({ activeSection }: { activeSection: SectionKey }) {
+  switch (activeSection) {
+    case "users":
+      return <UserManagementProvider><PremiumUserManagement /></UserManagementProvider>;
+    case "excel-mapping":
+      return <ExcelMapping />;
+    case "workflow-diagnostics":
+      return <WorkflowDiagnosticsPanel />;
+    case "stages":
+      return <ProductionStagesManagement />;
+    case "categories":
+      return <CategoriesManagement />;
+    case "specifications":
+      return <PrintSpecificationsManagement />;
+    case "batch-allocation":
+      return <BatchAllocationManagement />;
+    case "holidays":
+      return <PublicHolidaysManagement />;
+    case "permissions":
+      return <AdminStagePermissionsManager />;
+    case "user-groups":
+      return <UserGroupsManagement />;
+    case "printers":
+      return <PrintersManagement />;
+    case "proof-links":
+      return <ProofLinkManagement />;
+    case "queue-merging":
+      return <QueueMergeGroupsManagement />;
+    case "paper-sizes":
+      return <PaperSizeDefaultsManager />;
+    default:
+      return null;
+  }
+}
+
+export default function TrackerAdmin() {
+  const [activeSection, setActiveSection] = useState<SectionKey>("users");
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-6 pb-4">
         <h1 className="text-3xl font-bold">Production Tracker Admin</h1>
         <p className="text-muted-foreground">
           Manage production stages, categories, permissions, specifications, and system diagnostics
         </p>
+        <div className="mt-4">
+          <ScheduleHealthCard />
+        </div>
       </div>
 
-      <ScheduleHealthCard />
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="users" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Users
-          </TabsTrigger>
-          <TabsTrigger value="excel-mapping" className="flex items-center gap-2">
-            <FileSpreadsheet className="h-4 w-4" />
-            Excel Mapping
-          </TabsTrigger>
-          <TabsTrigger value="workflow-diagnostics" className="flex items-center gap-2">
-            <Wrench className="h-4 w-4" />
-            Diagnostics
-          </TabsTrigger>
-          <TabsTrigger value="stages" className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            Stages
-          </TabsTrigger>
-          <TabsTrigger value="categories" className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Categories
-          </TabsTrigger>
-          <TabsTrigger value="specifications" className="flex items-center gap-2">
-            <Layers className="h-4 w-4" />
-            Specifications
-          </TabsTrigger>
-          <TabsTrigger value="batch-allocation" className="flex items-center gap-2">
-            <Package className="h-4 w-4" />
-            Batching
-          </TabsTrigger>
-          <TabsTrigger value="holidays" className="flex items-center gap-2">
-            <Calendar className="h-4 w-4" />
-            Holidays
-          </TabsTrigger>
-          <TabsTrigger value="permissions" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Permissions
-          </TabsTrigger>
-          <TabsTrigger value="user-groups" className="flex items-center gap-2">
-            <Building2 className="h-4 w-4" />
-            User Groups
-          </TabsTrigger>
-          <TabsTrigger value="printers" className="flex items-center gap-2">
-            <Printer className="h-4 w-4" />
-            Printers
-          </TabsTrigger>
-          <TabsTrigger value="proof-links" className="flex items-center gap-2">
-            <Mail className="h-4 w-4" />
-            Proof Links
-          </TabsTrigger>
-          <TabsTrigger value="queue-merging" className="flex items-center gap-2">
-            <GitMerge className="h-4 w-4" />
-            Queue Merging
-          </TabsTrigger>
-          <TabsTrigger value="paper-sizes" className="flex items-center gap-2">
-            <Ruler className="h-4 w-4" />
-            Paper Sizes
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="users">
-          <UserManagementProvider>
-            <PremiumUserManagement />
-          </UserManagementProvider>
-        </TabsContent>
-
-        <TabsContent value="excel-mapping">
-          <ExcelMapping />
-        </TabsContent>
-
-        <TabsContent value="workflow-diagnostics">
-          <WorkflowDiagnosticsPanel />
-        </TabsContent>
-
-        <TabsContent value="stages">
-          <ProductionStagesManagement />
-        </TabsContent>
-
-        <TabsContent value="categories">
-          <CategoriesManagement />
-        </TabsContent>
-
-        <TabsContent value="specifications">
-          <PrintSpecificationsManagement />
-        </TabsContent>
-
-        <TabsContent value="batch-allocation">
-          <BatchAllocationManagement />
-        </TabsContent>
-
-        <TabsContent value="holidays">
-          <PublicHolidaysManagement />
-        </TabsContent>
-
-        <TabsContent value="permissions">
-          <AdminStagePermissionsManager />
-        </TabsContent>
-
-        <TabsContent value="user-groups">
-          <UserGroupsManagement />
-        </TabsContent>
-
-        <TabsContent value="printers">
-          <PrintersManagement />
-        </TabsContent>
-
-        <TabsContent value="proof-links">
-          <ProofLinkManagement />
-        </TabsContent>
-
-        <TabsContent value="queue-merging">
-          <QueueMergeGroupsManagement />
-        </TabsContent>
-
-        <TabsContent value="paper-sizes">
-          <PaperSizeDefaultsManager />
-        </TabsContent>
-      </Tabs>
+      <SidebarProvider defaultOpen={true}>
+        <div className="flex flex-1 min-h-0 w-full">
+          <AdminSidebar activeSection={activeSection} onSelect={setActiveSection} />
+          <main className="flex-1 overflow-y-auto p-6 pt-2">
+            <div className="flex items-center gap-2 mb-4">
+              <SidebarTrigger />
+              <h2 className="text-xl font-semibold">
+                {NAV_ITEMS.find((i) => i.key === activeSection)?.label}
+              </h2>
+            </div>
+            <SectionContent activeSection={activeSection} />
+          </main>
+        </div>
+      </SidebarProvider>
     </div>
   );
 }
