@@ -67,6 +67,8 @@ const GROUPS = ["Overview", "People & Access", "Production Config", "Hardware & 
 
 function SectionContent({ activeSection }: { activeSection: SectionKey }) {
   switch (activeSection) {
+    case "schedule-health":
+      return <ScheduleHealthCard />;
     case "users":
       return <UserManagementProvider><PremiumUserManagement /></UserManagementProvider>;
     case "excel-mapping":
