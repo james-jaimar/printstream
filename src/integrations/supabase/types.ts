@@ -2378,6 +2378,55 @@ export type Database = {
         }
         Relationships: []
       }
+      paper_size_defaults: {
+        Row: {
+          created_at: string
+          default_paper_size_id: string
+          id: string
+          paper_type_id: string | null
+          paper_weight_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          default_paper_size_id: string
+          id?: string
+          paper_type_id?: string | null
+          paper_weight_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          default_paper_size_id?: string
+          id?: string
+          paper_type_id?: string | null
+          paper_weight_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_size_defaults_default_paper_size_id_fkey"
+            columns: ["default_paper_size_id"]
+            isOneToOne: false
+            referencedRelation: "hp12000_paper_sizes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_size_defaults_paper_type_id_fkey"
+            columns: ["paper_type_id"]
+            isOneToOne: false
+            referencedRelation: "print_specifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_size_defaults_paper_weight_id_fkey"
+            columns: ["paper_weight_id"]
+            isOneToOne: false
+            referencedRelation: "print_specifications"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       postcard_jobs: {
         Row: {
           batch_allocated_at: string | null
