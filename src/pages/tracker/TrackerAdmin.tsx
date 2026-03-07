@@ -103,7 +103,7 @@ function SectionContent({ activeSection }: { activeSection: SectionKey }) {
 }
 
 export default function TrackerAdmin() {
-  const [activeSection, setActiveSection] = useState<SectionKey>("users");
+  const [activeSection, setActiveSection] = useState<SectionKey>("schedule-health");
   const [collapsed, setCollapsed] = useState(false);
 
   return (
