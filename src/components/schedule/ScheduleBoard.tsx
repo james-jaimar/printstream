@@ -12,6 +12,7 @@ import { JobDiagnosticsModal } from "./JobDiagnosticsModal";
 import { MasterOrderModal } from "@/components/tracker/modals/MasterOrderModal";
 import { ExpediteJobDialog } from "@/components/tracker/common/ExpediteJobDialog";
 import { PrinterReassignmentModal } from "@/components/tracker/jobs/PrinterReassignmentModal";
+import { MultiShiftGroupingDialog } from "./dialogs/MultiShiftGroupingDialog";
 import type { ScheduleDayData, ScheduledStageData } from "@/hooks/useScheduleReader";
 import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobDiagnostics } from "@/hooks/useJobDiagnostics";
