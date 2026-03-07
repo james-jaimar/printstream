@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Settings as SettingsIcon, Save, Database } from "lucide-react";
+import { PaperSizeDefaultsManager } from "@/components/settings/PaperSizeDefaultsManager";
 import { productConfigs } from "@/config/productTypes";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -215,7 +216,8 @@ const Settings = () => {
         </CardContent>
       </Card>
       
-      {/* Additional settings sections can be added here */}
+      {/* Paper Size Defaults for HP12000 */}
+      <PaperSizeDefaultsManager />
     </div>
   );
 };

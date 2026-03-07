@@ -1,65 +1,55 @@
 
 
-# Default Paper Size Mapping for HP12000
+# Fix Paper Specification Pipeline: Mapping Not Reaching Schedule Board
 
-## Problem
-Jobs come in with paper specs like "170gsm Gloss" but no sheet size, showing as "Unknown Size" on the schedule board. This creates messy grouping (e.g., "170gsm Gloss - Large", "170gsm Gloss - Small", "170gsm Gloss - Unknown Size" all separate). Admin needs a way to set system-level defaults: "170gsm Gloss → Small" so jobs auto-assign the correct HP12000 paper size.
+## Problem Traced
 
-## Solution
+For job D430816, the full data flow is:
 
-### 1. New Database Table: `paper_size_defaults`
+1. **Excel text**: `"Distak Semi Gloss, 80gsm, White, 1000x700"`
+2. **Mapping exists** in `excel_import_mappings`: maps to `paper_type = "Paper Adhesive"` + `paper_weight = "080gsm"` (correct)
+3. **JSONB saved** to `production_jobs.paper_specifications`: raw text stored correctly
+4. **`job_print_specifications` table**: **EMPTY** for this job — the mapping was never written
+5. **Schedule board fallback**: parses JSONB with regex, extracts "80gsm" + "Gloss" (partial match from "Semi Gloss") → displays "80gsm Gloss" (wrong)
 
-Maps a combination of `paper_weight` (from `print_specifications`) and optionally `paper_type` to a default `hp12000_paper_size_id`.
+## Root Cause
 
+Neither job creator automatically looks up `excel_import_mappings` to resolve paper specs into `job_print_specifications`. The `enhancedJobCreator` only does this if `userApprovedMappings` explicitly contains a `paperSpecification` field — which depends on the UI flow. The `DirectJobCreator` tries to match against `print_specifications.name` directly, but raw Excel text like "Distak Semi Gloss, 80gsm, White, 1000x700" never matches.
+
+## Fix (Two Parts)
+
+### Part 1: Auto-resolve paper specs during job creation
+
+Add a shared utility function that runs after a job is created. It reads the job's `paper_specifications` JSONB keys, looks them up in `excel_import_mappings` (where `mapping_type = 'paper_specification'`), and saves the resolved `paper_type_specification_id` / `paper_weight_specification_id` to `job_print_specifications`.
+
+**New file**: `src/services/PaperSpecAutoResolver.ts`
 ```text
-paper_size_defaults
-├── id (uuid PK)
-├── paper_weight_id (FK → print_specifications.id)  -- e.g., "170gsm"
-├── paper_type_id (FK → print_specifications.id, nullable)  -- e.g., "Gloss" (null = any type at this weight)
-├── default_paper_size_id (FK → hp12000_paper_sizes.id)  -- e.g., Small
-├── created_at, updated_at
-└── UNIQUE(paper_weight_id, paper_type_id)
+- Takes job_id and paper_specifications JSONB
+- For each key in the JSONB object:
+  - Query excel_import_mappings WHERE excel_text = key AND mapping_type = 'paper_specification'
+  - If found and has paper_type_specification_id / paper_weight_specification_id:
+    - Upsert into job_print_specifications with categories 'paper_type' and 'paper_weight'
+- Skip if job_print_specifications already has entries (don't overwrite)
 ```
 
-When resolving: first try exact match (weight + type), then fallback to weight-only match (where `paper_type_id IS NULL`).
+**Modified**: `src/services/DirectJobCreator.ts` — call auto-resolver after job creation (line ~164)
+**Modified**: `src/utils/excel/enhancedJobCreator.ts` — call auto-resolver as fallback after the userApprovedMappings block (line ~549)
 
-### 2. Admin UI — Settings Page Addition
+### Part 2: Fix JSONB fallback parser
 
-Add a "Paper Size Defaults" card to `src/pages/Settings.tsx`:
-- Table showing current mappings: Weight | Type | Default Size | Actions
-- Add/edit rows via inline selects (paper weight dropdown, paper type dropdown, paper size dropdown)
-- Delete button per row
-
-### 3. Auto-Apply During Job Creation
-
-**New file: `src/services/PaperSizeDefaultResolver.ts`**
-- Called after `PaperSpecAutoResolver` completes (or during stage creation in `DirectJobCreator`)
-- For each HP12000 stage instance where `hp12000_paper_size_id IS NULL`:
-  1. Look up the job's resolved `paper_type` and `paper_weight` from `job_print_specifications`
-  2. Query `paper_size_defaults` for a match (exact first, then weight-only)
-  3. If found, update `job_stage_instances.hp12000_paper_size_id`
-
-**Modified: `src/services/DirectJobCreator.ts`**
-- After stage creation loop, call `PaperSizeDefaultResolver` to auto-fill paper sizes
-
-### 4. Files
-
-| Action | File |
-|--------|------|
-| **Migration** | New table `paper_size_defaults` with RLS |
-| **New** | `src/services/PaperSizeDefaultResolver.ts` |
-| **Modified** | `src/pages/Settings.tsx` — add Paper Size Defaults admin card |
-| **Modified** | `src/services/DirectJobCreator.ts` — call resolver after stage creation |
-
-### Flow
+In `src/hooks/useScheduleReader.tsx` (lines 376-386), the `knownTypes` matching extracts "Gloss" from "Semi Gloss". Fix by using word-boundary matching to avoid partial matches.
 
 ```text
-Excel import → Job created → PaperSpecAutoResolver sets paper_type/weight
-    → PaperSizeDefaultResolver checks paper_size_defaults table
-    → Finds "170gsm + Gloss → Small"
-    → Sets hp12000_paper_size_id on the stage instance
-    → Schedule board shows "170gsm Gloss - Small" ✓
+Current:  firstKey.toLowerCase().includes(kt.toLowerCase())
+Fixed:    new RegExp(`\\b${kt}\\b`, 'i').test(firstKey)
+          — BUT also exclude "Semi Gloss" from matching "Gloss"
+          — Add "Semi Gloss" and "Adhesive" to knownTypes list
+          — Check longer compound types before shorter ones
 ```
 
-Admin changes "170gsm Gloss" from Small to Large → only affects new jobs going forward. Existing jobs keep their assigned size.
+### Files Modified
+- **New**: `src/services/PaperSpecAutoResolver.ts`
+- **Edit**: `src/services/DirectJobCreator.ts` — integrate auto-resolver
+- **Edit**: `src/utils/excel/enhancedJobCreator.ts` — integrate auto-resolver as fallback
+- **Edit**: `src/hooks/useScheduleReader.tsx` — fix JSONB fallback type extraction
 
