@@ -147,6 +147,10 @@ export default function TrackerAdmin() {
         <TabsContent value="queue-merging">
           <QueueMergeGroupsManagement />
         </TabsContent>
+
+        <TabsContent value="paper-sizes">
+          <PaperSizeDefaultsManager />
+        </TabsContent>
       </Tabs>
     </div>
   );
