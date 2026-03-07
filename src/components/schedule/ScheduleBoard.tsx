@@ -281,6 +281,14 @@ export function ScheduleBoard({
         onClose={() => setShowPrinterReassignment(false)}
         onComplete={onRefresh}
       />
+
+      {/* Multi-Shift Production Grouping Dialog */}
+      <MultiShiftGroupingDialog
+        open={showMultiShiftGrouping}
+        onOpenChange={setShowMultiShiftGrouping}
+        scheduleDays={weekScheduleDays}
+        onComplete={onRefresh}
+      />
     </div>
   );
 }
