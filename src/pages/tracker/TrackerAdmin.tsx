@@ -63,7 +63,7 @@ const NAV_ITEMS: NavEntry[] = [
   { key: "workflow-diagnostics", label: "Diagnostics", icon: Wrench, group: "Data & Tools" },
 ];
 
-const GROUPS = ["People & Access", "Production Config", "Hardware & Links", "Data & Tools"];
+const GROUPS = ["Overview", "People & Access", "Production Config", "Hardware & Links", "Data & Tools"];
 
 function SectionContent({ activeSection }: { activeSection: SectionKey }) {
   switch (activeSection) {
