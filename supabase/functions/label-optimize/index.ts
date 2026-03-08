@@ -204,57 +204,75 @@ function correctAILayout(
     }
   }
 
-  // Create corrective runs for orphaned quantities
+  // Create corrective runs for orphaned quantities — SPREAD items across slots
   if (orphaned.size > 0) {
     const orphanedEntries = Array.from(orphaned.entries()).filter(([_, qty]) => qty > 0);
     
-    for (const [itemId, qty] of orphanedEntries) {
-      // Create a single-item run where all slots have the same qty
-      const qtyPerSlot = qty; // Single slot gets all the qty
-      const fillerItemId = itemId; // Use same item for blank slots
-
+    // Spread ALL orphaned items across a single corrective run if possible
+    const numOrphans = orphanedEntries.length;
+    
+    if (numOrphans > 0) {
+      const baseSlotsPerItem = Math.floor(totalSlots / numOrphans);
+      const extraSlots = totalSlots % numOrphans;
+      
       const slots: AISlotAssignment[] = [];
-      for (let s = 0; s < totalSlots; s++) {
-        if (s === 0) {
-          slots.push({ item_id: itemId, quantity_in_slot: qtyPerSlot });
-        } else {
-          slots.push({ item_id: fillerItemId, quantity_in_slot: 0 });
+      let slotIdx = 0;
+      
+      for (let i = 0; i < numOrphans; i++) {
+        const [itemId, qty] = orphanedEntries[i];
+        const slotsForItem = baseSlotsPerItem + (i < extraSlots ? 1 : 0);
+        const qtyPerSlot = Math.ceil(qty / slotsForItem);
+        let remaining = qty;
+        
+        for (let s = 0; s < slotsForItem; s++) {
+          const thisSlotQty = Math.min(qtyPerSlot, remaining);
+          slots.push({ item_id: itemId, quantity_in_slot: thisSlotQty });
+          remaining -= thisSlotQty;
+          slotIdx++;
         }
       }
-
-      // Check if this single-slot run itself violates overrun — it shouldn't since all equal
-      // But verify: frames for this run, actual output
-      const frames = Math.ceil(qtyPerSlot / labelsPerSlotPerFrame);
+      
+      // Fill any leftover slots as blank (should be 0-1)
+      while (slotIdx < totalSlots) {
+        slots.push({ item_id: orphanedEntries[0][0], quantity_in_slot: 0 });
+        slotIdx++;
+      }
+      
+      // Validate overrun on this corrective run
+      const maxSlotQty = Math.max(...slots.map(s => s.quantity_in_slot));
+      const frames = Math.ceil(maxSlotQty / labelsPerSlotPerFrame);
       const actualPerSlot = frames * labelsPerSlotPerFrame;
-      const singleOverrun = actualPerSlot - qtyPerSlot;
-
-      if (singleOverrun > maxOverrun) {
-        // Need to split further — divide qty across multiple slots in same run
-        const slotsNeeded = Math.min(totalSlots, Math.ceil(qty / (labelsPerSlotPerFrame * Math.ceil(1)))); // min 1 slot
-        const splitQty = Math.ceil(qty / slotsNeeded);
-        let remaining = qty;
-        const splitSlots: AISlotAssignment[] = [];
-        for (let s = 0; s < totalSlots; s++) {
-          if (remaining > 0 && s < slotsNeeded) {
-            const thisSlot = Math.min(splitQty, remaining);
-            splitSlots.push({ item_id: itemId, quantity_in_slot: thisSlot });
-            remaining -= thisSlot;
-          } else {
-            splitSlots.push({ item_id: itemId, quantity_in_slot: 0 });
-          }
-        }
-        layout.runs.push({
-          slot_assignments: splitSlots,
-          reasoning: `Corrective run for ${qty} labels of item ${itemId} (split across ${slotsNeeded} slots to respect overrun limit)`,
-        });
-      } else {
+      
+      // Check if all items in this run are within overrun
+      const allOk = slots.every(s => s.quantity_in_slot === 0 || (actualPerSlot - s.quantity_in_slot) <= maxOverrun);
+      
+      if (allOk) {
+        // Single corrective run with items spread across slots
         layout.runs.push({
           slot_assignments: slots,
-          reasoning: `Corrective run for ${qty} orphaned labels of item ${itemId} (moved from overrun-violating run)`,
+          reasoning: `Corrective run: ${numOrphans} item(s) spread across ${totalSlots} slots to minimize blanks`,
         });
+        notes.push(`Created 1 corrective run with ${numOrphans} orphaned items spread across ${totalSlots - Math.max(0, totalSlots - slotIdx)} slots`);
+      } else {
+        // Items have too-different quantities for one run — create separate runs per item, but SPREAD each
+        for (const [itemId, qty] of orphanedEntries) {
+          const itemSlots: AISlotAssignment[] = [];
+          const qtyPerSlot = Math.ceil(qty / totalSlots);
+          let remaining = qty;
+          
+          for (let s = 0; s < totalSlots; s++) {
+            const thisSlotQty = Math.min(qtyPerSlot, remaining);
+            itemSlots.push({ item_id: itemId, quantity_in_slot: thisSlotQty > 0 ? thisSlotQty : 0 });
+            remaining -= Math.max(0, thisSlotQty);
+          }
+          
+          layout.runs.push({
+            slot_assignments: itemSlots,
+            reasoning: `Corrective run for ${qty} labels of item ${itemId} (spread across ${totalSlots} slots)`,
+          });
+          notes.push(`Created corrective run for item ${itemId} with ${qty} labels spread across slots`);
+        }
       }
-
-      notes.push(`Created corrective run for item ${itemId} with ${qty} labels`);
     }
   }
 
