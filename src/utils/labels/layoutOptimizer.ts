@@ -288,18 +288,18 @@ function balanceSlotQuantities(
 
 function createGangedRuns(items: LabelItem[], config: SlotConfig, maxOverrun: number = DEFAULT_MAX_OVERRUN): ProposedRun[] {
   if (items.length <= config.totalSlots) {
-    // All items fit in one run
+    // All items fit in one run — use blank-aware filling
     const itemSlots = items.map(item => ({
       item_id: item.id,
       quantity: item.quantity,
       needs_rotation: item.needs_rotation || false,
     }));
     
-    const assignments = fillAllSlots(itemSlots, config.totalSlots);
+    const assignments = fillSlotsWithBlankOption(itemSlots, config.totalSlots, config, maxOverrun);
     
     // Validate actual output doesn't exceed maxOverrun for any slot
     if (!validateRunOverrun(assignments, config, maxOverrun)) {
-      // Round-robin created too much imbalance — fall back to balanced splitting
+      // Still too much imbalance — fall back to balanced splitting
       return balanceSlotQuantities(assignments, config, 1, maxOverrun);
     }
     
