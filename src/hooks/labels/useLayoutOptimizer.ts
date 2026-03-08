@@ -112,6 +112,7 @@ function buildAILayoutOption(
       print_efficiency_score: printEfficiency,
       labor_efficiency_score: laborEfficiency,
       reasoning: `🤖 AI-Computed: ${aiReasoning}`,
+      trade_offs: aiTradeOffs,
     };
 
     return {
