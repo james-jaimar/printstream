@@ -152,7 +152,10 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
         body: { 
           items: itemsToUse, 
           dieline: dielineToUse, 
-          constraints: { max_overrun: currentMaxOverrun } 
+          constraints: { max_overrun: currentMaxOverrun },
+          qty_per_roll: qtyPerRoll ?? undefined,
+          label_width_mm: dielineToUse.label_width_mm,
+          label_height_mm: dielineToUse.label_height_mm,
         }
       });
 
