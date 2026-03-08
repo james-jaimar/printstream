@@ -963,7 +963,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
         config,
         theoreticalMinMeters,
         'Equal-quantity strategy — all slots in each run print the same quantity, eliminating intra-run waste',
-        qtyPerRoll
+        qtyPerRoll,
+        dieline,
+        maxOverrun
       ));
     }
   }
