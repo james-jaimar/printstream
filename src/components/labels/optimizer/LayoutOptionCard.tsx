@@ -1,8 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Check, Zap, Package, Clock, Scissors } from 'lucide-react';
+import { Check, Zap, Package, Scissors, AlertTriangle, Info, LayoutGrid } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { LayoutOption } from '@/types/labels';
 
@@ -46,6 +46,8 @@ export function LayoutOptionCard({
       default: return 'Layout Option';
     }
   };
+
+  const tradeOffs = option.trade_offs;
 
   return (
     <Card 
@@ -120,6 +122,59 @@ export function LayoutOptionCard({
             <span>{Math.round(option.labor_efficiency_score * 100)}%</span>
           </div>
         </div>
+
+        {/* Trade-off Badges */}
+        {tradeOffs && (
+          <TooltipProvider>
+            <div className="flex flex-wrap gap-1.5">
+              {tradeOffs.blank_slots_available > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                      <LayoutGrid className="h-3 w-3 mr-1" />
+                      {tradeOffs.blank_slots_available} blank slot{tradeOffs.blank_slots_available > 1 ? 's' : ''}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs text-xs">
+                      {tradeOffs.blank_slot_note || 'Blank slots can be used for internal labels or another job'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {tradeOffs.overrun_warnings && tradeOffs.overrun_warnings.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      {tradeOffs.overrun_warnings.length} overrun warning{tradeOffs.overrun_warnings.length > 1 ? 's' : ''}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <div className="max-w-xs text-xs space-y-1">
+                      {tradeOffs.overrun_warnings.map((w, i) => (
+                        <p key={i}>{w}</p>
+                      ))}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {tradeOffs.roll_size_note && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                      <Info className="h-3 w-3 mr-1" />
+                      Roll size tip
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs text-xs">{tradeOffs.roll_size_note}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </TooltipProvider>
+        )}
 
         {/* Reasoning */}
         <p className="text-xs text-muted-foreground italic">

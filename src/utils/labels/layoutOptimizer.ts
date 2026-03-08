@@ -19,6 +19,7 @@ import type {
   LabelDieline, 
   LabelInkConfig,
   LayoutOption, 
+  LayoutTradeOffs,
   ProposedRun, 
   SlotAssignment,
   OptimizationWeights 
@@ -164,6 +165,53 @@ function fillAllSlots(
   return assignments;
 }
 
+/**
+ * Fill slots with blank option: assigns items to slots, but leaves remaining
+ * slots blank (qty=0) when filling them via round-robin would breach maxOverrun.
+ */
+function fillSlotsWithBlankOption(
+  itemSlots: { item_id: string; quantity: number; needs_rotation?: boolean }[],
+  totalSlots: number,
+  config: SlotConfig,
+  maxOverrun: number
+): SlotAssignment[] {
+  if (itemSlots.length === 0) return [];
+
+  // If items >= totalSlots, no blanks needed — use normal fillAllSlots
+  if (itemSlots.length >= totalSlots) {
+    return fillAllSlots(itemSlots, totalSlots);
+  }
+
+  // Try normal fillAllSlots first
+  const normalAssignments = fillAllSlots(itemSlots, totalSlots);
+  if (validateRunOverrun(normalAssignments, config, maxOverrun)) {
+    return normalAssignments; // round-robin is fine
+  }
+
+  // Round-robin would breach overrun — assign items to their own slots, blank the rest
+  const assignments: SlotAssignment[] = [];
+  for (let s = 0; s < totalSlots; s++) {
+    if (s < itemSlots.length) {
+      assignments.push({
+        slot: s,
+        item_id: itemSlots[s].item_id,
+        quantity_in_slot: itemSlots[s].quantity,
+        needs_rotation: itemSlots[s].needs_rotation || false,
+      });
+    } else {
+      // Blank slot — use first item's artwork but qty 0
+      assignments.push({
+        slot: s,
+        item_id: itemSlots[0].item_id,
+        quantity_in_slot: 0,
+        needs_rotation: itemSlots[0].needs_rotation || false,
+      });
+    }
+  }
+
+  return assignments;
+}
+
 // ─── SLOT BALANCING ─────────────────────────────────────────────────
 
 /**
@@ -240,18 +288,18 @@ function balanceSlotQuantities(
 
 function createGangedRuns(items: LabelItem[], config: SlotConfig, maxOverrun: number = DEFAULT_MAX_OVERRUN): ProposedRun[] {
   if (items.length <= config.totalSlots) {
-    // All items fit in one run
+    // All items fit in one run — use blank-aware filling
     const itemSlots = items.map(item => ({
       item_id: item.id,
       quantity: item.quantity,
       needs_rotation: item.needs_rotation || false,
     }));
     
-    const assignments = fillAllSlots(itemSlots, config.totalSlots);
+    const assignments = fillSlotsWithBlankOption(itemSlots, config.totalSlots, config, maxOverrun);
     
     // Validate actual output doesn't exceed maxOverrun for any slot
     if (!validateRunOverrun(assignments, config, maxOverrun)) {
-      // Round-robin created too much imbalance — fall back to balanced splitting
+      // Still too much imbalance — fall back to balanced splitting
       return balanceSlotQuantities(assignments, config, 1, maxOverrun);
     }
     
@@ -396,7 +444,7 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
         needs_rotation: sorted[idx].needs_rotation || false,
       }));
       
-      const assignments = fillAllSlots(itemSlots, config.totalSlots);
+      const assignments = fillSlotsWithBlankOption(itemSlots, config.totalSlots, config, maxOverrun);
       
       // Check slot-to-slot balance
       const slotQtys = assignments.map(a => a.quantity_in_slot);
@@ -567,13 +615,80 @@ function createEqualQuantityRuns(
 
 // ─── SCORING & OPTION CREATION ──────────────────────────────────────
 
+/**
+ * Suggest a sensible qty_per_roll based on label dimensions
+ */
+function suggestQtyPerRoll(dieline: LabelDieline): { suggested: number; note: string } {
+  const labelArea = dieline.label_width_mm * dieline.label_height_mm;
+  if (labelArea < 2500) { // < ~50x50mm
+    return { suggested: 1000, note: 'Small labels (<50mm) — suggested 1,000 per roll' };
+  } else if (labelArea < 10000) { // < ~100x100mm
+    return { suggested: 500, note: 'Medium labels (50–100mm) — suggested 500 per roll' };
+  } else {
+    return { suggested: 250, note: 'Large labels (>100mm) — suggested 250 per roll' };
+  }
+}
+
+/**
+ * Build trade-off annotations from runs
+ */
+function buildTradeOffs(
+  runs: ProposedRun[],
+  config: SlotConfig,
+  dieline: LabelDieline,
+  qtyPerRoll?: number,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
+): LayoutTradeOffs {
+  // Count blank slots
+  let blankSlots = 0;
+  for (const run of runs) {
+    for (const slot of run.slot_assignments) {
+      if (slot.quantity_in_slot === 0) blankSlots++;
+    }
+  }
+
+  // Overrun warnings
+  const overrunWarnings: string[] = [];
+  for (const run of runs) {
+    const actualPerSlot = run.frames * config.labelsPerSlotPerFrame;
+    for (const slot of run.slot_assignments) {
+      if (slot.quantity_in_slot > 0) {
+        const overrun = actualPerSlot - slot.quantity_in_slot;
+        if (overrun > maxOverrun) {
+          overrunWarnings.push(
+            `Run ${run.run_number}, Slot ${slot.slot + 1}: +${overrun} overrun (max ${maxOverrun})`
+          );
+        }
+      }
+    }
+  }
+
+  // Roll size note
+  let rollSizeNote: string | undefined;
+  if (!qtyPerRoll) {
+    const suggestion = suggestQtyPerRoll(dieline);
+    rollSizeNote = suggestion.note;
+  }
+
+  return {
+    blank_slots_available: blankSlots,
+    blank_slot_note: blankSlots > 0
+      ? `${blankSlots} blank slot(s) available — use for internal labels or another job`
+      : undefined,
+    roll_size_note: rollSizeNote,
+    overrun_warnings: overrunWarnings.length > 0 ? overrunWarnings : undefined,
+  };
+}
+
 function createLayoutOption(
   id: string,
   runs: ProposedRun[],
   config: SlotConfig,
   theoreticalMinMeters: number,
   reasoning: string,
-  qtyPerRoll?: number
+  qtyPerRoll?: number,
+  dieline?: LabelDieline,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
 ): Omit<LayoutOption, 'overall_score'> {
   const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
   const totalFrames = runs.reduce((sum, r) => sum + r.frames, 0);
@@ -591,11 +706,15 @@ function createLayoutOption(
   if (qtyPerRoll && qtyPerRoll > 0) {
     const rewindingRuns = runs.filter(r => r.needs_rewinding);
     if (rewindingRuns.length > 0) {
-      // Penalize proportionally to how many runs need manual rewinding
       const rewindPenalty = (rewindingRuns.length / runs.length) * 0.4;
       laborEfficiency = Math.max(0, laborEfficiency - rewindPenalty);
     }
   }
+
+  // Build trade-offs if dieline provided
+  const trade_offs = dieline
+    ? buildTradeOffs(runs, config, dieline, qtyPerRoll, maxOverrun)
+    : undefined;
   
   return {
     id,
@@ -607,6 +726,7 @@ function createLayoutOption(
     print_efficiency_score: printEfficiency,
     labor_efficiency_score: laborEfficiency,
     reasoning,
+    trade_offs,
   };
 }
 
@@ -774,7 +894,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
       gangedRuns.length === 1
         ? 'All items ganged in a single balanced run — all slots filled'
         : `All items ganged, split into ${gangedRuns.length} balanced runs to minimize waste`,
-      qtyPerRoll
+      qtyPerRoll,
+      dieline,
+      maxOverrun
     ));
   }
   
@@ -789,7 +911,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
     config,
     theoreticalMinMeters,
     'Each item on its own run — all slots filled, maximum flexibility for quantity control',
-    qtyPerRoll
+    qtyPerRoll,
+    dieline,
+    maxOverrun
   ));
   
   // Option 3: Optimized — balanced ganging with quantity splitting across runs
@@ -803,7 +927,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
         config,
         theoreticalMinMeters,
         'Balanced approach — items ganged where possible, quantities split across runs to minimize waste',
-        qtyPerRoll
+        qtyPerRoll,
+        dieline,
+        maxOverrun
       ));
     }
     
@@ -818,7 +944,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
           config,
           theoreticalMinMeters,
           rollOptResult.reasoning,
-          qtyPerRoll
+          qtyPerRoll,
+          dieline,
+          maxOverrun
         ));
       }
     }
@@ -835,7 +963,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
         config,
         theoreticalMinMeters,
         'Equal-quantity strategy — all slots in each run print the same quantity, eliminating intra-run waste',
-        qtyPerRoll
+        qtyPerRoll,
+        dieline,
+        maxOverrun
       ));
     }
   }

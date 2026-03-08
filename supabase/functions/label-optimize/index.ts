@@ -33,11 +33,21 @@ interface OptimizeRequest {
     rush_job?: boolean;
     max_overrun?: number;
   };
+  qty_per_roll?: number;
+  label_width_mm?: number;
+  label_height_mm?: number;
 }
 
 interface AISlotAssignment {
   item_id: string;
   quantity_in_slot: number;
+}
+
+interface AITradeOffs {
+  blank_slots_available?: number;
+  blank_slot_note?: string;
+  roll_size_note?: string;
+  overrun_warnings?: string[];
 }
 
 interface AIRun {
@@ -49,11 +59,9 @@ interface AILayout {
   runs: AIRun[];
   overall_reasoning: string;
   estimated_waste_percent: number;
+  trade_offs?: AITradeOffs;
 }
 
-/**
- * Calculate labelsPerSlotPerFrame server-side for accurate prompting
- */
 function calcLabelsPerSlotPerFrame(dieline: Dieline): number {
   const MAX_FRAME_LENGTH_MM = 960;
   const bleedVertical = (dieline.bleed_top_mm || 0) + (dieline.bleed_bottom_mm || 0);
@@ -64,12 +72,6 @@ function calcLabelsPerSlotPerFrame(dieline: Dieline): number {
   return dieline.rows_around * templatesPerFrame;
 }
 
-/**
- * Validate AI output:
- * - Every run has exactly totalSlots assignments
- * - All item quantities accounted for (no dropped items, no over-allocation)
- * - Per-slot overrun within maxOverrun
- */
 function validateAILayout(
   layout: AILayout,
   items: LabelItem[],
@@ -79,7 +81,6 @@ function validateAILayout(
 ): { valid: boolean; warnings: string[] } {
   const warnings: string[] = [];
 
-  // Check slot counts
   for (let i = 0; i < layout.runs.length; i++) {
     const run = layout.runs[i];
     if (run.slot_assignments.length !== totalSlots) {
@@ -87,7 +88,6 @@ function validateAILayout(
     }
   }
 
-  // Check all items are accounted for
   const itemTotals = new Map<string, number>();
   for (const run of layout.runs) {
     for (const slot of run.slot_assignments) {
@@ -100,8 +100,6 @@ function validateAILayout(
     if (assigned === 0) {
       warnings.push(`Item "${item.name}" (${item.id}) not assigned to any run`);
     }
-    // Items can be split across runs — total assigned should be >= ordered qty
-    // Allow under-assignment up to maxOverrun (rounding), flag over-assignment beyond maxOverrun
     if (assigned > 0 && assigned < item.quantity) {
       const shortfall = item.quantity - assigned;
       if (shortfall > maxOverrun) {
@@ -113,7 +111,6 @@ function validateAILayout(
     }
   }
 
-  // Check overrun per slot per run
   for (let i = 0; i < layout.runs.length; i++) {
     const run = layout.runs[i];
     const maxSlotQty = Math.max(...run.slot_assignments.map(s => s.quantity_in_slot));
@@ -121,9 +118,11 @@ function validateAILayout(
     const actualPerSlot = frames * labelsPerSlotPerFrame;
 
     for (const slot of run.slot_assignments) {
-      const overrun = actualPerSlot - slot.quantity_in_slot;
-      if (overrun > maxOverrun) {
-        warnings.push(`Run ${i + 1}: slot for item ${slot.item_id} overrun ${overrun} > max ${maxOverrun}`);
+      if (slot.quantity_in_slot > 0) {
+        const overrun = actualPerSlot - slot.quantity_in_slot;
+        if (overrun > maxOverrun) {
+          warnings.push(`Run ${i + 1}: slot for item ${slot.item_id} overrun ${overrun} > max ${maxOverrun}`);
+        }
       }
     }
   }
@@ -137,7 +136,7 @@ serve(async (req) => {
   }
 
   try {
-    const { items, dieline, constraints }: OptimizeRequest = await req.json();
+    const { items, dieline, constraints, qty_per_roll, label_width_mm, label_height_mm }: OptimizeRequest = await req.json();
 
     if (!items || items.length === 0) {
       return new Response(
@@ -161,6 +160,18 @@ serve(async (req) => {
     const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0);
     const maxOverrun = constraints?.max_overrun ?? 250;
 
+    // Derive roll size context
+    const lw = label_width_mm || dieline.label_width_mm;
+    const lh = label_height_mm || dieline.label_height_mm;
+    const labelArea = lw * lh;
+    let rollSizeContext = '';
+    if (qty_per_roll) {
+      rollSizeContext = `\nROLL SIZE: Customer requires ${qty_per_roll} labels per output roll. Factor this into your layout.`;
+    } else {
+      const suggestedQpr = labelArea < 2500 ? 1000 : labelArea < 10000 ? 500 : 250;
+      rollSizeContext = `\nROLL SIZE: No qty_per_roll specified. Based on label dimensions (${lw}×${lh}mm), a sensible default would be ~${suggestedQpr}/roll. Include a roll_size_note in your trade_offs suggesting this.`;
+    }
+
     const systemPrompt = `You are an expert print production optimizer for HP Indigo digital label printing on rolls.
 
 STRATEGY — EQUAL-QUANTITY RUNS (CRITICAL):
@@ -176,68 +187,50 @@ HOW TO ACHIEVE THIS:
 6. A slot may have quantity_in_slot = 0 (blank) if fewer items than slots remain at that level. Use the same item_id as another slot in the run.
 7. The sum of all quantity_in_slot values for each item across ALL runs must be >= the ordered quantity.
 
-WHY THIS WORKS:
-- When all slots in a run have the same quantity, frames = ceil(quantity / ${labelsPerSlotPerFrame}).
-- Actual output per slot = frames × ${labelsPerSlotPerFrame}, which is very close to quantity — near-zero waste.
-- The only "overrun" is inter-item: some items get a small quantity bump, which is far cheaper than intra-run overrun from mismatched slots.
+BLANK SLOT STRATEGY (IMPORTANT):
+- If placing an item in a slot via round-robin would cause overrun > ${maxOverrun} labels, LEAVE THE SLOT BLANK (quantity_in_slot = 0) instead.
+- Blank slots are VALUABLE — the operator can fill them with internal labels, test prints, or another customer's short job.
+- When you create blank slots, note how many in the trade_offs.blank_slots_available field and add a helpful note in trade_offs.blank_slot_note.
+- It is ALWAYS better to have blank slots than to violate the overrun constraint.
 
-WORKED EXAMPLE (${totalSlots} slots):
-Items: A=700, B=2000, C=150, D=300, E=300, F=6300, G=5300, H=800, I=1000, J=1000, K=1400, L=700, M=700, N=700, O=800
-Step 1 — Identify clusters:
-  ~700: A(700), L(700), M(700), N(700) → Run at 700
-  ~1000: I(1000), J(1000), plus portions of B, K → Run at 1000
-  ~150: C(150), D(300→150+150), E(300→150+150) → Run at 150 (with blank or bump)
-  ~2650: portions of F(6300) and G(5300) → Run at 2650
-  ~800: H(800), O(800), plus remainders → Run at 800
-Step 2 — Build runs (all ${totalSlots} slots equal):
-  Run 1: ${totalSlots} slots × 700 each
-  Run 2: ${totalSlots} slots × 1000 each
-  Run 3: ${totalSlots} slots × 150 each
-  Run 4: ${totalSlots} slots × 2650 each
-  Run 5: ${totalSlots} slots × 800 each
-Result: 5 runs, zero intra-run waste, small bumps on a few items.
-
-CRITICAL PRODUCTION RULES:
-1. EVERY slot (column) in a frame MUST be filled. No empty slots allowed.
-   - If there are ${totalSlots} slots and only 3 items, duplicate items across remaining slots using round-robin.
-   - A single-item run fills ALL ${totalSlots} slots with the same artwork.
-2. The run length (number of frames) is determined by the slot with the HIGHEST quantity_in_slot.
-   All slots print for the same length. The actual output per slot = frames × ${labelsPerSlotPerFrame}.
-3. Quantities CAN and SHOULD be split across multiple runs when it reduces waste.
-4. Gang items with SIMILAR quantities together to minimize waste.
-5. When items are duplicated across slots via round-robin, divide their quantity by the number of slots they occupy.
-
-QUANTITY SPLITTING (IMPORTANT):
-- You MAY split a single item's total quantity across multiple runs.
-- Example: A client orders 3000 of item "A". You can assign 2500 to Run 1 and 500 to Run 2 if that creates better groupings and less waste.
-- The total quantity_in_slot for each item across ALL runs must equal or slightly exceed the ordered quantity (within overrun tolerance).
-- Splitting is especially useful when an item's quantity is much larger than others — split it to match quantities in different runs.
-- The finishing department will combine rolls from different runs, so splitting is operationally fine.
-
-EMPTY SLOTS:
-- You MAY leave a slot effectively empty by assigning quantity_in_slot = 0 if it genuinely reduces waste.
-- Use the same item_id as another slot in that run (the artwork must be present, it just prints 0 needed labels).
-- This is useful when you have fewer items than slots and rounding would create excessive overrun.
-
-OVERRUN CONSTRAINT (CRITICAL):
+OVERRUN CONSTRAINT (CRITICAL — HARD LIMIT):
 - Maximum acceptable overrun per slot: ${maxOverrun} labels
 - Overrun = (frames × ${labelsPerSlotPerFrame}) − quantity_in_slot
-- Never create a run where any slot's overrun exceeds ${maxOverrun}
-- If items cannot be ganged within this limit, put them on separate runs
+- NEVER create a run where any slot's overrun exceeds ${maxOverrun}
+- If items cannot be ganged within this limit, either split them to separate runs OR leave remaining slots blank
+- This is a HARD constraint — do not violate it under any circumstances
+${rollSizeContext}
 
 MACHINE SPECIFICATIONS:
 - Available slots (columns across): ${totalSlots}
 - Labels per slot per frame: ${labelsPerSlotPerFrame}
 - Labels per frame (all slots): ${labelsPerFrame}
 
+CRITICAL PRODUCTION RULES:
+1. EVERY slot must be accounted for — either with an item assignment or as a blank (qty=0).
+2. The run length (number of frames) is determined by the slot with the HIGHEST quantity_in_slot.
+   All slots print for the same length. Actual output per slot = frames × ${labelsPerSlotPerFrame}.
+3. Quantities CAN and SHOULD be split across multiple runs when it reduces waste.
+4. Gang items with SIMILAR quantities together to minimize waste.
+5. When items are duplicated across slots via round-robin, divide their quantity by the number of slots they occupy.
+
+QUANTITY SPLITTING:
+- You MAY split a single item's total quantity across multiple runs.
+- The total quantity_in_slot for each item across ALL runs must equal or slightly exceed the ordered quantity.
+- Splitting is especially useful when an item's quantity is much larger than others.
+
+TRADE-OFF THINKING:
+Think creatively about the layout. Consider:
+- Is it better to leave 2 blank slots than to create 800 overrun on a small-quantity item?
+- Could the operator use blank slots for internal labels?
+- If qty_per_roll isn't set, what would be a practical suggestion based on label size?
+- Surface your reasoning in the trade_offs object so the operator can make informed decisions.
+
 YOU MUST return actual run layouts with specific slot assignments using the create_layout tool.
 Each run must have EXACTLY ${totalSlots} slot_assignments.
 Use the actual item IDs provided below.
-The quantity_in_slot is how many labels that slot needs to print (before frame rounding).
-If an item appears in multiple slots (round-robin), divide its total quantity by the number of slots it occupies.
-If an item's quantity is split across runs, make sure the sum of all its slot quantities across all runs >= the ordered quantity.
 
-REMEMBER: The single most important rule is that ALL slots within a run should have the SAME quantity_in_slot value. This is the key to minimizing waste.
+REMEMBER: The single most important rule is that ALL slots within a run should have the SAME quantity_in_slot value. The second most important rule is NEVER exceed the ${maxOverrun}-label overrun limit.
 
 ITEMS TO ASSIGN (use these exact IDs):
 ${items.map(i => `- ID: "${i.id}" | Name: "${i.name}" | Quantity: ${i.quantity}`).join('\n')}`;
@@ -248,11 +241,13 @@ Total labels needed: ${totalLabels.toLocaleString()}
 Available slots per frame: ${totalSlots}
 Labels per slot per frame: ${labelsPerSlotPerFrame}
 Max overrun per slot: ${maxOverrun}
+${qty_per_roll ? `Qty per roll: ${qty_per_roll}` : 'Qty per roll: not specified (suggest one)'}
+Label dimensions: ${lw}×${lh}mm
 
 ${constraints?.rush_job ? 'RUSH JOB — prioritize speed (fewer runs).' : ''}
 ${constraints?.prefer_ganging ? 'Customer prefers ganging multiple items per run where possible.' : ''}
 
-Return the complete layout using the create_layout tool with actual item IDs and quantities.`;
+Return the complete layout using the create_layout tool with actual item IDs and quantities. Include trade_offs with blank slot counts and any roll size suggestions.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -293,7 +288,7 @@ Return the complete layout using the create_layout tool with actual item IDs and
                               },
                               quantity_in_slot: {
                                 type: "number",
-                                description: "How many labels this slot needs to print"
+                                description: "How many labels this slot needs to print. Use 0 for blank slots."
                               }
                             },
                             required: ["item_id", "quantity_in_slot"],
@@ -316,6 +311,30 @@ Return the complete layout using the create_layout tool with actual item IDs and
                   estimated_waste_percent: {
                     type: "number",
                     description: "Estimated material waste percentage"
+                  },
+                  trade_offs: {
+                    type: "object",
+                    description: "Trade-off suggestions and notes for the operator",
+                    properties: {
+                      blank_slots_available: {
+                        type: "number",
+                        description: "Total number of blank (qty=0) slots across all runs"
+                      },
+                      blank_slot_note: {
+                        type: "string",
+                        description: "Note about blank slots, e.g. 'Use for internal labels or another job'"
+                      },
+                      roll_size_note: {
+                        type: "string",
+                        description: "Suggestion about qty_per_roll if not specified"
+                      },
+                      overrun_warnings: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Per-slot warnings about overrun approaching limits"
+                      }
+                    },
+                    additionalProperties: false
                   }
                 },
                 required: ["runs", "overall_reasoning", "estimated_waste_percent"],
@@ -362,7 +381,6 @@ Return the complete layout using the create_layout tool with actual item IDs and
       }
     }
 
-    // Validate the AI output
     let validation = { valid: false, warnings: ["No layout returned from AI"] };
     if (layout) {
       validation = validateAILayout(layout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);

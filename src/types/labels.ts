@@ -443,6 +443,13 @@ export interface CreateLabelDielineInput {
 }
 
 // AI Layout types
+export interface LayoutTradeOffs {
+  blank_slots_available: number;
+  blank_slot_note?: string;
+  roll_size_note?: string;
+  overrun_warnings?: string[];
+}
+
 export interface LayoutOption {
   id: string;
   runs: ProposedRun[];
@@ -454,6 +461,7 @@ export interface LayoutOption {
   labor_efficiency_score: number;
   overall_score: number;
   reasoning: string;
+  trade_offs?: LayoutTradeOffs;
 }
 
 export interface RollSplitOption {

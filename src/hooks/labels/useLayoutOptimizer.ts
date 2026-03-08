@@ -21,6 +21,7 @@ import {
   type LabelItem, 
   type LabelDieline, 
   type LayoutOption,
+  type LayoutTradeOffs,
   type ProposedRun,
   type SlotAssignment,
   type OptimizationWeights,
@@ -51,7 +52,8 @@ function buildAILayoutOption(
   dieline: LabelDieline,
   items: LabelItem[],
   weights: OptimizationWeights,
-  qtyPerRoll?: number
+  qtyPerRoll?: number,
+  aiTradeOffs?: LayoutTradeOffs
 ): LayoutOption | null {
   try {
     const config = getSlotConfig(dieline);
@@ -111,6 +113,7 @@ function buildAILayoutOption(
       print_efficiency_score: printEfficiency,
       labor_efficiency_score: laborEfficiency,
       reasoning: `🤖 AI-Computed: ${aiReasoning}`,
+      trade_offs: aiTradeOffs,
     };
 
     return {
@@ -151,7 +154,10 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
         body: { 
           items: itemsToUse, 
           dieline: dielineToUse, 
-          constraints: { max_overrun: currentMaxOverrun } 
+          constraints: { max_overrun: currentMaxOverrun },
+          qty_per_roll: qtyPerRoll ?? undefined,
+          label_width_mm: dielineToUse.label_width_mm,
+          label_height_mm: dielineToUse.label_height_mm,
         }
       });
 
@@ -165,7 +171,8 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
           dielineToUse,
           itemsToUse,
           weightsToUse,
-          qtyPerRoll ?? undefined
+          qtyPerRoll ?? undefined,
+          data.layout.trade_offs
         );
 
         if (data.validation && !data.validation.valid) {
