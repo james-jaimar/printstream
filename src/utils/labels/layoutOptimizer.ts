@@ -944,7 +944,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
           config,
           theoreticalMinMeters,
           rollOptResult.reasoning,
-          qtyPerRoll
+          qtyPerRoll,
+          dieline,
+          maxOverrun
         ));
       }
     }
