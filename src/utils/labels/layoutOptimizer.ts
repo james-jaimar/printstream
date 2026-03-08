@@ -894,7 +894,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
       gangedRuns.length === 1
         ? 'All items ganged in a single balanced run — all slots filled'
         : `All items ganged, split into ${gangedRuns.length} balanced runs to minimize waste`,
-      qtyPerRoll
+      qtyPerRoll,
+      dieline,
+      maxOverrun
     ));
   }
   
