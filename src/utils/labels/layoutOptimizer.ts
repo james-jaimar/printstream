@@ -19,6 +19,7 @@ import type {
   LabelDieline, 
   LabelInkConfig,
   LayoutOption, 
+  LayoutTradeOffs,
   ProposedRun, 
   SlotAssignment,
   OptimizationWeights 
