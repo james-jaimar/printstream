@@ -927,7 +927,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
         config,
         theoreticalMinMeters,
         'Balanced approach — items ganged where possible, quantities split across runs to minimize waste',
-        qtyPerRoll
+        qtyPerRoll,
+        dieline,
+        maxOverrun
       ));
     }
     
