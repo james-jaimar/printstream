@@ -204,57 +204,75 @@ function correctAILayout(
     }
   }
 
-  // Create corrective runs for orphaned quantities
+  // Create corrective runs for orphaned quantities — SPREAD items across slots
   if (orphaned.size > 0) {
     const orphanedEntries = Array.from(orphaned.entries()).filter(([_, qty]) => qty > 0);
     
-    for (const [itemId, qty] of orphanedEntries) {
-      // Create a single-item run where all slots have the same qty
-      const qtyPerSlot = qty; // Single slot gets all the qty
-      const fillerItemId = itemId; // Use same item for blank slots
-
+    // Spread ALL orphaned items across a single corrective run if possible
+    const numOrphans = orphanedEntries.length;
+    
+    if (numOrphans > 0) {
+      const baseSlotsPerItem = Math.floor(totalSlots / numOrphans);
+      const extraSlots = totalSlots % numOrphans;
+      
       const slots: AISlotAssignment[] = [];
-      for (let s = 0; s < totalSlots; s++) {
-        if (s === 0) {
-          slots.push({ item_id: itemId, quantity_in_slot: qtyPerSlot });
-        } else {
-          slots.push({ item_id: fillerItemId, quantity_in_slot: 0 });
+      let slotIdx = 0;
+      
+      for (let i = 0; i < numOrphans; i++) {
+        const [itemId, qty] = orphanedEntries[i];
+        const slotsForItem = baseSlotsPerItem + (i < extraSlots ? 1 : 0);
+        const qtyPerSlot = Math.ceil(qty / slotsForItem);
+        let remaining = qty;
+        
+        for (let s = 0; s < slotsForItem; s++) {
+          const thisSlotQty = Math.min(qtyPerSlot, remaining);
+          slots.push({ item_id: itemId, quantity_in_slot: thisSlotQty });
+          remaining -= thisSlotQty;
+          slotIdx++;
         }
       }
-
-      // Check if this single-slot run itself violates overrun — it shouldn't since all equal
-      // But verify: frames for this run, actual output
-      const frames = Math.ceil(qtyPerSlot / labelsPerSlotPerFrame);
+      
+      // Fill any leftover slots as blank (should be 0-1)
+      while (slotIdx < totalSlots) {
+        slots.push({ item_id: orphanedEntries[0][0], quantity_in_slot: 0 });
+        slotIdx++;
+      }
+      
+      // Validate overrun on this corrective run
+      const maxSlotQty = Math.max(...slots.map(s => s.quantity_in_slot));
+      const frames = Math.ceil(maxSlotQty / labelsPerSlotPerFrame);
       const actualPerSlot = frames * labelsPerSlotPerFrame;
-      const singleOverrun = actualPerSlot - qtyPerSlot;
-
-      if (singleOverrun > maxOverrun) {
-        // Need to split further — divide qty across multiple slots in same run
-        const slotsNeeded = Math.min(totalSlots, Math.ceil(qty / (labelsPerSlotPerFrame * Math.ceil(1)))); // min 1 slot
-        const splitQty = Math.ceil(qty / slotsNeeded);
-        let remaining = qty;
-        const splitSlots: AISlotAssignment[] = [];
-        for (let s = 0; s < totalSlots; s++) {
-          if (remaining > 0 && s < slotsNeeded) {
-            const thisSlot = Math.min(splitQty, remaining);
-            splitSlots.push({ item_id: itemId, quantity_in_slot: thisSlot });
-            remaining -= thisSlot;
-          } else {
-            splitSlots.push({ item_id: itemId, quantity_in_slot: 0 });
-          }
-        }
-        layout.runs.push({
-          slot_assignments: splitSlots,
-          reasoning: `Corrective run for ${qty} labels of item ${itemId} (split across ${slotsNeeded} slots to respect overrun limit)`,
-        });
-      } else {
+      
+      // Check if all items in this run are within overrun
+      const allOk = slots.every(s => s.quantity_in_slot === 0 || (actualPerSlot - s.quantity_in_slot) <= maxOverrun);
+      
+      if (allOk) {
+        // Single corrective run with items spread across slots
         layout.runs.push({
           slot_assignments: slots,
-          reasoning: `Corrective run for ${qty} orphaned labels of item ${itemId} (moved from overrun-violating run)`,
+          reasoning: `Corrective run: ${numOrphans} item(s) spread across ${totalSlots} slots to minimize blanks`,
         });
+        notes.push(`Created 1 corrective run with ${numOrphans} orphaned items spread across ${totalSlots - Math.max(0, totalSlots - slotIdx)} slots`);
+      } else {
+        // Items have too-different quantities for one run — create separate runs per item, but SPREAD each
+        for (const [itemId, qty] of orphanedEntries) {
+          const itemSlots: AISlotAssignment[] = [];
+          const qtyPerSlot = Math.ceil(qty / totalSlots);
+          let remaining = qty;
+          
+          for (let s = 0; s < totalSlots; s++) {
+            const thisSlotQty = Math.min(qtyPerSlot, remaining);
+            itemSlots.push({ item_id: itemId, quantity_in_slot: thisSlotQty > 0 ? thisSlotQty : 0 });
+            remaining -= Math.max(0, thisSlotQty);
+          }
+          
+          layout.runs.push({
+            slot_assignments: itemSlots,
+            reasoning: `Corrective run for ${qty} labels of item ${itemId} (spread across ${totalSlots} slots)`,
+          });
+          notes.push(`Created corrective run for item ${itemId} with ${qty} labels spread across slots`);
+        }
       }
-
-      notes.push(`Created corrective run for item ${itemId} with ${qty} labels`);
     }
   }
 
@@ -305,24 +323,27 @@ SOLUTION: Items with very different quantities MUST go in SEPARATE runs, or the 
 
 BEFORE RETURNING YOUR LAYOUT: Mentally calculate frames × ${labelsPerSlotPerFrame} for EVERY run, then verify EVERY slot's overrun ≤ ${maxOverrun}. If any violates, SPLIT that run.
 
-STRATEGY — EQUAL-QUANTITY RUNS:
-Your PRIMARY goal is to create runs where ALL slots print the SAME quantity_in_slot.
-This eliminates intra-run overrun entirely (every slot uses the full run length).
+STRATEGY — EQUAL-QUANTITY RUNS WITH MAXIMUM SLOT UTILIZATION:
+Your PRIMARY goal is to create runs where ALL slots are FILLED (no blanks) and quantities are balanced.
 
 HOW TO ACHIEVE THIS:
 1. List every item and its ordered quantity.
-2. Find natural "quantity levels" — groups of up to ${totalSlots} items (or item-portions) that share the same quantity.
+2. Find natural "quantity levels" — groups of up to ${totalSlots} items (or item-portions) that share similar quantities.
 3. For each level, create a run where every slot has quantity_in_slot = that level's quantity.
 4. Large items are SPLIT across multiple runs.
 5. Small items may be BUMPED UP slightly if doing so fills a run cleanly and extras are acceptable within ${maxOverrun}.
-6. A slot may have quantity_in_slot = 0 (blank) if fewer items than slots remain at that level.
-7. The sum of all quantity_in_slot values for each item across ALL runs must be >= the ordered quantity.
+6. The sum of all quantity_in_slot values for each item across ALL runs must be >= the ordered quantity.
+7. CRITICAL: If you have N items and ${totalSlots} slots, SPREAD items across floor(${totalSlots}/N) slots each.
+   Example: 4 items in 9 slots → each item gets 2 slots (8 filled, 1 blank), NOT 4 filled + 5 blank.
+   Example: 3 items in 9 slots → each item gets 3 slots (9 filled, 0 blanks).
 
-BLANK SLOT STRATEGY:
-- If placing an item in a slot would cause overrun > ${maxOverrun}, LEAVE IT BLANK (qty=0).
-- Blank slots are VALUABLE — operator can fill with internal labels or another job.
-- Note blank slot count in trade_offs.blank_slots_available.
-- It is ALWAYS better to have blank slots than to violate the overrun constraint.
+BLANK SLOT RULES — MINIMIZE BLANKS:
+- Maximum 1-2 blank slots per run is acceptable. More than 2 blank slots is UNACCEPTABLE.
+- If a run would have >2 blank slots, you MUST spread the existing items across more slots to fill capacity.
+- Split each item's quantity across its allocated slots: qty_per_slot = ceil(item_qty / slots_for_item).
+- A slot may have quantity_in_slot = 0 (blank) ONLY as a last resort when spreading still leaves 1 slot.
+- NEVER put each item in just 1 slot when there are slots available — that wastes press capacity.
+- Note any remaining blank slots in trade_offs.blank_slots_available.
 ${rollSizeContext}
 
 MACHINE SPECIFICATIONS:
@@ -337,7 +358,8 @@ CRITICAL PRODUCTION RULES:
 4. Gang items with SIMILAR quantities to minimize waste.
 
 TRADE-OFF THINKING:
-- Is it better to leave 2 blank slots than create 800 overrun on a small-qty item? YES, ALWAYS.
+- Is it better to have 1 blank slot with items spread across 8 slots, or 5 blank slots with items in only 4 slots? ALWAYS spread.
+- A run with 5+ blank slots out of ${totalSlots} is NEVER acceptable — redistribute items.
 - Surface reasoning in trade_offs so operator can make informed decisions.
 
 Return layouts using create_layout tool. Each run must have EXACTLY ${totalSlots} slot_assignments.
