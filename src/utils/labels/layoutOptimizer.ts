@@ -165,6 +165,53 @@ function fillAllSlots(
   return assignments;
 }
 
+/**
+ * Fill slots with blank option: assigns items to slots, but leaves remaining
+ * slots blank (qty=0) when filling them via round-robin would breach maxOverrun.
+ */
+function fillSlotsWithBlankOption(
+  itemSlots: { item_id: string; quantity: number; needs_rotation?: boolean }[],
+  totalSlots: number,
+  config: SlotConfig,
+  maxOverrun: number
+): SlotAssignment[] {
+  if (itemSlots.length === 0) return [];
+
+  // If items >= totalSlots, no blanks needed — use normal fillAllSlots
+  if (itemSlots.length >= totalSlots) {
+    return fillAllSlots(itemSlots, totalSlots);
+  }
+
+  // Try normal fillAllSlots first
+  const normalAssignments = fillAllSlots(itemSlots, totalSlots);
+  if (validateRunOverrun(normalAssignments, config, maxOverrun)) {
+    return normalAssignments; // round-robin is fine
+  }
+
+  // Round-robin would breach overrun — assign items to their own slots, blank the rest
+  const assignments: SlotAssignment[] = [];
+  for (let s = 0; s < totalSlots; s++) {
+    if (s < itemSlots.length) {
+      assignments.push({
+        slot: s,
+        item_id: itemSlots[s].item_id,
+        quantity_in_slot: itemSlots[s].quantity,
+        needs_rotation: itemSlots[s].needs_rotation || false,
+      });
+    } else {
+      // Blank slot — use first item's artwork but qty 0
+      assignments.push({
+        slot: s,
+        item_id: itemSlots[0].item_id,
+        quantity_in_slot: 0,
+        needs_rotation: itemSlots[0].needs_rotation || false,
+      });
+    }
+  }
+
+  return assignments;
+}
+
 // ─── SLOT BALANCING ─────────────────────────────────────────────────
 
 /**
