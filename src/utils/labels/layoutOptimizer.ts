@@ -615,13 +615,80 @@ function createEqualQuantityRuns(
 
 // ─── SCORING & OPTION CREATION ──────────────────────────────────────
 
+/**
+ * Suggest a sensible qty_per_roll based on label dimensions
+ */
+function suggestQtyPerRoll(dieline: LabelDieline): { suggested: number; note: string } {
+  const labelArea = dieline.label_width_mm * dieline.label_height_mm;
+  if (labelArea < 2500) { // < ~50x50mm
+    return { suggested: 1000, note: 'Small labels (<50mm) — suggested 1,000 per roll' };
+  } else if (labelArea < 10000) { // < ~100x100mm
+    return { suggested: 500, note: 'Medium labels (50–100mm) — suggested 500 per roll' };
+  } else {
+    return { suggested: 250, note: 'Large labels (>100mm) — suggested 250 per roll' };
+  }
+}
+
+/**
+ * Build trade-off annotations from runs
+ */
+function buildTradeOffs(
+  runs: ProposedRun[],
+  config: SlotConfig,
+  dieline: LabelDieline,
+  qtyPerRoll?: number,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
+): LayoutTradeOffs {
+  // Count blank slots
+  let blankSlots = 0;
+  for (const run of runs) {
+    for (const slot of run.slot_assignments) {
+      if (slot.quantity_in_slot === 0) blankSlots++;
+    }
+  }
+
+  // Overrun warnings
+  const overrunWarnings: string[] = [];
+  for (const run of runs) {
+    const actualPerSlot = run.frames * config.labelsPerSlotPerFrame;
+    for (const slot of run.slot_assignments) {
+      if (slot.quantity_in_slot > 0) {
+        const overrun = actualPerSlot - slot.quantity_in_slot;
+        if (overrun > maxOverrun) {
+          overrunWarnings.push(
+            `Run ${run.run_number}, Slot ${slot.slot + 1}: +${overrun} overrun (max ${maxOverrun})`
+          );
+        }
+      }
+    }
+  }
+
+  // Roll size note
+  let rollSizeNote: string | undefined;
+  if (!qtyPerRoll) {
+    const suggestion = suggestQtyPerRoll(dieline);
+    rollSizeNote = suggestion.note;
+  }
+
+  return {
+    blank_slots_available: blankSlots,
+    blank_slot_note: blankSlots > 0
+      ? `${blankSlots} blank slot(s) available — use for internal labels or another job`
+      : undefined,
+    roll_size_note: rollSizeNote,
+    overrun_warnings: overrunWarnings.length > 0 ? overrunWarnings : undefined,
+  };
+}
+
 function createLayoutOption(
   id: string,
   runs: ProposedRun[],
   config: SlotConfig,
   theoreticalMinMeters: number,
   reasoning: string,
-  qtyPerRoll?: number
+  qtyPerRoll?: number,
+  dieline?: LabelDieline,
+  maxOverrun: number = DEFAULT_MAX_OVERRUN
 ): Omit<LayoutOption, 'overall_score'> {
   const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
   const totalFrames = runs.reduce((sum, r) => sum + r.frames, 0);
@@ -639,11 +706,15 @@ function createLayoutOption(
   if (qtyPerRoll && qtyPerRoll > 0) {
     const rewindingRuns = runs.filter(r => r.needs_rewinding);
     if (rewindingRuns.length > 0) {
-      // Penalize proportionally to how many runs need manual rewinding
       const rewindPenalty = (rewindingRuns.length / runs.length) * 0.4;
       laborEfficiency = Math.max(0, laborEfficiency - rewindPenalty);
     }
   }
+
+  // Build trade-offs if dieline provided
+  const trade_offs = dieline
+    ? buildTradeOffs(runs, config, dieline, qtyPerRoll, maxOverrun)
+    : undefined;
   
   return {
     id,
@@ -655,6 +726,7 @@ function createLayoutOption(
     print_efficiency_score: printEfficiency,
     labor_efficiency_score: laborEfficiency,
     reasoning,
+    trade_offs,
   };
 }
 
