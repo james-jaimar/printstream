@@ -444,7 +444,7 @@ function createOptimizedRuns(items: LabelItem[], config: SlotConfig, maxOverrun:
         needs_rotation: sorted[idx].needs_rotation || false,
       }));
       
-      const assignments = fillAllSlots(itemSlots, config.totalSlots);
+      const assignments = fillSlotsWithBlankOption(itemSlots, config.totalSlots, config, maxOverrun);
       
       // Check slot-to-slot balance
       const slotQtys = assignments.map(a => a.quantity_in_slot);
