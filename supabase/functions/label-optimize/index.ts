@@ -358,7 +358,8 @@ CRITICAL PRODUCTION RULES:
 4. Gang items with SIMILAR quantities to minimize waste.
 
 TRADE-OFF THINKING:
-- Is it better to leave 2 blank slots than create 800 overrun on a small-qty item? YES, ALWAYS.
+- Is it better to have 1 blank slot with items spread across 8 slots, or 5 blank slots with items in only 4 slots? ALWAYS spread.
+- A run with 5+ blank slots out of ${totalSlots} is NEVER acceptable — redistribute items.
 - Surface reasoning in trade_offs so operator can make informed decisions.
 
 Return layouts using create_layout tool. Each run must have EXACTLY ${totalSlots} slot_assignments.
