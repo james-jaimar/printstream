@@ -171,7 +171,8 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
           dielineToUse,
           itemsToUse,
           weightsToUse,
-          qtyPerRoll ?? undefined
+          qtyPerRoll ?? undefined,
+          data.layout.trade_offs
         );
 
         if (data.validation && !data.validation.valid) {
