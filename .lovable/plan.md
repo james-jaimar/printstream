@@ -11,14 +11,19 @@
 - Updated `createGangedRuns` and `createOptimizedRuns` to use blank-aware slot filling
 - Updated `createLayoutOption` to accept dieline + maxOverrun and populate trade_offs
 
-### 3. `supabase/functions/label-optimize/index.ts` — Enhanced AI prompt
+### 3. `supabase/functions/label-optimize/index.ts` — Enhanced AI prompt + server-side correction
+- Overrun constraint moved to TOP of prompt with concrete math example
 - Blank slot guidance in system prompt (hard constraint: prefer blanks over overrun violations)
 - Roll size reasoning (passes qty_per_roll + label dimensions; suggests defaults if not set)
 - `trade_offs` field added to create_layout tool schema
+- NEW: `correctAILayout()` post-processor that fixes overrun violations server-side
+- NEW: Retry logic — if AI violates overrun, retries once with explicit failure feedback
+- NEW: Returns `corrected: true` flag when layout was auto-fixed
 
 ### 4. `src/hooks/labels/useLayoutOptimizer.ts` — Passes qtyPerRoll & dimensions to AI
 - Sends `qty_per_roll`, `label_width_mm`, `label_height_mm` in edge function request
 - Passes AI `trade_offs` through to `buildAILayoutOption`
+- NEW: Surfaces correction flag — shows toast when AI layout was auto-corrected
 
 ### 5. `src/components/labels/optimizer/LayoutOptionCard.tsx` — Trade-off UI
 - Amber badge for blank slots with tooltip
