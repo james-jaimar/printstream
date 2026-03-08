@@ -166,8 +166,12 @@ function fillAllSlots(
 }
 
 /**
- * Fill slots with blank option: assigns items to slots, but leaves remaining
- * slots blank (qty=0) when filling them via round-robin would breach maxOverrun.
+ * Smart Slot Spreading: distribute items across as many slots as possible
+ * to minimize blank slots. Each item gets floor(totalSlots / numItems) slots,
+ * with remainder items getting +1 slot.
+ * 
+ * Example: 4 items in 9 slots → 2-2-2-2 + 1 blank (not 4 filled + 5 blank)
+ * Example: 3 items in 9 slots → 3-3-3 = 0 blanks
  */
 function fillSlotsWithBlankOption(
   itemSlots: { item_id: string; quantity: number; needs_rotation?: boolean }[],
@@ -182,33 +186,49 @@ function fillSlotsWithBlankOption(
     return fillAllSlots(itemSlots, totalSlots);
   }
 
-  // Try normal fillAllSlots first
+  // Try normal round-robin first (best case)
   const normalAssignments = fillAllSlots(itemSlots, totalSlots);
   if (validateRunOverrun(normalAssignments, config, maxOverrun)) {
-    return normalAssignments; // round-robin is fine
+    return normalAssignments;
   }
 
-  // Round-robin would breach overrun — assign items to their own slots, blank the rest
+  // Round-robin breaches overrun — SPREAD items across multiple slots each
+  const n = itemSlots.length;
+  const baseSlots = Math.floor(totalSlots / n);
+  const extra = totalSlots % n;
+
   const assignments: SlotAssignment[] = [];
-  for (let s = 0; s < totalSlots; s++) {
-    if (s < itemSlots.length) {
+  let slotIdx = 0;
+
+  for (let i = 0; i < n; i++) {
+    const slotsForItem = baseSlots + (i < extra ? 1 : 0);
+    const qtyPerSlot = Math.ceil(itemSlots[i].quantity / slotsForItem);
+    let remaining = itemSlots[i].quantity;
+
+    for (let s = 0; s < slotsForItem; s++) {
+      const thisSlotQty = Math.min(qtyPerSlot, remaining);
       assignments.push({
-        slot: s,
-        item_id: itemSlots[s].item_id,
-        quantity_in_slot: itemSlots[s].quantity,
-        needs_rotation: itemSlots[s].needs_rotation || false,
+        slot: slotIdx++,
+        item_id: itemSlots[i].item_id,
+        quantity_in_slot: thisSlotQty,
+        needs_rotation: itemSlots[i].needs_rotation || false,
       });
-    } else {
-      // Blank slot — use first item's artwork but qty 0
-      assignments.push({
-        slot: s,
-        item_id: itemSlots[0].item_id,
-        quantity_in_slot: 0,
-        needs_rotation: itemSlots[0].needs_rotation || false,
-      });
+      remaining -= thisSlotQty;
     }
   }
 
+  // Fill any leftover slots as blank (should be 0 or 1 at most)
+  while (slotIdx < totalSlots) {
+    assignments.push({
+      slot: slotIdx++,
+      item_id: itemSlots[0].item_id,
+      quantity_in_slot: 0,
+      needs_rotation: itemSlots[0].needs_rotation || false,
+    });
+  }
+
+  // Validate the spread result — if still too much overrun, it means
+  // items have very different quantities and need separate runs (caller handles)
   return assignments;
 }
 
