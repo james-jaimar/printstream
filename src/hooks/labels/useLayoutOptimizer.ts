@@ -21,6 +21,7 @@ import {
   type LabelItem, 
   type LabelDieline, 
   type LayoutOption,
+  type LayoutTradeOffs,
   type ProposedRun,
   type SlotAssignment,
   type OptimizationWeights,
