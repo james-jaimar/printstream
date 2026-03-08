@@ -911,7 +911,9 @@ export function generateLayoutOptions(input: LayoutInput): LayoutOption[] {
     config,
     theoreticalMinMeters,
     'Each item on its own run — all slots filled, maximum flexibility for quantity control',
-    qtyPerRoll
+    qtyPerRoll,
+    dieline,
+    maxOverrun
   ));
   
   // Option 3: Optimized — balanced ganging with quantity splitting across runs
