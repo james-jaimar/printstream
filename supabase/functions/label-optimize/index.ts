@@ -500,21 +500,14 @@ serve(async (req) => {
     const systemPrompt = buildSystemPrompt(totalSlots, labelsPerSlotPerFrame, labelsPerFrame, maxOverrun, rollSizeContext, items);
     const tools = buildToolSchema(totalSlots);
 
-    const userPrompt = `Create the optimal production layout for this order.
+    const userPrompt = `Plan the production layout for this order.
 
-Total labels needed: ${totalLabels.toLocaleString()}
-Available slots per frame: ${totalSlots}
-Labels per slot per frame: ${labelsPerSlotPerFrame}
-Max overrun per slot: ${maxOverrun}
-${qty_per_roll ? `Qty per roll: ${qty_per_roll}` : 'Qty per roll: not specified (suggest one)'}
-Label dimensions: ${lw}×${lh}mm
+Summary: ${items.length} items, ${totalLabels.toLocaleString()} total labels, ${totalSlots} slots, ${labelsPerSlotPerFrame} labels/slot/frame, max overrun ${maxOverrun}.
+${qty_per_roll ? `Customer requires ${qty_per_roll} labels per output roll.` : 'No qty/roll specified — suggest one in trade_offs.roll_size_note.'}
+${constraints?.rush_job ? 'RUSH JOB — minimize number of runs.' : ''}
+${constraints?.prefer_ganging ? 'Customer prefers ganging where possible.' : ''}
 
-${constraints?.rush_job ? 'RUSH JOB — prioritize speed (fewer runs).' : ''}
-${constraints?.prefer_ganging ? 'Customer prefers ganging multiple items per run where possible.' : ''}
-
-IMPORTANT: Before finalizing, verify every slot in every run: frames × ${labelsPerSlotPerFrame} - quantity_in_slot must be ≤ ${maxOverrun}. If not, split the run.
-
-Return the complete layout using the create_layout tool.`;
+Think step by step, then return the layout via create_layout.`;
 
     // --- First AI attempt ---
     let layout: AILayout | null = null;
