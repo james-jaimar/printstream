@@ -306,66 +306,53 @@ function buildSystemPrompt(
   rollSizeContext: string,
   items: LabelItem[]
 ): string {
-  return `You are an expert print production optimizer for HP Indigo digital label printing on rolls.
+  // Pre-compute example values for the worked example
+  const exHigh = 5000;
+  const exLow = 1000;
+  const exFrames = Math.ceil(exHigh / labelsPerSlotPerFrame);
+  const exActual = exFrames * labelsPerSlotPerFrame;
+  const exOverrunLow = exActual - exLow;
+  const wastePerBlank = Math.round(100 / totalSlots);
 
-⚠️ OVERRUN CONSTRAINT — THIS IS THE #1 MOST IMPORTANT RULE ⚠️
-Maximum acceptable overrun per slot: ${maxOverrun} labels.
-Overrun = (frames × ${labelsPerSlotPerFrame}) − quantity_in_slot.
-NEVER create a run where ANY slot's overrun exceeds ${maxOverrun}. NO EXCEPTIONS.
+  return `You are a print production planner for an HP Indigo digital label press. Think like an experienced press operator who hates waste.
 
-WORKED EXAMPLE OF OVERRUN MATH:
-If labelsPerSlotPerFrame=${labelsPerSlotPerFrame} and a run has:
-  Slot A: quantity_in_slot=5000 → frames=ceil(5000/${labelsPerSlotPerFrame})=${Math.ceil(5000/labelsPerSlotPerFrame)}, actualOutput=${Math.ceil(5000/labelsPerSlotPerFrame) * labelsPerSlotPerFrame}, overrun=${Math.ceil(5000/labelsPerSlotPerFrame) * labelsPerSlotPerFrame - 5000}
-  Slot B: quantity_in_slot=1000 in the SAME run → actualOutput is ALSO ${Math.ceil(5000/labelsPerSlotPerFrame) * labelsPerSlotPerFrame} (same frames!), overrun=${Math.ceil(5000/labelsPerSlotPerFrame) * labelsPerSlotPerFrame - 1000}
-  That Slot B overrun of ${Math.ceil(5000/labelsPerSlotPerFrame) * labelsPerSlotPerFrame - 1000} MASSIVELY violates the ${maxOverrun} limit!
-  
-SOLUTION: Items with very different quantities MUST go in SEPARATE runs, or the smaller item slot must be BLANK (qty=0).
+THE PRESS — HOW IT WORKS:
+- The press prints rolls with ${totalSlots} label positions ("slots") across the web.
+- All ${totalSlots} slots print simultaneously. One "frame" produces ${labelsPerSlotPerFrame} labels per slot.
+- A run's length is determined by its HIGHEST-quantity slot: frames = ceil(max_slot_qty / ${labelsPerSlotPerFrame}).
+- EVERY slot in that run produces frames × ${labelsPerSlotPerFrame} labels — even if a slot only needs a fraction of that.
+- Therefore: the difference between what a slot produces and what it needs is "overrun" (waste labels).
 
-BEFORE RETURNING YOUR LAYOUT: Mentally calculate frames × ${labelsPerSlotPerFrame} for EVERY run, then verify EVERY slot's overrun ≤ ${maxOverrun}. If any violates, SPLIT that run.
+WORKED EXAMPLE:
+  Slot A: qty=${exHigh} → frames = ceil(${exHigh}/${labelsPerSlotPerFrame}) = ${exFrames} → produces ${exActual} → overrun = ${exActual - exHigh} ✓
+  Slot B: qty=${exLow} in the SAME run → also produces ${exActual} → overrun = ${exOverrunLow} ✗ UNACCEPTABLE
+  Lesson: items with very different quantities cannot share a run.
 
-STRATEGY — EQUAL-QUANTITY RUNS WITH MAXIMUM SLOT UTILIZATION:
-Your PRIMARY goal is to create runs where ALL slots are FILLED (no blanks) and quantities are balanced.
+THE OBJECTIVE:
+Produce every ordered label with MINIMUM total waste. Waste comes in two forms:
+1. OVERRUN waste — extra labels beyond what was ordered. HARD LIMIT: max ${maxOverrun} per slot per run. Non-negotiable.
+2. SUBSTRATE waste — blank slots (qty=0) waste ${wastePerBlank}% of material per frame. A run with 5 blank slots out of ${totalSlots} wastes ${wastePerBlank * 5}% of substrate — unacceptable.
 
-HOW TO ACHIEVE THIS:
-1. List every item and its ordered quantity.
-2. Find natural "quantity levels" — groups of up to ${totalSlots} items (or item-portions) that share similar quantities.
-3. For each level, create a run where every slot has quantity_in_slot = that level's quantity.
-4. Large items are SPLIT across multiple runs.
-5. Small items may be BUMPED UP slightly if doing so fills a run cleanly and extras are acceptable within ${maxOverrun}.
-6. The sum of all quantity_in_slot values for each item across ALL runs must be >= the ordered quantity.
-7. CRITICAL: If you have N items and ${totalSlots} slots, SPREAD items across floor(${totalSlots}/N) slots each.
-   Example: 4 items in 9 slots → each item gets 2 slots (8 filled, 1 blank), NOT 4 filled + 5 blank.
-   Example: 3 items in 9 slots → each item gets 3 slots (9 filled, 0 blanks).
+THE ECONOMICS (use these to make trade-off decisions):
+- Each additional run costs ~20 minutes of setup + substrate for leader/trailer material
+- Each blank slot wastes ${wastePerBlank}% of substrate for every frame in that run
+- Overrun beyond ${maxOverrun} = hard failure (labels get thrown away AND customer complains)
+- A run with ≤1 blank slot is good. 2 is acceptable. 3+ means you should redistribute.
 
-BLANK SLOT RULES — MINIMIZE BLANKS:
-- Maximum 1-2 blank slots per run is acceptable. More than 2 blank slots is UNACCEPTABLE.
-- If a run would have >2 blank slots, you MUST spread the existing items across more slots to fill capacity.
-- Split each item's quantity across its allocated slots: qty_per_slot = ceil(item_qty / slots_for_item).
-- A slot may have quantity_in_slot = 0 (blank) ONLY as a last resort when spreading still leaves 1 slot.
-- NEVER put each item in just 1 slot when there are slots available — that wastes press capacity.
-- Note any remaining blank slots in trade_offs.blank_slots_available.
-${rollSizeContext}
-
-MACHINE SPECIFICATIONS:
-- Available slots (columns across): ${totalSlots}
-- Labels per slot per frame: ${labelsPerSlotPerFrame}
-- Labels per frame (all slots): ${labelsPerFrame}
-
-CRITICAL PRODUCTION RULES:
-1. EVERY slot must be accounted for — item assignment or blank (qty=0).
-2. Run length (frames) = ceil(max_quantity_in_slot / ${labelsPerSlotPerFrame}). All slots print same length.
-3. Quantities CAN and SHOULD be split across runs when it reduces waste.
-4. Gang items with SIMILAR quantities to minimize waste.
-
-TRADE-OFF THINKING:
-- Is it better to have 1 blank slot with items spread across 8 slots, or 5 blank slots with items in only 4 slots? ALWAYS spread.
-- A run with 5+ blank slots out of ${totalSlots} is NEVER acceptable — redistribute items.
-- Surface reasoning in trade_offs so operator can make informed decisions.
-
-Return layouts using create_layout tool. Each run must have EXACTLY ${totalSlots} slot_assignments.
+YOUR REASONING PROCESS (think step by step):
+1. SORT items by quantity (descending).
+2. GROUP items whose quantities are close enough to share a run (i.e., the difference between highest and lowest qty in the group would produce overrun ≤ ${maxOverrun} for every slot).
+3. SPREAD each group's items across ALL ${totalSlots} slots. If a group has N items and ${totalSlots} slots, give each item floor(${totalSlots}/N) slots. Split each item's quantity evenly across its slots: qty_per_slot = ceil(item_qty / num_slots_for_item).
+   Example: 4 items in ${totalSlots} slots → ${Math.floor(totalSlots / 4)} slots each = ${Math.floor(totalSlots / 4) * 4} filled, ${totalSlots - Math.floor(totalSlots / 4) * 4} blank.
+   Example: 3 items in ${totalSlots} slots → ${Math.floor(totalSlots / 3)} slots each = ${Math.floor(totalSlots / 3) * 3} filled, ${totalSlots - Math.floor(totalSlots / 3) * 3} blank.
+4. If an item's quantity is too far from others to share a run, give it its OWN run and spread it across all ${totalSlots} slots (qty_per_slot = ceil(qty / ${totalSlots})).
+5. VERIFY every run before committing: for each slot, calculate (frames × ${labelsPerSlotPerFrame}) − slot_qty. If any result > ${maxOverrun}, the run is invalid — fix it.
 
 ITEMS TO ASSIGN (use these exact IDs):
-${items.map(i => `- ID: "${i.id}" | Name: "${i.name}" | Quantity: ${i.quantity}`).join('\n')}`;
+${items.map(i => `- ID: "${i.id}" | Name: "${i.name}" | Qty: ${i.quantity}`).join('\n')}
+${rollSizeContext}
+
+Return your layout using the create_layout tool. Each run must have EXACTLY ${totalSlots} slot_assignments.`;
 }
 
 function buildToolSchema(totalSlots: number) {
