@@ -104,7 +104,7 @@ export const useScheduledJobs = (options: UseScheduledJobsOptions = {}) => {
           )
         `)
         .eq('job_table_name', 'production_jobs')
-        .in('status', ['pending', 'active', 'on_hold', 'in_progress']);
+        .in('status', ['pending', 'active', 'on_hold', 'in_progress', 'scheduled']);
 
       // Filter by production stage if specified
       if (production_stage_id) {

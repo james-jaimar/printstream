@@ -102,20 +102,23 @@ export const ScheduleProductionSidebar: React.FC<ScheduleProductionSidebarProps>
   };
 
   const getJobCountByStatus = (status: string) => {
-    let count = 0;
+    const uniqueJobIds = new Set<string>();
     scheduleDays.forEach(day => {
       day.time_slots?.forEach(slot => {
-        count += slot.scheduled_stages?.filter(stage => {
-          switch (status) {
-            case 'pending': return stage.status === 'pending';
-            case 'active': return stage.status === 'active';
-            case 'completed': return stage.status === 'completed';
-            default: return false;
-          }
-        }).length || 0;
+        slot.scheduled_stages?.forEach(stage => {
+          const matches = (() => {
+            switch (status) {
+              case 'pending': return stage.status === 'pending';
+              case 'active': return stage.status === 'active';
+              case 'completed': return stage.status === 'completed';
+              default: return false;
+            }
+          })();
+          if (matches) uniqueJobIds.add(stage.job_id);
+        });
       });
     });
-    return count;
+    return uniqueJobIds.size;
   };
 
   return (

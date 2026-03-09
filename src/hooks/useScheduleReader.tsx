@@ -163,6 +163,8 @@ export function useScheduleReader() {
         .not("scheduled_start_at", "is", null)
         .not("scheduled_end_at", "is", null)
         .not("status", "eq", "completed")
+        .not("status", "eq", "skipped")
+        .not("status", "eq", "changes_requested")
         .order("scheduled_start_at", { ascending: true });
 
       if (stagesError) {
