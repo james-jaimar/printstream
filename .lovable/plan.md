@@ -1,77 +1,32 @@
 
+# Smarter AI Layout Engine — IMPLEMENTED
 
-# Rethinking the AI Layout Prompt — Let the LLM Actually Think
+## Changes Made
 
-## The Real Problem
+### 1. `src/types/labels.ts` — Added `LayoutTradeOffs` interface and `trade_offs?` to `LayoutOption`
+### 2. `src/utils/labels/layoutOptimizer.ts` — Smart Slot Spreading + trade-off annotations
+- **Rewrote `fillSlotsWithBlankOption()`**: Now spreads items across `floor(totalSlots / numItems)` slots each, splitting quantities evenly. Example: 4 items in 9 slots → 2 slots each (8 filled, 1 blank), NOT 4 filled + 5 blank.
+- `suggestQtyPerRoll()`: suggests roll size based on label dimensions
+- `buildTradeOffs()`: annotates each option with blank slot counts, overrun warnings, roll size notes
+- Updated `createGangedRuns` and `createOptimizedRuns` to use blank-aware slot filling
 
-The current prompt is **700+ words of contradictory micro-rules** that the AI half-follows. It says "MINIMIZE blanks" but also "blank slots are a last resort." It says "spread items" but also "EQUAL-QUANTITY RUNS." It's a rule soup — and when an LLM gets conflicting instructions, it picks whichever one it noticed last.
+### 3. `supabase/functions/label-optimize/index.ts` — Physics-first AI prompt + server-side correction
+- **Complete prompt rewrite**: Replaced 700+ words of contradictory rules with a concise, physics-first prompt that:
+  - Teaches how the press works (frames, slots, simultaneous printing) in plain language
+  - Defines the objective clearly: minimize total waste (overrun + substrate)
+  - Provides economic context: blank slot cost (% substrate waste), run changeover cost (~20 min), overrun as hard limit
+  - Includes a worked numerical example showing why mixed quantities break runs
+  - Instructs step-by-step reasoning: sort → group by similar qty → spread across slots → verify overrun math
+- **Corrective run fix**: Orphaned items spread across all slots (not dumped into 1 slot with rest blank)
+- `correctAILayout()` post-processor fixes overrun violations server-side
+- Retry logic — if AI violates overrun, retries once with explicit failure feedback
+- Returns `corrected: true` flag when layout was auto-fixed
 
-The result: the AI isn't *thinking* about the problem. It's trying to follow a checklist and failing.
+### 4. `src/hooks/labels/useLayoutOptimizer.ts` — Passes qtyPerRoll & dimensions to AI
+- Sends `qty_per_roll`, `label_width_mm`, `label_height_mm` in edge function request
+- Surfaces correction flag — shows toast when AI layout was auto-corrected
 
-## Current Prompt (Summary of Issues)
-
-1. **Overrun constraint is buried in noise.** It's technically at the top but surrounded by 20+ other "CRITICAL" and "IMPORTANT" rules. When everything is critical, nothing is.
-2. **The AI is told HOW to solve, not WHAT to solve.** Rules like "spread items across floor(totalSlots/N) slots each" are algorithmic instructions — if we're going to dictate the algorithm, we don't need AI. The AI should figure out the best approach.
-3. **No real-world context.** The AI doesn't know what a blank slot *costs* (wasted substrate), what overrun *costs* (extra labels nobody wants), or what a changeover *costs* (20 min setup). Without cost awareness, it can't make trade-off decisions.
-4. **The corrective post-processor is a band-aid.** It blanks slots and creates messy corrective runs because the AI got it wrong in the first place.
-
-## The Fix: A Complete Prompt Rewrite
-
-Replace the current `buildSystemPrompt` with a prompt that:
-
-1. **Teaches the physics of the press** (how frames work, why all slots run the same length) in 3-4 sentences — not a wall of rules
-2. **Defines the objective clearly**: minimize total waste labels across all runs, subject to: every ordered label is produced, no slot overruns by more than X
-3. **Gives cost context**: "Each blank slot in a 9-slot run wastes 11% of substrate per frame. A run with 5 blank slots wastes 55% of substrate. An extra run costs ~20 minutes of changeover. Balance these."
-4. **Provides a worked example** of a good layout vs a bad layout for a similar item mix — show, don't tell
-5. **Asks the AI to reason step-by-step** before committing: "First, sort items by quantity. Then identify which items can share a run (quantities within X of each other). Then assign slots. Then verify overrun math."
-
-### Proposed New System Prompt Structure
-
-```
-You are a print production planner for an HP Indigo digital label press.
-
-THE PRESS:
-- The press prints rolls with {totalSlots} label positions (slots) across the web.
-- All slots print simultaneously. One "frame" produces {labelsPerSlotPerFrame} labels per slot.
-- A run's length = ceil(max_slot_qty / {labelsPerSlotPerFrame}) frames. Every slot produces that many frames.
-- Therefore: if slot A needs 5000 and slot B needs 1000, both produce ceil(5000/{labelsPerSlotPerFrame}) × {labelsPerSlotPerFrame} = {X} labels. Slot B gets {X-1000} extra labels it doesn't need. That's waste.
-
-THE OBJECTIVE:
-Produce all ordered labels with MINIMUM total waste. Waste has two forms:
-1. OVERRUN waste: extra labels per slot beyond what's ordered (max {maxOverrun} per slot per run — HARD LIMIT)
-2. SUBSTRATE waste: blank slots (qty=0) waste {Math.round(100/totalSlots)}% of material per blank slot per frame
-
-THE COSTS:
-- Each additional run = ~20 minutes setup + substrate for leader/trailer
-- Each blank slot = {Math.round(100/totalSlots)}% material waste for every frame in that run
-- Overrun beyond {maxOverrun} per slot = UNACCEPTABLE (hard constraint, not a preference)
-
-YOUR TASK:
-1. Sort items by quantity
-2. Group items with similar quantities (within {maxOverrun} of each other) into the same run
-3. When items share a run, spread them across ALL {totalSlots} slots to minimise blanks:
-   - 4 items → ~{Math.floor(totalSlots/4)} slots each
-   - Split each item's quantity evenly across its slots
-4. If an item's quantity is too different from others in a run, give it its own run and spread across all {totalSlots} slots
-5. VERIFY: For every run, calculate frames = ceil(max_slot_qty / {labelsPerSlotPerFrame}). Then for every slot: (frames × {labelsPerSlotPerFrame}) - slot_qty must be ≤ {maxOverrun}. If not, fix it.
-
-{rollSizeContext}
-```
-
-### What Changes
-
-| File | Change |
-|------|--------|
-| `supabase/functions/label-optimize/index.ts` | Complete rewrite of `buildSystemPrompt()` — concise, physics-first, objective-driven. Simplify user prompt. Keep correction logic as safety net but it should rarely trigger. |
-
-### What Stays the Same
-
-- Tool schema (unchanged)
-- `correctAILayout()` post-processor (safety net, unchanged)
-- Retry logic (unchanged)
-- Validation function (unchanged)
-- Client-side code (unchanged)
-- Local algorithm in `layoutOptimizer.ts` (unchanged)
-
-This is a **prompt-only change** — one function rewrite in the edge function. The goal is to stop treating the AI like a rule-following robot and start treating it like a thinking planner who understands the physics and economics of the press.
-
+### 5. `src/components/labels/optimizer/LayoutOptionCard.tsx` — Trade-off UI
+- Amber badge for blank slots with tooltip
+- Red badge for overrun warnings with tooltip listing each
+- Blue badge for roll size suggestions with tooltip
