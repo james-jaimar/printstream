@@ -56,19 +56,20 @@ export const ScheduleProductionSidebar: React.FC<ScheduleProductionSidebarProps>
   }, [scheduleDays, allStages]);
 
   const getStageJobCount = (stageId: string) => {
-    let count = 0;
     const stage = allStages.find(s => s.id === stageId);
     if (!stage) return 0;
     
+    const uniqueJobIds = new Set<string>();
     scheduleDays.forEach(day => {
       day.time_slots?.forEach(slot => {
-        const stageJobs = slot.scheduled_stages?.filter(scheduledStage => 
-          scheduledStage.stage_name === stage.name
-        ) || [];
-        count += stageJobs.length;
+        slot.scheduled_stages?.forEach(scheduledStage => {
+          if (scheduledStage.stage_name === stage.name) {
+            uniqueJobIds.add(scheduledStage.job_id);
+          }
+        });
       });
     });
-    return count;
+    return uniqueJobIds.size;
   };
 
   const getTotalScheduledJobs = () => {
