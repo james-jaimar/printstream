@@ -206,7 +206,7 @@ export function PaperListDialog({
                     </TableCell>
                     <TableCell>{g.paperSize}</TableCell>
                     <TableCell className="text-right">{g.jobCount}</TableCell>
-                    <TableCell className="text-right">{g.totalMinutes}</TableCell>
+                    <TableCell className="text-right">{g.totalQty}</TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                       {g.workOrders.join(", ")}
                     </TableCell>
