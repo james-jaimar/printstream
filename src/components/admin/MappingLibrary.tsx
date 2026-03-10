@@ -7,7 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BatchMappingOperations } from "./mapping/BatchMappingOperations";
-import { Search, Download, Trash2, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Download, Trash2, CheckCircle, AlertCircle, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { EditMappingDialog } from "./mapping/EditMappingDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -59,6 +60,8 @@ export const MappingLibrary: React.FC = () => {
   });
   const { toast } = useToast();
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [editMapping, setEditMapping] = useState<Mapping | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   // Debounce search input
   useEffect(() => {
@@ -478,6 +481,17 @@ export const MappingLibrary: React.FC = () => {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  onClick={() => {
+                                    setEditMapping(mapping);
+                                    setEditOpen(true);
+                                  }}
+                                  title="Edit mapping"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => toggleVerification(mapping.id, mapping.is_verified)}
                                 >
                                   {mapping.is_verified ? "Unverify" : "Verify"}
@@ -536,6 +550,16 @@ export const MappingLibrary: React.FC = () => {
           <BatchMappingOperations onOperationComplete={handleRefresh} />
         </TabsContent>
       </Tabs>
+
+      <EditMappingDialog
+        mapping={editMapping}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => {
+          loadMappings();
+          loadStats();
+        }}
+      />
     </div>
   );
 };
