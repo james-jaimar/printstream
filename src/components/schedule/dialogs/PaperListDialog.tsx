@@ -42,7 +42,7 @@ interface PaperGroup {
   paperWeight: string;
   paperSize: string;
   jobCount: number;
-  totalMinutes: number;
+  totalQty: number;
   workOrders: string[];
 }
 
@@ -84,7 +84,7 @@ export function PaperListDialog({
 
           if (existing) {
             existing.jobCount += 1;
-            existing.totalMinutes += stage.estimated_duration_minutes;
+            existing.totalQty += stage.quantity || 0;
             if (!existing.workOrders.includes(wo)) existing.workOrders.push(wo);
           } else {
             map.set(key, {
@@ -93,7 +93,7 @@ export function PaperListDialog({
               paperWeight: pWeight,
               paperSize: pSize,
               jobCount: 1,
-              totalMinutes: stage.estimated_duration_minutes,
+              totalQty: stage.quantity || 0,
               workOrders: [wo],
             });
           }
@@ -111,7 +111,7 @@ export function PaperListDialog({
     const header = `Paper List — ${day?.day_name} ${selectedDate}\n${"─".repeat(50)}`;
     const rows = paperGroups.map(
       (g) =>
-        `${g.paperWeight} ${g.paperType} (${g.paperSize})  ×${g.jobCount} jobs  ~${g.totalMinutes}min\n  WOs: ${g.workOrders.join(", ")}`
+        `${g.paperWeight} ${g.paperType} (${g.paperSize})  ×${g.jobCount} jobs  Qty: ${g.totalQty}\n  WOs: ${g.workOrders.join(", ")}`
     );
     const text = [header, ...rows].join("\n\n");
     navigator.clipboard.writeText(text);
@@ -125,10 +125,10 @@ export function PaperListDialog({
     w.document.write(`<html><head><title>Paper List – ${selectedDate}</title>
       <style>body{font-family:sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#f5f5f5}</style></head><body>
       <h2>Paper List — ${day?.day_name} ${selectedDate}</h2>
-      <table><thead><tr><th>Paper</th><th>Size</th><th>Jobs</th><th>Est. Minutes</th><th>Work Orders</th></tr></thead><tbody>`);
+      <table><thead><tr><th>Paper</th><th>Size</th><th>Jobs</th><th>Qty</th><th>Work Orders</th></tr></thead><tbody>`);
     paperGroups.forEach((g) => {
       w.document.write(
-        `<tr><td>${g.paperWeight} ${g.paperType}</td><td>${g.paperSize}</td><td>${g.jobCount}</td><td>${g.totalMinutes}</td><td>${g.workOrders.join(", ")}</td></tr>`
+        `<tr><td>${g.paperWeight} ${g.paperType}</td><td>${g.paperSize}</td><td>${g.jobCount}</td><td>${g.totalQty}</td><td>${g.workOrders.join(", ")}</td></tr>`
       );
     });
     w.document.write("</tbody></table></body></html>");
@@ -194,7 +194,7 @@ export function PaperListDialog({
                   <TableHead>Paper</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead className="text-right">Jobs</TableHead>
-                  <TableHead className="text-right">Est. Min</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
                   <TableHead>Work Orders</TableHead>
                 </TableRow>
               </TableHeader>
@@ -206,7 +206,7 @@ export function PaperListDialog({
                     </TableCell>
                     <TableCell>{g.paperSize}</TableCell>
                     <TableCell className="text-right">{g.jobCount}</TableCell>
-                    <TableCell className="text-right">{g.totalMinutes}</TableCell>
+                    <TableCell className="text-right">{g.totalQty}</TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                       {g.workOrders.join(", ")}
                     </TableCell>

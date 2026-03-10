@@ -26,6 +26,7 @@ export interface ScheduledStageData {
   paper_display?: string;     // combined display format like "230gsm FBB"
   hp12000_paper_size_name?: string;  // HP12000 paper size name (e.g., "A3+ Large", "A4+ Small")
   hp12000_paper_size?: string;       // Extracted size only (Large/Small)
+  quantity?: number;          // run qty from job_stage_instances
   is_split_job?: boolean;     // true if this stage is part of a cross-day split job
   split_job_part?: number;    // which part of the split (1, 2, etc.)
   split_job_total_parts?: number; // total parts in the split
@@ -146,6 +147,7 @@ export function useScheduleReader() {
           notes,
           stage_specification_id,
           hp12000_paper_size_id,
+          quantity,
           is_split_job,
           split_job_part,
           split_job_total_parts,
@@ -447,6 +449,7 @@ export function useScheduleReader() {
             paper_display: displaySpec,
             hp12000_paper_size_name: hp12000PaperSizeName,
             hp12000_paper_size: hp12000PaperSize,
+            quantity: row.quantity || undefined,
             is_split_job: row.is_split_job || false,
             split_job_part: row.split_job_part || undefined,
             split_job_total_parts: row.split_job_total_parts || undefined,
