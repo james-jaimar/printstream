@@ -52,6 +52,16 @@ export async function backfillPaperSpecifications(options?: { forceResolve?: boo
 
     for (const job of allJobs) {
       try {
+        // In force mode, delete existing paper specs so they can be re-resolved
+        if (forceResolve) {
+          await supabase
+            .from('job_print_specifications')
+            .delete()
+            .eq('job_id', job.id)
+            .eq('job_table_name', 'production_jobs')
+            .in('specification_category', ['paper_type', 'paper_weight']);
+        }
+
         const resolved = await autoResolvePaperSpecifications(
           job.id,
           job.paper_specifications as Record<string, any>
