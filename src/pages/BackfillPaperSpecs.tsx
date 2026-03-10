@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Loader2, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { backfillPaperSpecifications } from '@/utils/backfillPaperSpecifications';
 
 export default function BackfillPaperSpecs() {
