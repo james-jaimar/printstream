@@ -7,7 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BatchMappingOperations } from "./mapping/BatchMappingOperations";
-import { Search, Download, Trash2, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Download, Trash2, CheckCircle, AlertCircle, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { EditMappingDialog } from "./mapping/EditMappingDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
