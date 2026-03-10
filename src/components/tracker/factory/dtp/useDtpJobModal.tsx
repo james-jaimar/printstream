@@ -12,6 +12,8 @@ interface StageInstance {
   client_name?: string;
   notes?: string | null;
   rework_count?: number | null;
+  started_by?: string;
+  completed_by?: string;
 }
 
 type ProofApprovalFlow = 'pending' | 'choosing_allocation' | 'batch_allocation' | 'direct_printing';
