@@ -84,7 +84,7 @@ export function PaperListDialog({
 
           if (existing) {
             existing.jobCount += 1;
-            existing.totalMinutes += stage.estimated_duration_minutes;
+            existing.totalQty += stage.quantity || 0;
             if (!existing.workOrders.includes(wo)) existing.workOrders.push(wo);
           } else {
             map.set(key, {
@@ -93,7 +93,7 @@ export function PaperListDialog({
               paperWeight: pWeight,
               paperSize: pSize,
               jobCount: 1,
-              totalMinutes: stage.estimated_duration_minutes,
+              totalQty: stage.quantity || 0,
               workOrders: [wo],
             });
           }
