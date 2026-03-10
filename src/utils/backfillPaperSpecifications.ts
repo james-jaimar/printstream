@@ -6,7 +6,8 @@ import { autoResolvePaperSpecifications } from '@/services/PaperSpecAutoResolver
  * but not in the job_print_specifications table.
  * Uses paginated fetches and the same auto-resolver as job creation.
  */
-export async function backfillPaperSpecifications() {
+export async function backfillPaperSpecifications(options?: { forceResolve?: boolean }) {
+  const forceResolve = options?.forceResolve ?? false;
   const results = {
     total: 0,
     processed: 0,
