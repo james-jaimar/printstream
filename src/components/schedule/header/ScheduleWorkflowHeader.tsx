@@ -2,7 +2,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Calendar, Zap, Search, ArrowLeftRight, Layers } from "lucide-react";
+import { RefreshCw, Calendar, Zap, Search, ArrowLeftRight, Layers, FileText } from "lucide-react";
 import type { ScheduleDayData } from "@/hooks/useScheduleReader";
 
 interface ScheduleWorkflowHeaderProps {
