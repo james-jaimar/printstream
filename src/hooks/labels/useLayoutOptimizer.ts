@@ -170,10 +170,18 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
       if (data?.layout?.runs) {
         const wasCorrected = data.corrected === true;
         const correctionNotes: string[] = data.correction_notes || [];
+        const validationWarnings: string[] = data.validation?.warnings || [];
 
         const reasoning = wasCorrected
           ? `${data.layout.overall_reasoning} ⚠️ Auto-corrected to respect overrun limits.`
           : (data.layout.overall_reasoning || 'AI-optimized layout');
+
+        // Build debug info for UI inspection
+        const debugInfo: LayoutDebugInfo = {
+          validation_warnings: validationWarnings,
+          correction_notes: correctionNotes,
+          input_items: itemsToUse.map(i => ({ id: i.id, name: i.name, quantity: i.quantity })),
+        };
 
         const aiOption = buildAILayoutOption(
           data.layout.runs,
@@ -183,11 +191,12 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
           itemsToUse,
           weightsToUse,
           qtyPerRoll ?? undefined,
-          data.layout.trade_offs
+          data.layout.trade_offs,
+          debugInfo
         );
 
         if (data.validation && !data.validation.valid) {
-          console.warn('AI layout validation warnings:', data.validation.warnings);
+          console.warn('AI layout validation warnings:', validationWarnings);
         }
 
         if (wasCorrected) {
