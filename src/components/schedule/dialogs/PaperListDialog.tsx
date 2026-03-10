@@ -194,7 +194,7 @@ export function PaperListDialog({
                   <TableHead>Paper</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead className="text-right">Jobs</TableHead>
-                  <TableHead className="text-right">Est. Min</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
                   <TableHead>Work Orders</TableHead>
                 </TableRow>
               </TableHeader>
