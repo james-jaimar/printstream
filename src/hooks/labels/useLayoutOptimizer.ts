@@ -21,6 +21,7 @@ import {
   type LabelItem, 
   type LabelDieline, 
   type LayoutOption,
+  type LayoutDebugInfo,
   type LayoutTradeOffs,
   type ProposedRun,
   type SlotAssignment,
@@ -53,7 +54,8 @@ function buildAILayoutOption(
   items: LabelItem[],
   weights: OptimizationWeights,
   qtyPerRoll?: number,
-  aiTradeOffs?: LayoutTradeOffs
+  aiTradeOffs?: LayoutTradeOffs,
+  debugInfo?: LayoutDebugInfo
 ): LayoutOption | null {
   try {
     const config = getSlotConfig(dieline);
@@ -82,6 +84,7 @@ function buildAILayoutOption(
         actual_labels_per_slot: actualLabelsPerSlot,
         labels_per_output_roll: actualLabelsPerSlot,
         needs_rewinding: qtyPerRoll ? actualLabelsPerSlot < (qtyPerRoll - 50) : false,
+        reasoning: aiRun.reasoning,
       };
     });
 
@@ -114,6 +117,7 @@ function buildAILayoutOption(
       labor_efficiency_score: laborEfficiency,
       reasoning: `🤖 AI-Computed: ${aiReasoning}`,
       trade_offs: aiTradeOffs,
+      debug_info: debugInfo,
     };
 
     return {
@@ -166,10 +170,18 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
       if (data?.layout?.runs) {
         const wasCorrected = data.corrected === true;
         const correctionNotes: string[] = data.correction_notes || [];
+        const validationWarnings: string[] = data.validation?.warnings || [];
 
         const reasoning = wasCorrected
           ? `${data.layout.overall_reasoning} ⚠️ Auto-corrected to respect overrun limits.`
           : (data.layout.overall_reasoning || 'AI-optimized layout');
+
+        // Build debug info for UI inspection
+        const debugInfo: LayoutDebugInfo = {
+          validation_warnings: validationWarnings,
+          correction_notes: correctionNotes,
+          input_items: itemsToUse.map(i => ({ id: i.id, name: i.name, quantity: i.quantity })),
+        };
 
         const aiOption = buildAILayoutOption(
           data.layout.runs,
@@ -179,11 +191,12 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
           itemsToUse,
           weightsToUse,
           qtyPerRoll ?? undefined,
-          data.layout.trade_offs
+          data.layout.trade_offs,
+          debugInfo
         );
 
         if (data.validation && !data.validation.valid) {
-          console.warn('AI layout validation warnings:', data.validation.warnings);
+          console.warn('AI layout validation warnings:', validationWarnings);
         }
 
         if (wasCorrected) {

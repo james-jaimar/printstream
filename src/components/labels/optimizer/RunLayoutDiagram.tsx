@@ -44,6 +44,7 @@ interface RunLayoutDiagramProps {
   aiScore?: number | null;
   compact?: boolean;
   showStats?: boolean;
+  reasoning?: string;
   // Roll-awareness
   qtyPerRoll?: number;
   needsRewinding?: boolean;
@@ -69,6 +70,7 @@ export function RunLayoutDiagram({
   aiScore,
   compact = false,
   showStats = true,
+  reasoning,
   qtyPerRoll,
   needsRewinding,
   labelsPerOutputRoll,
@@ -413,6 +415,13 @@ export function RunLayoutDiagram({
               onSplitChange={onRollSplitChange!}
             />
           </div>
+        )}
+
+        {/* AI Reasoning for this run */}
+        {reasoning && !compact && (
+          <p className="mt-3 text-xs text-muted-foreground italic border-t pt-2">
+            💡 {reasoning}
+          </p>
         )}
       </CardContent>
     </Card>
