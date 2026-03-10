@@ -1,32 +1,28 @@
 
-# Smarter AI Layout Engine — IMPLEMENTED
+# AI Layout Optimizer — Consolidated Architecture
 
-## Changes Made
+## Current State (v2 — Consolidated)
 
-### 1. `src/types/labels.ts` — Added `LayoutTradeOffs` interface and `trade_offs?` to `LayoutOption`
-### 2. `src/utils/labels/layoutOptimizer.ts` — Smart Slot Spreading + trade-off annotations
-- **Rewrote `fillSlotsWithBlankOption()`**: Now spreads items across `floor(totalSlots / numItems)` slots each, splitting quantities evenly. Example: 4 items in 9 slots → 2 slots each (8 filled, 1 blank), NOT 4 filled + 5 blank.
-- `suggestQtyPerRoll()`: suggests roll size based on label dimensions
-- `buildTradeOffs()`: annotates each option with blank slot counts, overrun warnings, roll size notes
-- Updated `createGangedRuns` and `createOptimizedRuns` to use blank-aware slot filling
+### Architecture: AI-Only with Real Context
 
-### 3. `supabase/functions/label-optimize/index.ts` — Physics-first AI prompt + server-side correction
-- **Complete prompt rewrite**: Replaced 700+ words of contradictory rules with a concise, physics-first prompt that:
-  - Teaches how the press works (frames, slots, simultaneous printing) in plain language
-  - Defines the objective clearly: minimize total waste (overrun + substrate)
-  - Provides economic context: blank slot cost (% substrate waste), run changeover cost (~20 min), overrun as hard limit
-  - Includes a worked numerical example showing why mixed quantities break runs
-  - Instructs step-by-step reasoning: sort → group by similar qty → spread across slots → verify overrun math
-- **Corrective run fix**: Orphaned items spread across all slots (not dumped into 1 slot with rest blank)
-- `correctAILayout()` post-processor fixes overrun violations server-side
-- Retry logic — if AI violates overrun, retries once with explicit failure feedback
-- Returns `corrected: true` flag when layout was auto-fixed
+```text
+FLOW: Query existing runs → Subtract printed qty → AI (single brain) → Validate (warnings only) → Human review
+FALLBACK: Individual runs (one item per run) if AI fails
+```
 
-### 4. `src/hooks/labels/useLayoutOptimizer.ts` — Passes qtyPerRoll & dimensions to AI
-- Sends `qty_per_roll`, `label_width_mm`, `label_height_mm` in edge function request
-- Surfaces correction flag — shows toast when AI layout was auto-corrected
+### What Was Removed
+1. **`correctAILayout()`** — server-side post-processor that bumped quantities and created corrective runs
+2. **5 algorithmic strategies** — `ganged-all`, `individual`, `optimized`, `roll-optimized`, `equal-qty` (~600 lines)
+3. **`fillSlotsWithBlankOption()`**, `balanceSlotQuantities()`, `fillAllSlots()`, `annotateRunsWithRollInfo()`, `createGangedRuns()`, `createOptimizedRuns()`, `createEqualQuantityRuns()`, `createRollOptimizedRuns()`
 
-### 5. `src/components/labels/optimizer/LayoutOptionCard.tsx` — Trade-off UI
-- Amber badge for blank slots with tooltip
-- Red badge for overrun warnings with tooltip listing each
-- Blue badge for roll size suggestions with tooltip
+### What Was Added
+1. **Already-printed context** — hook queries `label_runs` table before calling AI, subtracts printed quantities, excludes fully-printed items
+2. **`already_printed` parameter** — edge function accepts and injects into AI prompt so it knows what's done
+3. **Fallback layout** — simple individual runs if AI is unavailable (rate limit, error, etc.)
+
+### Files Changed
+| File | Change |
+|------|--------|
+| `supabase/functions/label-optimize/index.ts` | Removed `correctAILayout()` (~160 lines), accepts `already_printed`, single AI pass with retry (no correction) |
+| `src/utils/labels/layoutOptimizer.ts` | Stripped to math utilities only (~250 lines from ~1000). Kept: `getSlotConfig`, `calculateFramesForSlot`, `calculateMeters`, `calculateProductionTime`, `calculateRunPrintTime`, `scoreLayout`, `validateRunOverrun`, `createSingleItemRun`, `suggestQtyPerRoll`, `buildTradeOffs`, `createLayoutOption`, `formatLayoutSummary` |
+| `src/hooks/labels/useLayoutOptimizer.ts` | AI-only flow with `getAlreadyPrintedQuantities()`, `buildFallbackLayout()`. No parallel algorithmic generation |
