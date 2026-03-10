@@ -125,6 +125,17 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
               Multi-Shift Grouping
             </Button>
           )}
+          {onPaperList && (
+            <Button
+              onClick={onPaperList}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <FileText className="h-4 w-4" />
+              Paper List
+            </Button>
+          )}
         </div>
       </div>
 

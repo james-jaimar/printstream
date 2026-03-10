@@ -292,6 +292,13 @@ export function ScheduleBoard({
         scheduleDays={weekScheduleDays}
         onComplete={onRefresh}
       />
+
+      {/* Paper List Dialog */}
+      <PaperListDialog
+        open={showPaperList}
+        onOpenChange={setShowPaperList}
+        scheduleDays={weekScheduleDays}
+      />
     </div>
   );
 }
