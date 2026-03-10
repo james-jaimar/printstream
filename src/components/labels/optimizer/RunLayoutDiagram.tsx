@@ -70,6 +70,8 @@ export function RunLayoutDiagram({
   aiScore,
   compact = false,
   showStats = true,
+  reasoning,
+  showStats = true,
   qtyPerRoll,
   needsRewinding,
   labelsPerOutputRoll,
