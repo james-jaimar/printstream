@@ -19,6 +19,8 @@ export interface AutoApprovedJob {
   proof_started_by?: string;
   // Track who worked on the DTP stage for this job
   dtp_worked_by?: string[];
+  // Resolved name of last person who worked on this job
+  last_worked_by_name?: string;
 }
 
 // DTP stage ID
