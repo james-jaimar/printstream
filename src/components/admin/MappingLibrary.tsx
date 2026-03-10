@@ -550,6 +550,16 @@ export const MappingLibrary: React.FC = () => {
           <BatchMappingOperations onOperationComplete={handleRefresh} />
         </TabsContent>
       </Tabs>
+
+      <EditMappingDialog
+        mapping={editMapping}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => {
+          loadMappings();
+          loadStats();
+        }}
+      />
     </div>
   );
 };
