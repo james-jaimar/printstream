@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, Clock, CheckCircle } from 'lucide-react';
+import { Send, Clock, CheckCircle, User } from 'lucide-react';
 import { AutoApprovedJob } from '@/hooks/tracker/useAutoApprovedJobs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -106,6 +106,13 @@ export const AutoApprovedPrintQueueColumn: React.FC<AutoApprovedPrintQueueColumn
                     Approved {formatDistanceToNow(new Date(job.proof_approved_manually_at), { addSuffix: true })}
                   </span>
                 </div>
+
+                {job.last_worked_by_name && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
+                    <User className="h-3 w-3" />
+                    <span>Last worked on by: <span className="font-medium">{job.last_worked_by_name}</span></span>
+                  </div>
+                )}
 
                 {job.client_name && (
                   <div className="text-xs text-muted-foreground mb-2">

@@ -19,6 +19,8 @@ export interface AutoApprovedJob {
   proof_started_by?: string;
   // Track who worked on the DTP stage for this job
   dtp_worked_by?: string[];
+  // Resolved name of last person who worked on this job
+  last_worked_by_name?: string;
 }
 
 // DTP stage ID
@@ -93,22 +95,52 @@ export const useAutoApprovedJobs = () => {
         }
       }
 
-      const formattedJobs: AutoApprovedJob[] = (data || []).map((item: any) => ({
-        id: item.id,
-        job_id: item.job_id,
-        wo_no: item.production_jobs.wo_no,
-        customer: item.production_jobs.customer,
-        reference: item.production_jobs.reference,
-        stage_name: item.production_stages.name,
-        proof_approved_manually_at: item.proof_approved_manually_at,
-        client_name: item.client_name,
-        client_email: item.client_email,
-        print_files_sent_to_printer_at: item.print_files_sent_to_printer_at,
-        print_files_sent_by: item.print_files_sent_by,
-        proof_completed_by: item.completed_by,
-        proof_started_by: item.started_by,
-        dtp_worked_by: dtpWorkers[item.job_id] || []
-      }));
+      // Collect all unique user IDs to resolve names
+      const allUserIds = new Set<string>();
+      (data || []).forEach((item: any) => {
+        if (item.completed_by) allUserIds.add(item.completed_by);
+        if (item.started_by) allUserIds.add(item.started_by);
+      });
+      Object.values(dtpWorkers).flat().forEach(id => allUserIds.add(id));
+
+      // Batch resolve user IDs to names
+      let profileMap: Record<string, string> = {};
+      const userIdArray = [...allUserIds];
+      if (userIdArray.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIdArray);
+        
+        if (profiles) {
+          profiles.forEach((p: any) => {
+            if (p.full_name) profileMap[p.id] = p.full_name;
+          });
+        }
+      }
+
+      const formattedJobs: AutoApprovedJob[] = (data || []).map((item: any) => {
+        // Determine the last person who worked on this: proof completed_by > proof started_by > dtp workers
+        const lastWorkerId = item.completed_by || item.started_by || (dtpWorkers[item.job_id]?.[0]);
+        
+        return {
+          id: item.id,
+          job_id: item.job_id,
+          wo_no: item.production_jobs.wo_no,
+          customer: item.production_jobs.customer,
+          reference: item.production_jobs.reference,
+          stage_name: item.production_stages.name,
+          proof_approved_manually_at: item.proof_approved_manually_at,
+          client_name: item.client_name,
+          client_email: item.client_email,
+          print_files_sent_to_printer_at: item.print_files_sent_to_printer_at,
+          print_files_sent_by: item.print_files_sent_by,
+          proof_completed_by: item.completed_by,
+          proof_started_by: item.started_by,
+          dtp_worked_by: dtpWorkers[item.job_id] || [],
+          last_worked_by_name: lastWorkerId ? profileMap[lastWorkerId] : undefined
+        };
+      });
 
       setJobs(formattedJobs);
       setLastUpdated(new Date());
