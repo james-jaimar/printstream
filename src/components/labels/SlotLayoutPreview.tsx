@@ -26,6 +26,7 @@ export function SlotLayoutPreview({ runs, items, dieline }: SlotLayoutPreviewPro
           items={items}
           meters={run.meters}
           frames={run.frames}
+          reasoning={run.reasoning}
           showStats={true}
         />
       ))}
