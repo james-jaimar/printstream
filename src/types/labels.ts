@@ -489,6 +489,8 @@ export interface ProposedRun {
   // User adjustments
   quantity_override?: number;
   roll_split?: RollSplitOption;
+  // AI reasoning
+  reasoning?: string;
 }
 
 export interface OptimizationWeights {
