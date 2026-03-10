@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, Clock, CheckCircle } from 'lucide-react';
+import { Send, Clock, CheckCircle, User } from 'lucide-react';
 import { AutoApprovedJob } from '@/hooks/tracker/useAutoApprovedJobs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
