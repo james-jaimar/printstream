@@ -449,6 +449,7 @@ export function useScheduleReader() {
             paper_display: displaySpec,
             hp12000_paper_size_name: hp12000PaperSizeName,
             hp12000_paper_size: hp12000PaperSize,
+            quantity: row.quantity || undefined,
             is_split_job: row.is_split_job || false,
             split_job_part: row.split_job_part || undefined,
             split_job_total_parts: row.split_job_total_parts || undefined,

@@ -42,7 +42,7 @@ interface PaperGroup {
   paperWeight: string;
   paperSize: string;
   jobCount: number;
-  totalMinutes: number;
+  totalQty: number;
   workOrders: string[];
 }
 
