@@ -13,6 +13,11 @@ interface LabelItem {
   height_mm?: number;
 }
 
+interface AlreadyPrinted {
+  item_id: string;
+  printed_qty: number;
+}
+
 interface Dieline {
   columns_across: number;
   rows_around: number;
@@ -36,6 +41,7 @@ interface OptimizeRequest {
   qty_per_roll?: number;
   label_width_mm?: number;
   label_height_mm?: number;
+  already_printed?: AlreadyPrinted[];
 }
 
 interface AISlotAssignment {
@@ -130,183 +136,15 @@ function validateAILayout(
   return { valid: warnings.length === 0, warnings };
 }
 
-/**
- * Post-processor: correct any AI layout that violates overrun constraints.
- * For each run, if a slot's overrun exceeds maxOverrun:
- *   - Try to bump the slot qty up to (actualPerSlot - maxOverrun) if item can absorb it
- *   - Otherwise blank the slot (qty=0) and collect orphaned quantity for corrective runs
- * Then create equal-qty corrective runs for orphaned quantities.
- */
-function correctAILayout(
-  layout: AILayout,
-  items: LabelItem[],
-  totalSlots: number,
-  labelsPerSlotPerFrame: number,
-  maxOverrun: number
-): { layout: AILayout; corrected: boolean; correctionNotes: string[] } {
-  const notes: string[] = [];
-  let corrected = false;
-
-  // Track how much quantity each item still needs (ordered qty)
-  const itemOrderedQty = new Map<string, number>();
-  for (const item of items) {
-    itemOrderedQty.set(item.id, item.quantity);
-  }
-
-  // First pass: track total assigned per item across all runs
-  const itemAssigned = new Map<string, number>();
-  for (const run of layout.runs) {
-    for (const slot of run.slot_assignments) {
-      itemAssigned.set(slot.item_id, (itemAssigned.get(slot.item_id) || 0) + slot.quantity_in_slot);
-    }
-  }
-
-  // Orphaned quantities that need new runs
-  const orphaned = new Map<string, number>();
-
-  // Fix each run
-  for (let i = 0; i < layout.runs.length; i++) {
-    const run = layout.runs[i];
-    const maxSlotQty = Math.max(...run.slot_assignments.map(s => s.quantity_in_slot));
-    if (maxSlotQty === 0) continue;
-
-    const frames = Math.ceil(maxSlotQty / labelsPerSlotPerFrame);
-    const actualPerSlot = frames * labelsPerSlotPerFrame;
-
-    for (const slot of run.slot_assignments) {
-      if (slot.quantity_in_slot <= 0) continue;
-
-      const overrun = actualPerSlot - slot.quantity_in_slot;
-      if (overrun <= maxOverrun) continue;
-
-      // Overrun violation detected
-      corrected = true;
-      const minAcceptableQty = actualPerSlot - maxOverrun;
-
-      // Option A: Can we bump this slot's qty up?
-      const itemOrdered = itemOrderedQty.get(slot.item_id) || 0;
-      const currentTotal = itemAssigned.get(slot.item_id) || 0;
-      const headroom = itemOrdered - currentTotal + slot.quantity_in_slot; // how much this item can go up to
-
-      if (minAcceptableQty <= headroom) {
-        // Bump up — the extra labels are still within ordered qty headroom
-        const bump = minAcceptableQty - slot.quantity_in_slot;
-        notes.push(`Run ${i + 1}: bumped slot for item ${slot.item_id} from ${slot.quantity_in_slot} to ${minAcceptableQty} (+${bump}) to stay within overrun limit`);
-        itemAssigned.set(slot.item_id, currentTotal - slot.quantity_in_slot + minAcceptableQty);
-        slot.quantity_in_slot = minAcceptableQty;
-      } else {
-        // Option B: blank the slot, orphan the quantity
-        notes.push(`Run ${i + 1}: blanked slot for item ${slot.item_id} (had ${slot.quantity_in_slot}, overrun was ${overrun} > max ${maxOverrun})`);
-        orphaned.set(slot.item_id, (orphaned.get(slot.item_id) || 0) + slot.quantity_in_slot);
-        itemAssigned.set(slot.item_id, currentTotal - slot.quantity_in_slot);
-        slot.quantity_in_slot = 0;
-      }
-    }
-  }
-
-  // Create corrective runs for orphaned quantities — SPREAD items across slots
-  if (orphaned.size > 0) {
-    const orphanedEntries = Array.from(orphaned.entries()).filter(([_, qty]) => qty > 0);
-    
-    // Spread ALL orphaned items across a single corrective run if possible
-    const numOrphans = orphanedEntries.length;
-    
-    if (numOrphans > 0) {
-      const baseSlotsPerItem = Math.floor(totalSlots / numOrphans);
-      const extraSlots = totalSlots % numOrphans;
-      
-      const slots: AISlotAssignment[] = [];
-      let slotIdx = 0;
-      
-      for (let i = 0; i < numOrphans; i++) {
-        const [itemId, qty] = orphanedEntries[i];
-        const slotsForItem = baseSlotsPerItem + (i < extraSlots ? 1 : 0);
-        const qtyPerSlot = Math.ceil(qty / slotsForItem);
-        let remaining = qty;
-        
-        for (let s = 0; s < slotsForItem; s++) {
-          const thisSlotQty = Math.min(qtyPerSlot, remaining);
-          slots.push({ item_id: itemId, quantity_in_slot: thisSlotQty });
-          remaining -= thisSlotQty;
-          slotIdx++;
-        }
-      }
-      
-      // Fill any leftover slots as blank (should be 0-1)
-      while (slotIdx < totalSlots) {
-        slots.push({ item_id: orphanedEntries[0][0], quantity_in_slot: 0 });
-        slotIdx++;
-      }
-      
-      // Validate overrun on this corrective run
-      const maxSlotQty = Math.max(...slots.map(s => s.quantity_in_slot));
-      const frames = Math.ceil(maxSlotQty / labelsPerSlotPerFrame);
-      const actualPerSlot = frames * labelsPerSlotPerFrame;
-      
-      // Check if all items in this run are within overrun
-      const allOk = slots.every(s => s.quantity_in_slot === 0 || (actualPerSlot - s.quantity_in_slot) <= maxOverrun);
-      
-      if (allOk) {
-        // Single corrective run with items spread across slots
-        layout.runs.push({
-          slot_assignments: slots,
-          reasoning: `Corrective run: ${numOrphans} item(s) spread across ${totalSlots} slots to minimize blanks`,
-        });
-        notes.push(`Created 1 corrective run with ${numOrphans} orphaned items spread across ${totalSlots - Math.max(0, totalSlots - slotIdx)} slots`);
-      } else {
-        // Items have too-different quantities for one run — create separate runs per item, but SPREAD each
-        for (const [itemId, qty] of orphanedEntries) {
-          const itemSlots: AISlotAssignment[] = [];
-          const qtyPerSlot = Math.ceil(qty / totalSlots);
-          let remaining = qty;
-          
-          for (let s = 0; s < totalSlots; s++) {
-            const thisSlotQty = Math.min(qtyPerSlot, remaining);
-            itemSlots.push({ item_id: itemId, quantity_in_slot: thisSlotQty > 0 ? thisSlotQty : 0 });
-            remaining -= Math.max(0, thisSlotQty);
-          }
-          
-          layout.runs.push({
-            slot_assignments: itemSlots,
-            reasoning: `Corrective run for ${qty} labels of item ${itemId} (spread across ${totalSlots} slots)`,
-          });
-          notes.push(`Created corrective run for item ${itemId} with ${qty} labels spread across slots`);
-        }
-      }
-    }
-  }
-
-  // Update trade_offs
-  if (corrected) {
-    let totalBlanks = 0;
-    for (const run of layout.runs) {
-      totalBlanks += run.slot_assignments.filter(s => s.quantity_in_slot === 0).length;
-    }
-
-    layout.trade_offs = {
-      ...layout.trade_offs,
-      blank_slots_available: totalBlanks,
-      blank_slot_note: totalBlanks > 0
-        ? `${totalBlanks} blank slot(s) — available for internal labels or another job`
-        : layout.trade_offs?.blank_slot_note,
-      overrun_warnings: notes,
-    };
-
-    layout.overall_reasoning = `[Auto-corrected] ${layout.overall_reasoning}. Server-side correction applied to enforce overrun limit of ${maxOverrun}.`;
-  }
-
-  return { layout, corrected, correctionNotes: notes };
-}
-
 function buildSystemPrompt(
   totalSlots: number,
   labelsPerSlotPerFrame: number,
   labelsPerFrame: number,
   maxOverrun: number,
   rollSizeContext: string,
-  items: LabelItem[]
+  items: LabelItem[],
+  alreadyPrintedContext: string
 ): string {
-  // Pre-compute example values for the worked example
   const exHigh = 5000;
   const exLow = 1000;
   const exFrames = Math.ceil(exHigh / labelsPerSlotPerFrame);
@@ -347,7 +185,7 @@ YOUR REASONING PROCESS (think step by step):
    Example: 3 items in ${totalSlots} slots → ${Math.floor(totalSlots / 3)} slots each = ${Math.floor(totalSlots / 3) * 3} filled, ${totalSlots - Math.floor(totalSlots / 3) * 3} blank.
 4. If an item's quantity is too far from others to share a run, give it its OWN run and spread it across all ${totalSlots} slots (qty_per_slot = ceil(qty / ${totalSlots})).
 5. VERIFY every run before committing: for each slot, calculate (frames × ${labelsPerSlotPerFrame}) − slot_qty. If any result > ${maxOverrun}, the run is invalid — fix it.
-
+${alreadyPrintedContext}
 ITEMS TO ASSIGN (use these exact IDs):
 ${items.map(i => `- ID: "${i.id}" | Name: "${i.name}" | Qty: ${i.quantity}`).join('\n')}
 ${rollSizeContext}
@@ -461,7 +299,7 @@ serve(async (req) => {
   }
 
   try {
-    const { items, dieline, constraints, qty_per_roll, label_width_mm, label_height_mm }: OptimizeRequest = await req.json();
+    const { items, dieline, constraints, qty_per_roll, label_width_mm, label_height_mm, already_printed }: OptimizeRequest = await req.json();
 
     if (!items || items.length === 0) {
       return new Response(
@@ -485,6 +323,16 @@ serve(async (req) => {
     const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0);
     const maxOverrun = constraints?.max_overrun ?? 250;
 
+    // Build already-printed context for the AI prompt
+    let alreadyPrintedContext = '';
+    if (already_printed && already_printed.length > 0) {
+      const printedLines = already_printed.map(ap => {
+        const item = items.find(i => i.id === ap.item_id);
+        return `- Item "${item?.name || ap.item_id}": ${ap.printed_qty} already printed`;
+      });
+      alreadyPrintedContext = `\nALREADY PRINTED — These quantities have ALREADY been produced in previous runs. The quantities in the ITEMS list above already reflect the REMAINING amounts needed. Do NOT add back already-printed quantities.\n${printedLines.join('\n')}\n`;
+    }
+
     // Roll size context
     const lw = label_width_mm || dieline.label_width_mm;
     const lh = label_height_mm || dieline.label_height_mm;
@@ -497,7 +345,7 @@ serve(async (req) => {
       rollSizeContext = `\nROLL SIZE: No qty_per_roll specified. Based on label dimensions (${lw}×${lh}mm), suggest ~${suggestedQpr}/roll in trade_offs.roll_size_note.`;
     }
 
-    const systemPrompt = buildSystemPrompt(totalSlots, labelsPerSlotPerFrame, labelsPerFrame, maxOverrun, rollSizeContext, items);
+    const systemPrompt = buildSystemPrompt(totalSlots, labelsPerSlotPerFrame, labelsPerFrame, maxOverrun, rollSizeContext, items, alreadyPrintedContext);
     const tools = buildToolSchema(totalSlots);
 
     const userPrompt = `Plan the production layout for this order.
@@ -506,10 +354,11 @@ Summary: ${items.length} items, ${totalLabels.toLocaleString()} total labels, ${
 ${qty_per_roll ? `Customer requires ${qty_per_roll} labels per output roll.` : 'No qty/roll specified — suggest one in trade_offs.roll_size_note.'}
 ${constraints?.rush_job ? 'RUSH JOB — minimize number of runs.' : ''}
 ${constraints?.prefer_ganging ? 'Customer prefers ganging where possible.' : ''}
+${already_printed && already_printed.length > 0 ? `\nNote: ${already_printed.length} item(s) have already been partially/fully printed in previous runs. The item quantities above reflect only what REMAINS to be printed.` : ''}
 
 Think step by step, then return the layout via create_layout.`;
 
-    // --- First AI attempt ---
+    // --- AI attempt (single pass, no correction) ---
     let layout: AILayout | null = null;
     try {
       layout = await callAI(LOVABLE_API_KEY, systemPrompt, userPrompt, tools);
@@ -533,32 +382,19 @@ Think step by step, then return the layout via create_layout.`;
     }
 
     let validation = { valid: false, warnings: ["No layout returned from AI"] };
-    let wasCorrected = false;
-    let correctionNotes: string[] = [];
 
     if (layout) {
       validation = validateAILayout(layout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
 
       if (!validation.valid) {
-        console.warn("AI layout validation warnings (attempt 1):", validation.warnings);
+        console.warn("AI layout validation warnings:", validation.warnings);
 
-        // Check if there are overrun violations specifically
+        // Check if there are overrun violations — retry once with feedback, but NO correction
         const hasOverrunViolations = validation.warnings.some(w => w.includes('overrun') && w.includes('> max'));
 
         if (hasOverrunViolations) {
-          // Try server-side correction first
-          const correction = correctAILayout(layout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
-          layout = correction.layout;
-          wasCorrected = correction.corrected;
-          correctionNotes = correction.correctionNotes;
-
-          // Re-validate after correction
-          validation = validateAILayout(layout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
-
-          if (!validation.valid) {
-            // Still not valid — retry AI with explicit failure feedback
-            console.warn("Post-correction still invalid, retrying AI with feedback...");
-            const retryPrompt = `Your previous layout attempt had these overrun violations:
+          console.warn("Overrun violations detected, retrying AI with feedback...");
+          const retryPrompt = `Your previous layout attempt had these overrun violations:
 ${validation.warnings.filter(w => w.includes('overrun')).join('\n')}
 
 The MAXIMUM overrun per slot is ${maxOverrun} labels. You MUST fix this.
@@ -571,34 +407,24 @@ Redo the layout now. Each run's slots should ideally all have the SAME quantity_
 
 ${userPrompt}`;
 
-            try {
-              const retryLayout = await callAI(LOVABLE_API_KEY, systemPrompt, retryPrompt, tools);
-              if (retryLayout) {
-                const retryValidation = validateAILayout(retryLayout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
-                if (retryValidation.valid || 
-                    !retryValidation.warnings.some(w => w.includes('overrun') && w.includes('> max'))) {
-                  // Retry is better — use it
-                  layout = retryLayout;
-                  validation = retryValidation;
-                  wasCorrected = false;
-                  correctionNotes = [];
-                  console.log("AI retry succeeded — overrun violations resolved");
-                } else {
-                  // Retry still bad — apply correction to retry result
-                  const retryCorrection = correctAILayout(retryLayout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
-                  layout = retryCorrection.layout;
-                  wasCorrected = retryCorrection.corrected;
-                  correctionNotes = retryCorrection.correctionNotes;
-                  validation = validateAILayout(layout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
-                  console.warn("AI retry also had violations — applied server-side correction");
-                }
+          try {
+            const retryLayout = await callAI(LOVABLE_API_KEY, systemPrompt, retryPrompt, tools);
+            if (retryLayout) {
+              const retryValidation = validateAILayout(retryLayout, items, totalSlots, labelsPerSlotPerFrame, maxOverrun);
+              if (retryValidation.valid ||
+                  !retryValidation.warnings.some(w => w.includes('overrun') && w.includes('> max'))) {
+                layout = retryLayout;
+                validation = retryValidation;
+                console.log("AI retry succeeded — overrun violations resolved");
+              } else {
+                // Retry still bad — return it with warnings for human review
+                layout = retryLayout;
+                validation = retryValidation;
+                console.warn("AI retry still has violations — returning with warnings for human review");
               }
-            } catch (retryErr) {
-              console.warn("AI retry failed, using corrected first attempt:", retryErr);
-              // Keep the corrected first attempt
             }
-          } else {
-            console.log("Server-side correction resolved all overrun violations");
+          } catch (retryErr) {
+            console.warn("AI retry failed, using first attempt with warnings:", retryErr);
           }
         }
       }
@@ -609,8 +435,6 @@ ${userPrompt}`;
         success: true,
         layout,
         validation,
-        corrected: wasCorrected,
-        correction_notes: correctionNotes,
         metadata: {
           items_count: items.length,
           total_labels: totalLabels,
