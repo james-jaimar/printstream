@@ -21,6 +21,8 @@ export interface AutoApprovedJob {
   dtp_worked_by?: string[];
   // Resolved name of last person who worked on this job
   last_worked_by_name?: string;
+  // Resolved name of who approved the proof
+  approved_by_name?: string;
 }
 
 // DTP stage ID
