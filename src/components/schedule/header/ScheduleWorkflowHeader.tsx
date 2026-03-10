@@ -27,7 +27,8 @@ export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
   searchQuery,
   onSearchChange,
   onPrinterReassignment,
-  onMultiShiftGrouping
+  onMultiShiftGrouping,
+  onPaperList
 }) => {
   const totalStages = scheduleDays.reduce((total, day) => total + day.total_stages, 0);
   const totalMinutes = scheduleDays.reduce((total, day) => total + day.total_minutes, 0);
