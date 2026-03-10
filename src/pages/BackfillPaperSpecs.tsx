@@ -26,7 +26,7 @@ export default function BackfillPaperSpecs() {
     setResults(null);
 
     try {
-      const backfillResults = await backfillPaperSpecifications();
+      const backfillResults = await backfillPaperSpecifications({ forceResolve });
       setResults(backfillResults);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
