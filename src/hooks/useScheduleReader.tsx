@@ -147,6 +147,7 @@ export function useScheduleReader() {
           notes,
           stage_specification_id,
           hp12000_paper_size_id,
+          quantity,
           is_split_job,
           split_job_part,
           split_job_total_parts,
