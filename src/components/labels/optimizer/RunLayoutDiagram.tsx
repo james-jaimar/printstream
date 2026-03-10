@@ -44,6 +44,7 @@ interface RunLayoutDiagramProps {
   aiScore?: number | null;
   compact?: boolean;
   showStats?: boolean;
+  reasoning?: string;
   // Roll-awareness
   qtyPerRoll?: number;
   needsRewinding?: boolean;
