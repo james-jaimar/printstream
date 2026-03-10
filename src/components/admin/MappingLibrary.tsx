@@ -481,6 +481,17 @@ export const MappingLibrary: React.FC = () => {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  onClick={() => {
+                                    setEditMapping(mapping);
+                                    setEditOpen(true);
+                                  }}
+                                  title="Edit mapping"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => toggleVerification(mapping.id, mapping.is_verified)}
                                 >
                                   {mapping.is_verified ? "Unverify" : "Verify"}
