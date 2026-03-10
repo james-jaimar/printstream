@@ -15,6 +15,7 @@ interface ScheduleWorkflowHeaderProps {
   onSearchChange: (query: string) => void;
   onPrinterReassignment?: () => void;
   onMultiShiftGrouping?: () => void;
+  onPaperList?: () => void;
 }
 
 export const ScheduleWorkflowHeader: React.FC<ScheduleWorkflowHeaderProps> = ({
