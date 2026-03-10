@@ -125,10 +125,10 @@ export function PaperListDialog({
     w.document.write(`<html><head><title>Paper List – ${selectedDate}</title>
       <style>body{font-family:sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#f5f5f5}</style></head><body>
       <h2>Paper List — ${day?.day_name} ${selectedDate}</h2>
-      <table><thead><tr><th>Paper</th><th>Size</th><th>Jobs</th><th>Est. Minutes</th><th>Work Orders</th></tr></thead><tbody>`);
+      <table><thead><tr><th>Paper</th><th>Size</th><th>Jobs</th><th>Qty</th><th>Work Orders</th></tr></thead><tbody>`);
     paperGroups.forEach((g) => {
       w.document.write(
-        `<tr><td>${g.paperWeight} ${g.paperType}</td><td>${g.paperSize}</td><td>${g.jobCount}</td><td>${g.totalMinutes}</td><td>${g.workOrders.join(", ")}</td></tr>`
+        `<tr><td>${g.paperWeight} ${g.paperType}</td><td>${g.paperSize}</td><td>${g.jobCount}</td><td>${g.totalQty}</td><td>${g.workOrders.join(", ")}</td></tr>`
       );
     });
     w.document.write("</tbody></table></body></html>");
