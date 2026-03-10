@@ -71,7 +71,6 @@ export function RunLayoutDiagram({
   compact = false,
   showStats = true,
   reasoning,
-  showStats = true,
   qtyPerRoll,
   needsRewinding,
   labelsPerOutputRoll,
