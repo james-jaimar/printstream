@@ -27,6 +27,8 @@ interface StageInstance {
   client_name?: string;
   notes?: string;
   rework_count?: number;
+  started_by?: string;
+  completed_by?: string;
 }
 
 type ProofApprovalFlow = 'pending' | 'choosing_allocation' | 'batch_allocation' | 'direct_printing';
@@ -425,7 +427,9 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
         .from('job_stage_instances')
         .update({
           proof_approved_manually_at: currentTime,
-          updated_at: currentTime
+          updated_at: currentTime,
+          started_by: stageInstance.started_by || user?.id || null,
+          completed_by: user?.id || null
         })
         .eq('id', stageInstance.id);
 
@@ -435,7 +439,9 @@ export const ProofStageActions: React.FC<ProofStageActionsProps> = ({
       if (stageInstance) {
         setStageInstance({
           ...stageInstance,
-          proof_approved_manually_at: currentTime
+          proof_approved_manually_at: currentTime,
+          started_by: stageInstance.started_by || user?.id || undefined,
+          completed_by: user?.id || undefined
         });
       }
       

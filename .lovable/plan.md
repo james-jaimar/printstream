@@ -1,36 +1,32 @@
 
+# Smarter AI Layout Engine — IMPLEMENTED
 
-# Fix "Mine" Toggle — Track Who Approved the Proof
+## Changes Made
 
-## Root Cause
+### 1. `src/types/labels.ts` — Added `LayoutTradeOffs` interface and `trade_offs?` to `LayoutOption`
+### 2. `src/utils/labels/layoutOptimizer.ts` — Smart Slot Spreading + trade-off annotations
+- **Rewrote `fillSlotsWithBlankOption()`**: Now spreads items across `floor(totalSlots / numItems)` slots each, splitting quantities evenly. Example: 4 items in 9 slots → 2 slots each (8 filled, 1 blank), NOT 4 filled + 5 blank.
+- `suggestQtyPerRoll()`: suggests roll size based on label dimensions
+- `buildTradeOffs()`: annotates each option with blank slot counts, overrun warnings, roll size notes
+- Updated `createGangedRuns` and `createOptimizedRuns` to use blank-aware slot filling
 
-The "Mine" toggle **works correctly** — the problem is upstream. When a DTP operator clicks "Approve Proof" in `ProofStageActions.tsx`, the code sets `proof_approved_manually_at` but **never sets `completed_by` or `started_by`**. So 9 of 24 jobs have zero worker association. No operator can claim them via "Mine."
+### 3. `supabase/functions/label-optimize/index.ts` — Physics-first AI prompt + server-side correction
+- **Complete prompt rewrite**: Replaced 700+ words of contradictory rules with a concise, physics-first prompt that:
+  - Teaches how the press works (frames, slots, simultaneous printing) in plain language
+  - Defines the objective clearly: minimize total waste (overrun + substrate)
+  - Provides economic context: blank slot cost (% substrate waste), run changeover cost (~20 min), overrun as hard limit
+  - Includes a worked numerical example showing why mixed quantities break runs
+  - Instructs step-by-step reasoning: sort → group by similar qty → spread across slots → verify overrun math
+- **Corrective run fix**: Orphaned items spread across all slots (not dumped into 1 slot with rest blank)
+- `correctAILayout()` post-processor fixes overrun violations server-side
+- Retry logic — if AI violates overrun, retries once with explicit failure feedback
+- Returns `corrected: true` flag when layout was auto-fixed
 
-Data breakdown:
-- 24 total auto-approved jobs
-- 15 have worker IDs (split across operators)
-- **9 have NULL for all worker fields** — invisible to every operator's "Mine" view
+### 4. `src/hooks/labels/useLayoutOptimizer.ts` — Passes qtyPerRoll & dimensions to AI
+- Sends `qty_per_roll`, `label_width_mm`, `label_height_mm` in edge function request
+- Surfaces correction flag — shows toast when AI layout was auto-corrected
 
-## Fix
-
-### 1. `src/components/tracker/factory/dtp/ProofStageActions.tsx`
-When setting `proof_approved_manually_at`, also set `started_by` and/or `completed_by` to the current user's ID (if not already set). This ensures every manually-approved job has an operator trail.
-
-```typescript
-// Line ~424-430: Add current user tracking
-.update({
-  proof_approved_manually_at: currentTime,
-  updated_at: currentTime,
-  started_by: stageInstance.started_by || user?.id || null,  // preserve if already set
-  completed_by: user?.id || null  // person who approved = completed the proof stage
-})
-```
-
-### 2. `src/hooks/tracker/useAutoApprovedJobs.ts`
-Add `approved_by` field to the interface (the `completed_by` from the proof stage). This is the person who clicked "Approve." Display this as "Approved by: Name" alongside "Last worked on by: Name" — or merge them if they're the same person.
-
-### 3. Both UI components (`AutoApprovedPrintQueueList.tsx`, `AutoApprovedPrintQueueColumn.tsx`)
-Show "Approved by: [Name]" on each card so operators can see who approved it at a glance.
-
-This fix is both **retroactive-safe** (new approvals will track the user) and **forward-looking** (the "Mine" toggle will correctly filter). The 9 existing orphaned jobs will remain unassigned until someone acts on them — but all future approvals will be properly attributed.
-
+### 5. `src/components/labels/optimizer/LayoutOptionCard.tsx` — Trade-off UI
+- Amber badge for blank slots with tooltip
+- Red badge for overrun warnings with tooltip listing each
+- Blue badge for roll size suggestions with tooltip

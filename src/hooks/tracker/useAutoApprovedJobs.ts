@@ -21,6 +21,8 @@ export interface AutoApprovedJob {
   dtp_worked_by?: string[];
   // Resolved name of last person who worked on this job
   last_worked_by_name?: string;
+  // Resolved name of who approved the proof
+  approved_by_name?: string;
 }
 
 // DTP stage ID
@@ -122,6 +124,8 @@ export const useAutoApprovedJobs = () => {
       const formattedJobs: AutoApprovedJob[] = (data || []).map((item: any) => {
         // Determine the last person who worked on this: proof completed_by > proof started_by > dtp workers
         const lastWorkerId = item.completed_by || item.started_by || (dtpWorkers[item.job_id]?.[0]);
+        // The approver is the completed_by on the proof stage (person who clicked Approve)
+        const approverId = item.completed_by;
         
         return {
           id: item.id,
@@ -138,7 +142,8 @@ export const useAutoApprovedJobs = () => {
           proof_completed_by: item.completed_by,
           proof_started_by: item.started_by,
           dtp_worked_by: dtpWorkers[item.job_id] || [],
-          last_worked_by_name: lastWorkerId ? profileMap[lastWorkerId] : undefined
+          last_worked_by_name: lastWorkerId ? profileMap[lastWorkerId] : undefined,
+          approved_by_name: approverId ? profileMap[approverId] : undefined
         };
       });
 
