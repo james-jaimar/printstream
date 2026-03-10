@@ -417,6 +417,13 @@ export function RunLayoutDiagram({
             />
           </div>
         )}
+
+        {/* AI Reasoning for this run */}
+        {reasoning && !compact && (
+          <p className="mt-3 text-xs text-muted-foreground italic border-t pt-2">
+            💡 {reasoning}
+          </p>
+        )}
       </CardContent>
     </Card>
   );

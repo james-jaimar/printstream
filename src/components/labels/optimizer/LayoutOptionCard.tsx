@@ -182,6 +182,68 @@ export function LayoutOptionCard({
         <p className="text-xs text-muted-foreground italic">
           {option.reasoning}
         </p>
+
+        {/* Debug / AI Reasoning Section */}
+        {(option.debug_info || option.runs.some(r => r.reasoning)) && (
+          <Collapsible>
+            <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full" onClick={(e) => e.stopPropagation()}>
+              <Bug className="h-3 w-3" />
+              <span>Debug / AI Reasoning</span>
+              <ChevronDown className="h-3 w-3 ml-auto" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 space-y-3 text-xs">
+              {/* Input items the AI received */}
+              {option.debug_info?.input_items && option.debug_info.input_items.length > 0 && (
+                <div className="space-y-1">
+                  <p className="font-medium text-muted-foreground">AI Input Items:</p>
+                  <div className="bg-muted/50 rounded p-2 space-y-0.5 font-mono text-[11px]">
+                    {option.debug_info.input_items.map((item, i) => (
+                      <p key={i}>{item.name}: {item.quantity.toLocaleString()} labels</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Per-run reasoning */}
+              {option.runs.some(r => r.reasoning) && (
+                <div className="space-y-1">
+                  <p className="font-medium text-muted-foreground">Per-Run Reasoning:</p>
+                  <div className="bg-muted/50 rounded p-2 space-y-1.5">
+                    {option.runs.map((run, i) => run.reasoning ? (
+                      <p key={i} className="text-[11px]">
+                        <span className="font-semibold">Run {run.run_number}:</span> {run.reasoning}
+                      </p>
+                    ) : null)}
+                  </div>
+                </div>
+              )}
+
+              {/* Validation warnings */}
+              {option.debug_info?.validation_warnings && option.debug_info.validation_warnings.length > 0 && (
+                <div className="space-y-1">
+                  <p className="font-medium text-destructive">Validation Warnings:</p>
+                  <div className="bg-destructive/5 rounded p-2 space-y-0.5">
+                    {option.debug_info.validation_warnings.map((w, i) => (
+                      <p key={i} className="text-[11px] text-destructive">{w}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Correction notes */}
+              {option.debug_info?.correction_notes && option.debug_info.correction_notes.length > 0 && (
+                <div className="space-y-1">
+                  <p className="font-medium text-amber-600">Auto-Corrections Applied:</p>
+                  <div className="bg-amber-50 dark:bg-amber-950/30 rounded p-2 space-y-0.5">
+                    {option.debug_info.correction_notes.map((n, i) => (
+                      <p key={i} className="text-[11px] text-amber-700 dark:text-amber-300">{n}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+        )}
       </CardContent>
     </Card>
   );
