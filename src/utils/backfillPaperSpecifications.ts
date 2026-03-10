@@ -32,6 +32,7 @@ export async function backfillPaperSpecifications(options?: { forceResolve?: boo
         .from('production_jobs')
         .select('id, wo_no, paper_specifications')
         .not('paper_specifications', 'is', null)
+        .not('status', 'in', '("Completed","Cancelled","cancelled","completed","archived")')
         .range(offset, offset + batchSize - 1);
 
       if (error) throw error;
