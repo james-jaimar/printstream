@@ -13,6 +13,7 @@ import { MasterOrderModal } from "@/components/tracker/modals/MasterOrderModal";
 import { ExpediteJobDialog } from "@/components/tracker/common/ExpediteJobDialog";
 import { PrinterReassignmentModal } from "@/components/tracker/jobs/PrinterReassignmentModal";
 import { MultiShiftGroupingDialog } from "./dialogs/MultiShiftGroupingDialog";
+import { PaperListDialog } from "./dialogs/PaperListDialog";
 import type { ScheduleDayData, ScheduledStageData } from "@/hooks/useScheduleReader";
 import type { AccessibleJob } from "@/hooks/tracker/useAccessibleJobs";
 import { useJobDiagnostics } from "@/hooks/useJobDiagnostics";
@@ -53,6 +54,7 @@ export function ScheduleBoard({
   const [expediteStage, setExpediteStage] = useState<ScheduledStageData | null>(null);
   const [showPrinterReassignment, setShowPrinterReassignment] = useState(false);
   const [showMultiShiftGrouping, setShowMultiShiftGrouping] = useState(false);
+  const [showPaperList, setShowPaperList] = useState(false);
 
   // Filter schedule days to only show the current week (Monday to Friday)
   const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }); // Monday
@@ -184,6 +186,7 @@ export function ScheduleBoard({
           onSearchChange={setSearchQuery}
           onPrinterReassignment={isAdminUser ? () => setShowPrinterReassignment(true) : undefined}
           onMultiShiftGrouping={isAdminUser ? () => setShowMultiShiftGrouping(true) : undefined}
+          onPaperList={() => setShowPaperList(true)}
         />
         
         {/* Week Navigation */}
@@ -288,6 +291,13 @@ export function ScheduleBoard({
         onOpenChange={setShowMultiShiftGrouping}
         scheduleDays={weekScheduleDays}
         onComplete={onRefresh}
+      />
+
+      {/* Paper List Dialog */}
+      <PaperListDialog
+        open={showPaperList}
+        onOpenChange={setShowPaperList}
+        scheduleDays={weekScheduleDays}
       />
     </div>
   );
