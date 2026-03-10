@@ -18,6 +18,7 @@ export default function BackfillPaperSpecs() {
     errors: Array<{ jobId: string; woNo: string; error: string }>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forceResolve, setForceResolve] = useState(false);
 
   const handleRunBackfill = async () => {
     setIsRunning(true);
