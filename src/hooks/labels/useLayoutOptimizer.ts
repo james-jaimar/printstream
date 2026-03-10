@@ -84,6 +84,7 @@ function buildAILayoutOption(
         actual_labels_per_slot: actualLabelsPerSlot,
         labels_per_output_roll: actualLabelsPerSlot,
         needs_rewinding: qtyPerRoll ? actualLabelsPerSlot < (qtyPerRoll - 50) : false,
+        reasoning: aiRun.reasoning,
       };
     });
 
