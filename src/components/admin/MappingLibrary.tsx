@@ -60,6 +60,8 @@ export const MappingLibrary: React.FC = () => {
   });
   const { toast } = useToast();
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [editMapping, setEditMapping] = useState<Mapping | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   // Debounce search input
   useEffect(() => {
