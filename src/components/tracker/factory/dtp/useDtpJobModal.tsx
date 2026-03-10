@@ -53,7 +53,7 @@ export const useDtpJobModal = (job: AccessibleJob, isOpen: boolean) => {
       
       const { data: stageData } = await supabase
         .from('job_stage_instances')
-        .select('id, status, proof_emailed_at, proof_approved_manually_at, client_email, client_name, production_stage_id, notes, rework_count')
+        .select('id, status, proof_emailed_at, proof_approved_manually_at, client_email, client_name, production_stage_id, notes, rework_count, started_by, completed_by')
         .eq('job_id', job.job_id)
         .eq('production_stage_id', job.current_stage_id)
         .single();
