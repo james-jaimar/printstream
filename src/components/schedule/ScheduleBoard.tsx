@@ -186,6 +186,7 @@ export function ScheduleBoard({
           onSearchChange={setSearchQuery}
           onPrinterReassignment={isAdminUser ? () => setShowPrinterReassignment(true) : undefined}
           onMultiShiftGrouping={isAdminUser ? () => setShowMultiShiftGrouping(true) : undefined}
+          onPaperList={() => setShowPaperList(true)}
         />
         
         {/* Week Navigation */}
