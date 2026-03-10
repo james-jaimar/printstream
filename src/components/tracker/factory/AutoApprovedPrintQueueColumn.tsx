@@ -107,6 +107,13 @@ export const AutoApprovedPrintQueueColumn: React.FC<AutoApprovedPrintQueueColumn
                   </span>
                 </div>
 
+                {job.last_worked_by_name && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
+                    <User className="h-3 w-3" />
+                    <span>Last worked on by: <span className="font-medium">{job.last_worked_by_name}</span></span>
+                  </div>
+                )}
+
                 {job.client_name && (
                   <div className="text-xs text-muted-foreground mb-2">
                     <span className="font-medium">Client:</span> {job.client_name}
