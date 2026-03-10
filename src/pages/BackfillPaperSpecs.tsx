@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Loader2, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { backfillPaperSpecifications } from '@/utils/backfillPaperSpecifications';
 
 export default function BackfillPaperSpecs() {
@@ -17,6 +18,7 @@ export default function BackfillPaperSpecs() {
     errors: Array<{ jobId: string; woNo: string; error: string }>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forceResolve, setForceResolve] = useState(false);
 
   const handleRunBackfill = async () => {
     setIsRunning(true);
@@ -24,7 +26,7 @@ export default function BackfillPaperSpecs() {
     setResults(null);
 
     try {
-      const backfillResults = await backfillPaperSpecifications();
+      const backfillResults = await backfillPaperSpecifications({ forceResolve });
       setResults(backfillResults);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
@@ -53,9 +55,31 @@ export default function BackfillPaperSpecs() {
             </AlertDescription>
           </Alert>
 
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="forceResolve"
+              checked={forceResolve}
+              onCheckedChange={(checked) => setForceResolve(checked === true)}
+            />
+            <label htmlFor="forceResolve" className="text-sm font-medium cursor-pointer">
+              Force re-resolve (overwrite existing paper specs)
+            </label>
+          </div>
+
+          {forceResolve && (
+            <Alert className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-amber-800 dark:text-amber-200">
+                This will <strong>delete and re-resolve</strong> all existing paper type and weight
+                specifications using the current mapping library. Use this after updating mappings.
+              </AlertDescription>
+            </Alert>
+          )}
+
           <Button 
             onClick={handleRunBackfill} 
             disabled={isRunning}
+            variant={forceResolve ? "destructive" : "default"}
             className="w-full"
           >
             {isRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
