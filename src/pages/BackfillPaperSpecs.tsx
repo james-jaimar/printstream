@@ -49,9 +49,9 @@ export default function BackfillPaperSpecs() {
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription>
-              This will scan all production jobs with paper_specifications JSONB data and insert
-              missing entries into the job_print_specifications table. Jobs that already have
-              paper specs in the table will be skipped.
+              This will scan current production jobs (excluding completed/cancelled) with paper_specifications
+              JSONB data and insert missing entries into the job_print_specifications table. Jobs that already
+              have paper specs in the table will be skipped.
             </AlertDescription>
           </Alert>
 
