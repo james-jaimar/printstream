@@ -54,7 +54,8 @@ function buildAILayoutOption(
   items: LabelItem[],
   weights: OptimizationWeights,
   qtyPerRoll?: number,
-  aiTradeOffs?: LayoutTradeOffs
+  aiTradeOffs?: LayoutTradeOffs,
+  debugInfo?: LayoutDebugInfo
 ): LayoutOption | null {
   try {
     const config = getSlotConfig(dieline);
