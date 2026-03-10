@@ -111,7 +111,7 @@ export function PaperListDialog({
     const header = `Paper List — ${day?.day_name} ${selectedDate}\n${"─".repeat(50)}`;
     const rows = paperGroups.map(
       (g) =>
-        `${g.paperWeight} ${g.paperType} (${g.paperSize})  ×${g.jobCount} jobs  ~${g.totalMinutes}min\n  WOs: ${g.workOrders.join(", ")}`
+        `${g.paperWeight} ${g.paperType} (${g.paperSize})  ×${g.jobCount} jobs  Qty: ${g.totalQty}\n  WOs: ${g.workOrders.join(", ")}`
     );
     const text = [header, ...rows].join("\n\n");
     navigator.clipboard.writeText(text);
