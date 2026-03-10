@@ -450,6 +450,12 @@ export interface LayoutTradeOffs {
   overrun_warnings?: string[];
 }
 
+export interface LayoutDebugInfo {
+  validation_warnings: string[];
+  correction_notes: string[];
+  input_items: Array<{ id: string; name: string; quantity: number }>;
+}
+
 export interface LayoutOption {
   id: string;
   runs: ProposedRun[];
@@ -462,6 +468,7 @@ export interface LayoutOption {
   overall_score: number;
   reasoning: string;
   trade_offs?: LayoutTradeOffs;
+  debug_info?: LayoutDebugInfo;
 }
 
 export interface RollSplitOption {
