@@ -26,7 +26,7 @@ const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_DURATION_MS = 5 * 60 * 1000; // 5 min per run
 const VPS_BUSY_MAX_RETRIES = 3;
 const VPS_BUSY_RETRY_DELAY_MS = 5000;
-const INTER_RUN_DELAY_MS = 5000;
+const INTER_RUN_DELAY_MS = 2000;
 
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
