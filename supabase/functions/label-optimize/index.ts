@@ -514,8 +514,25 @@ function solveLayout(
     candidates.push(scoreLayout(runsR, totalSlots, lpf, items, qtyPerRoll));
   }
 
+  // Strategy 5: Fill-first solver — aggressively fills every slot
+  const runsFull = solveFullSlots(items, totalSlots, lpf, maxOverrun);
+  candidates.push(scoreLayout(runsFull, totalSlots, lpf, items, qtyPerRoll));
+
+  // Strategy 6: Fill-first with qtyPerRoll rounding
+  if (qtyPerRoll && qtyPerRoll > 0) {
+    const roundedItems = items.map(i => ({
+      ...i,
+      quantity: Math.ceil(i.quantity / qtyPerRoll) * qtyPerRoll,
+    }));
+    const runsFullR = solveFullSlots(roundedItems, totalSlots, lpf, maxOverrun);
+    candidates.push(scoreLayout(runsFullR, totalSlots, lpf, items, qtyPerRoll));
+  }
+
   // Pick best
   candidates.sort((a, b) => a.score - b.score);
+
+  console.log(`[label-optimize] Strategy scores: ${candidates.map((c, i) => `S${i + 1}=${c.score.toFixed(0)}`).join(', ')}`);
+
   return { layout: candidates[0], candidates: candidates.length };
 }
 
