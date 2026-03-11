@@ -31,6 +31,9 @@ const printStatusConfig: Record<PrintPdfStatus, {
 };
 
 export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile, isUnmatched, availableProofItems, onLinkToProof }: PrintReadyItemCardProps) {
+  const [isGeneratingThumb, setIsGeneratingThumb] = useState(false);
+  const [generatedThumbUrl, setGeneratedThumbUrl] = useState<string | null>(null);
+
   // Proof thumbnail: prefer proof_thumbnail_url, fall back to artwork_thumbnail_url
   const proofThumbPath = item.proof_thumbnail_url || item.artwork_thumbnail_url || null;
   const { url: proofThumbUrl, isLoading: proofLoading } = useThumbnailUrl(proofThumbPath);
@@ -44,6 +47,49 @@ export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile
   const printStatus = printStatusConfig[item.print_pdf_status || 'pending'];
   const PrintStatusIcon = printStatus.icon;
   const hasPrintFile = !!item.print_pdf_url;
+
+  // On-demand thumbnail generation when print PDF exists but thumbnail is missing
+  const generateThumbnailOnDemand = useCallback(async () => {
+    if (!item.print_pdf_url || item.print_thumbnail_url || isGeneratingThumb) return;
+    setIsGeneratingThumb(true);
+    try {
+      // Get a fresh signed URL from the storage path
+      let pdfUrl = item.print_pdf_url;
+      if (!pdfUrl.includes('token=') && !pdfUrl.startsWith('http')) {
+        const { data } = await supabase.storage
+          .from('label-files')
+          .createSignedUrl(pdfUrl, 300);
+        if (data?.signedUrl) pdfUrl = data.signedUrl;
+      }
+      
+      const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
+      const dataUrl = await generatePdfThumbnailFromUrl(pdfUrl, 300);
+      setGeneratedThumbUrl(dataUrl);
+      
+      // Upload and persist the thumbnail
+      const blob = dataUrlToBlob(dataUrl);
+      const thumbPath = `label-artwork/orders/${item.order_id}/thumbnails/${item.id}-print.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from('label-files')
+        .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
+      if (!uploadErr) {
+        await supabase.from('label_items').update({ print_thumbnail_url: thumbPath }).eq('id', item.id);
+      }
+    } catch (err) {
+      console.warn('On-demand print thumbnail generation failed:', item.id, err);
+    } finally {
+      setIsGeneratingThumb(false);
+    }
+  }, [item.id, item.print_pdf_url, item.print_thumbnail_url, item.order_id, isGeneratingThumb]);
+
+  // Auto-trigger thumbnail generation when print file exists but no thumbnail
+  useEffect(() => {
+    if (hasPrintFile && !printThumbPath && !generatedThumbUrl && !isGeneratingThumb) {
+      generateThumbnailOnDemand();
+    }
+  }, [hasPrintFile, printThumbPath, generatedThumbUrl, isGeneratingThumb, generateThumbnailOnDemand]);
+
+  const effectivePrintThumbUrl = printThumbUrl || generatedThumbUrl;
 
   return (
     <Card className="overflow-hidden">
