@@ -1,56 +1,39 @@
 
+# AI Layout Optimizer — Clean Architecture (v3)
 
-# Fix: Enforce Max Overrun as a Hard Constraint
+## Current State
 
-## Root Cause
-
-The architecture is actually clean now — no post-processing layers fighting each other. The problem is simpler: **the AI ignores the overrun constraint**. It assigns quantities to slots without computing the actual frame-based output, resulting in overruns of 502, 600, 1000, and 1200 against a max of 250.
-
-The current prompt says "HARD LIMIT" but the AI doesn't do the math. It needs to be taught *how* to verify its own work, and if it still fails, we need a retry with concrete feedback.
-
-## Changes
-
-### 1. Rewrite the AI prompt to teach the math explicitly (`supabase/functions/label-optimize/index.ts`)
-
-Current prompt explains the physics but doesn't show the AI how to check its own work. New prompt will include:
+### Architecture: AI-Only, Physics-First
 
 ```text
-HOW TO CHECK YOUR WORK:
-For each run, find the HIGHEST quantity_in_slot across all slots.
-frames = ceil(highest_qty / {labelsPerSlotPerFrame})
-actual_output_per_slot = frames × {labelsPerSlotPerFrame}
-overrun_for_each_slot = actual_output_per_slot − that_slot's_quantity_in_slot
-If ANY overrun > {maxOverrun}, you MUST split the item across more slots or move it to a different run.
-
-EXAMPLE: If labelsPerSlotPerFrame=16, maxOverrun=250
-  Slot A: 5300, Slot B: 700 → frames = ceil(5300/16) = 332
-  actual = 332×16 = 5312 → Slot B overrun = 5312−700 = 4612 ← VIOLATION
-  FIX: Move Slot B item to a run where the highest qty is closer to 700.
+FLOW: Query printed runs (printing/completed only) → Subtract from items → AI (single call) → Validate (warnings only) → Human review
+NO: Post-processing, correction loops, algorithmic strategies, efficiency scoring
 ```
 
-This gives the AI a concrete algorithm to self-check.
+### What Was Removed (from v2)
+1. **`OptimizationWeights`** — material/print/labor efficiency weights and UI sliders
+2. **`LayoutDebugInfo`** — correction_notes, input_items debug section
+3. **Efficiency scores** — material_efficiency_score, print_efficiency_score, labor_efficiency_score, overall_score
+4. **`scoreLayout()`**, `buildTradeOffs()`, `createLayoutOption()`, `createSingleItemRun()`, `validateRunOverrun()`, `suggestQtyPerRoll()` — all "second brain" utilities
+5. **`buildFallbackLayout()`** — no fallback, AI-only
+6. **`buildAILayoutOption()`** — client-side recalculation replaced with direct AI mapping
+7. **AI retry loop** — single call, warnings returned for human review
+8. **200+ line prompt** — replaced with ~40 line physics-focused prompt
 
-### 2. Add a single retry with violation feedback (`supabase/functions/label-optimize/index.ts`)
-
-If `validateLayout()` returns overrun violations, make ONE more AI call with the specific violations as feedback:
-
+### Key Fix: Already-Printed Logic
 ```text
-"Your layout has these overrun violations:
-- Run 1, slot X: overrun 502 > max 250
-- Run 2, slot Y: overrun 1200 > max 250
-Fix these by splitting high-overrun items into separate runs or spreading across more slots.
-Return a corrected layout."
+BEFORE: Queried ALL label_runs (including planned/saved), corrupting input on regeneration
+AFTER:  Only queries runs with status IN ('printing', 'completed')
 ```
 
-This is not "post-processing" — it's asking the AI to fix its own mistake with concrete data. If retry still fails, return the result with warnings for human review.
-
-### 3. No changes to the hook or utilities
-
-The hook (`useLayoutOptimizer.ts`) and utilities (`layoutOptimizer.ts`) are clean. No post-processing exists. The only issue is the quality of the AI's output.
-
-## Files
-
-| File | Change |
-|------|--------|
-| `supabase/functions/label-optimize/index.ts` | Rewrite prompt with self-check algorithm + add single retry with violation feedback |
-
+### Files
+| File | Lines | Change |
+|------|-------|--------|
+| `supabase/functions/label-optimize/index.ts` | ~200 | Clean prompt, single AI call, validation warnings only |
+| `src/hooks/labels/useLayoutOptimizer.ts` | ~230 | Fixed already-printed, direct AI mapping, no scoring |
+| `src/utils/labels/layoutOptimizer.ts` | ~85 | Math only: getSlotConfig, frames, meters, time |
+| `src/types/labels.ts` | ~480 | Removed weights/scores/debug, simplified LayoutOption & ProposedRun |
+| `src/components/labels/LayoutOptimizer.tsx` | ~400 | Removed weight sliders and score bars |
+| `src/components/labels/optimizer/LayoutOptionCard.tsx` | ~170 | Shows warnings + trade-offs, no efficiency scores |
+| `src/components/labels/optimizer/LayoutOptimizerPanel.tsx` | ~100 | Simplified, no weights |
+| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | ~350 | Unchanged visual, kept interactive controls |
