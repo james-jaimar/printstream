@@ -339,7 +339,22 @@ serve(async (req) => {
 
     const systemPrompt = buildSystemPrompt(items, totalSlots, labelsPerSlotPerFrame, max_overrun, qty_per_roll);
     const tools = buildTools(totalSlots);
-    const userMessage = `Plan the layout for ${items.length} items, ${totalLabels.toLocaleString()} total labels, ${totalSlots} slots. Max overrun: ${max_overrun}. Think step by step and verify each run's overrun before returning.`;
+    const userMessage = `Plan the most finishing-efficient shared print layout for ${items.length} items.
+
+Context:
+- Total labels requested: ${totalLabels.toLocaleString()}
+- Slots across: ${totalSlots}
+- Labels per slot per frame: ${labelsPerSlotPerFrame}
+- Max overrun per filled slot: ${max_overrun}
+- Preferred qty per roll: ${qty_per_roll || "not specified"}
+
+Important:
+- Prioritize reducing rewind and roll-joining work.
+- Clean finished roll quantities are more important than perfect slot utilization.
+- Blank slots are acceptable if they improve finishing efficiency.
+- Verify every run against the overrun rule before returning.
+
+Return the layout using the create_layout tool only.`;
 
     // --- First AI call ---
     const firstResult = await callAI(LOVABLE_API_KEY, systemPrompt, userMessage, tools);
