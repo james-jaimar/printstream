@@ -147,13 +147,11 @@ function greedySolve(
   lpf: number,
   maxOverrun: number
 ): RunBucket[] {
-  // Sort by quantity descending for best packing
   const sorted = [...splitItems].sort((a, b) => b.quantity - a.quantity);
   const runs: RunBucket[] = [];
 
   for (const si of sorted) {
     let placed = false;
-    // Try to fit into an existing run
     for (const run of runs) {
       if (run.slots.length >= totalSlots) continue;
       if (canAddToRun(run.slotQtys, si.quantity, lpf, maxOverrun)) {
@@ -165,6 +163,210 @@ function greedySolve(
     }
     if (!placed) {
       runs.push({ slots: [si], slotQtys: [si.quantity] });
+    }
+  }
+
+  return runs;
+}
+
+// ─── Fill-First Solver ───────────────────────────────────────────────────────
+
+/**
+ * Remaining quantity tracker for fill-first algorithm.
+ */
+interface ItemRemainder {
+  id: string;
+  name: string;
+  remaining: number;
+}
+
+/**
+ * Fill-first solver: ensures every slot in every run is filled (except possibly the last run).
+ * Splits items aggressively to fill slots within the compatible range of each run's anchor item.
+ */
+function solveFullSlots(
+  items: LabelItem[],
+  totalSlots: number,
+  lpf: number,
+  maxOverrun: number
+): RunBucket[] {
+  // Track remaining quantities for each item
+  const remainders: ItemRemainder[] = items
+    .map(i => ({ id: i.id, name: i.name, remaining: i.quantity }))
+    .sort((a, b) => b.remaining - a.remaining);
+
+  const runs: RunBucket[] = [];
+  let splitCounter = 0; // global split index tracker per item
+  const splitCounts = new Map<string, number>(); // track total splits per item
+
+  function totalRemaining(): number {
+    return remainders.reduce((s, r) => s + r.remaining, 0);
+  }
+
+  while (totalRemaining() > 0) {
+    // Sort remainders descending, filter out zero
+    remainders.sort((a, b) => b.remaining - a.remaining);
+    const available = remainders.filter(r => r.remaining > 0);
+    if (available.length === 0) break;
+
+    const run: RunBucket = { slots: [], slotQtys: [] };
+
+    // Pick the largest remaining item as anchor for this run
+    const anchor = available[0];
+    const anchorQty = anchor.remaining;
+
+    // Compute compatible range for this run
+    const frames = Math.ceil(anchorQty / lpf);
+    const actual = frames * lpf;
+    const minCompatible = Math.max(1, actual - maxOverrun);
+
+    // Place anchor in first slot (use all of it)
+    const anchorSplitIdx = splitCounts.get(anchor.id) || 0;
+    run.slots.push({
+      originalId: anchor.id,
+      originalName: anchor.name,
+      quantity: anchorQty,
+      splitIndex: anchorSplitIdx,
+      totalSplits: 0, // will be finalized later
+    });
+    run.slotQtys.push(anchorQty);
+    splitCounts.set(anchor.id, anchorSplitIdx + 1);
+    anchor.remaining = 0;
+
+    // Fill remaining slots
+    for (let slotIdx = 1; slotIdx < totalSlots; slotIdx++) {
+      // Re-sort available items
+      const candidates = remainders.filter(r => r.remaining > 0);
+      if (candidates.length === 0) break; // no more items — last run will have blanks
+
+      let placed = false;
+
+      // First: try to find an item that fits entirely within the compatible range
+      for (const cand of candidates) {
+        if (cand.remaining >= minCompatible && cand.remaining <= actual) {
+          // Fits entirely — verify with canAddToRun
+          if (canAddToRun(run.slotQtys, cand.remaining, lpf, maxOverrun)) {
+            const si = splitCounts.get(cand.id) || 0;
+            run.slots.push({
+              originalId: cand.id,
+              originalName: cand.name,
+              quantity: cand.remaining,
+              splitIndex: si,
+              totalSplits: 0,
+            });
+            run.slotQtys.push(cand.remaining);
+            splitCounts.set(cand.id, si + 1);
+            cand.remaining = 0;
+            placed = true;
+            break;
+          }
+        }
+      }
+
+      if (placed) continue;
+
+      // Second: try to split an item to create a portion that fits in the compatible range
+      // Pick the item with the most remaining quantity to split from
+      for (const cand of candidates) {
+        if (cand.remaining > actual) {
+          // Item is larger than actual — take a portion equal to anchorQty (will match anchor perfectly)
+          const portion = anchorQty;
+          if (canAddToRun(run.slotQtys, portion, lpf, maxOverrun)) {
+            const si = splitCounts.get(cand.id) || 0;
+            run.slots.push({
+              originalId: cand.id,
+              originalName: cand.name,
+              quantity: portion,
+              splitIndex: si,
+              totalSplits: 0,
+            });
+            run.slotQtys.push(portion);
+            splitCounts.set(cand.id, si + 1);
+            cand.remaining -= portion;
+            placed = true;
+            break;
+          }
+        } else if (cand.remaining < minCompatible) {
+          // Item is smaller than minCompatible — try placing it at minCompatible
+          // (this means we'll produce more than needed, but within overrun limit)
+          const portion = minCompatible;
+          if (portion <= cand.remaining) {
+            // Item has enough for minCompatible — shouldn't happen since remaining < minCompatible
+            continue;
+          }
+          // Actually, the item is too small. Try using its full remaining as a slot
+          // but only if it satisfies overrun constraint
+          if (canAddToRun(run.slotQtys, cand.remaining, lpf, maxOverrun)) {
+            const si = splitCounts.get(cand.id) || 0;
+            run.slots.push({
+              originalId: cand.id,
+              originalName: cand.name,
+              quantity: cand.remaining,
+              splitIndex: si,
+              totalSplits: 0,
+            });
+            run.slotQtys.push(cand.remaining);
+            splitCounts.set(cand.id, si + 1);
+            cand.remaining = 0;
+            placed = true;
+            break;
+          }
+        } else {
+          // Item is between minCompatible and actual — fits! Use all of it
+          if (canAddToRun(run.slotQtys, cand.remaining, lpf, maxOverrun)) {
+            const si = splitCounts.get(cand.id) || 0;
+            run.slots.push({
+              originalId: cand.id,
+              originalName: cand.name,
+              quantity: cand.remaining,
+              splitIndex: si,
+              totalSplits: 0,
+            });
+            run.slotQtys.push(cand.remaining);
+            splitCounts.set(cand.id, si + 1);
+            cand.remaining = 0;
+            placed = true;
+            break;
+          }
+        }
+      }
+
+      if (placed) continue;
+
+      // Third: if no item fits even with splitting, try taking a compatible portion from the largest
+      for (const cand of candidates) {
+        if (cand.remaining >= minCompatible) {
+          // Take exactly what fits: use anchorQty or cand.remaining, whichever is smaller
+          const portion = Math.min(cand.remaining, anchorQty);
+          if (portion >= minCompatible && canAddToRun(run.slotQtys, portion, lpf, maxOverrun)) {
+            const si = splitCounts.get(cand.id) || 0;
+            run.slots.push({
+              originalId: cand.id,
+              originalName: cand.name,
+              quantity: portion,
+              splitIndex: si,
+              totalSplits: 0,
+            });
+            run.slotQtys.push(portion);
+            splitCounts.set(cand.id, si + 1);
+            cand.remaining -= portion;
+            placed = true;
+            break;
+          }
+        }
+      }
+
+      // If still not placed, this slot stays blank (should only happen on last run)
+      if (!placed) break;
+    }
+
+    runs.push(run);
+  }
+
+  // Finalize totalSplits for each item
+  for (const run of runs) {
+    for (const slot of run.slots) {
+      slot.totalSplits = splitCounts.get(slot.originalId) || 1;
     }
   }
 
