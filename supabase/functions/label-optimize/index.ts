@@ -400,9 +400,16 @@ function scoreLayout(
   let splitPenalty = 0;
   let remainderPenalty = 0;
 
-  // Blank slots
-  for (const run of runs) {
-    blankSlotPenalty += (totalSlots - run.slots.length) * 10;
+  // Blank slots — massive penalty on non-last runs, mild on last run
+  for (let ri = 0; ri < runs.length; ri++) {
+    const blanks = totalSlots - runs[ri].slots.length;
+    if (ri < runs.length - 1) {
+      // Non-last run: blanks are effectively forbidden
+      blankSlotPenalty += blanks * 1000;
+    } else {
+      // Last run: blanks are acceptable
+      blankSlotPenalty += blanks * 10;
+    }
   }
 
   // Total overrun
