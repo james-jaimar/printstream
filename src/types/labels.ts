@@ -37,13 +37,6 @@ export const LABEL_FINISHING_CONSTANTS = {
   SHORT_ROLL_WARNING_THRESHOLD: 300, // < 300 labels/roll = warning, consider joining
 } as const;
 
-// AI Optimization Weights (Configurable)
-export const DEFAULT_OPTIMIZATION_WEIGHTS = {
-  material_efficiency: 0.4,   // Minimize substrate waste
-  print_efficiency: 0.35,     // Minimize number of runs/frames
-  labor_efficiency: 0.25,     // Minimize handling/changeovers
-} as const;
-
 // Status types
 export type LabelOrderStatus = 
   | 'quote' 
@@ -134,12 +127,10 @@ export interface LabelDieline {
   created_by: string | null;
   created_at: string;
   updated_at: string;
-  // Bleed specifications for asymmetric bleed support
   bleed_left_mm: number | null;
   bleed_right_mm: number | null;
   bleed_top_mm: number | null;
   bleed_bottom_mm: number | null;
-  // Die metadata
   die_no: string | null;
   rpl: string | null;
   die_type: string | null;
@@ -209,20 +200,17 @@ export interface LabelOrder {
   proof_version: number;
   notes: string | null;
   saved_layout: Record<string, any> | null;
-  // Post-print / delivery fields
   core_size_mm: number | null;
   qty_per_roll: number | null;
   roll_direction: string | null;
   delivery_method: string | null;
   delivery_address: string | null;
   delivery_notes: string | null;
-  // ABG machine output fields
   output_rolls_count: number | null;
   abg_speed_m_per_min: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
-  // Joined data
   dieline?: LabelDieline;
   substrate?: LabelStock;
   items?: LabelItem[];
@@ -238,7 +226,6 @@ export interface LabelItem {
   name: string;
   artwork_pdf_url: string | null;
   artwork_thumbnail_url: string | null;
-  // Dual artwork model - proof vs print-ready
   proof_pdf_url: string | null;
   proof_thumbnail_url: string | null;
   print_pdf_url: string | null;
@@ -247,7 +234,6 @@ export interface LabelItem {
   requires_crop: boolean;
   crop_amount_mm: CropAmountMm | null;
   artwork_source: ArtworkSource;
-  // Proofing workflow
   proofing_status: ProofingStatus;
   artwork_issue: string | null;
   quantity: number;
@@ -259,7 +245,6 @@ export interface LabelItem {
   min_dpi: number | null;
   has_bleed: boolean | null;
   notes: string | null;
-  // Orientation & multi-page support
   needs_rotation: boolean;
   page_count: number;
   parent_item_id: string | null;
@@ -268,13 +253,11 @@ export interface LabelItem {
   updated_at: string;
 }
 
-// PDF page box dimensions in mm
 export interface PdfBoxMm {
   width_mm: number;
   height_mm: number;
 }
 
-// All PDF page boxes
 export interface PdfBoxes {
   mediabox: PdfBoxMm | null;
   cropbox: PdfBoxMm | null;
@@ -299,7 +282,6 @@ export interface PreflightReport {
   spot_colors?: string[];
   warnings?: string[];
   errors?: string[];
-  // PDF page boxes for accurate dimension validation
   boxes?: PdfBoxes;
   primary_box?: "trimbox" | "mediabox";
 }
@@ -345,7 +327,6 @@ export interface LabelRun {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
-  // Joined data
   schedule?: LabelSchedule;
 }
 
@@ -364,7 +345,6 @@ export interface LabelSchedule {
   sort_order: number;
   created_at: string;
   updated_at: string;
-  // Joined data
   run?: LabelRun;
 }
 
@@ -393,14 +373,12 @@ export interface CreateLabelOrderInput {
   quickeasy_wo_no?: string;
   orientation?: number;
   ink_config?: LabelInkConfig;
-  // Post-print / delivery fields
   core_size_mm?: number | null;
   qty_per_roll?: number | null;
   roll_direction?: string | null;
   delivery_method?: string | null;
   delivery_address?: string | null;
   delivery_notes?: string | null;
-  // ABG machine output fields
   output_rolls_count?: number | null;
   abg_speed_m_per_min?: number | null;
 }
@@ -450,25 +428,15 @@ export interface LayoutTradeOffs {
   overrun_warnings?: string[];
 }
 
-export interface LayoutDebugInfo {
-  validation_warnings: string[];
-  correction_notes: string[];
-  input_items: Array<{ id: string; name: string; quantity: number }>;
-}
-
 export interface LayoutOption {
   id: string;
   runs: ProposedRun[];
   total_meters: number;
   total_frames: number;
   total_waste_meters: number;
-  material_efficiency_score: number;
-  print_efficiency_score: number;
-  labor_efficiency_score: number;
-  overall_score: number;
   reasoning: string;
   trade_offs?: LayoutTradeOffs;
-  debug_info?: LayoutDebugInfo;
+  warnings?: string[];
 }
 
 export interface RollSplitOption {
@@ -481,25 +449,14 @@ export interface ProposedRun {
   slot_assignments: SlotAssignment[];
   meters: number;
   frames: number;
-  // Roll-awareness metadata
   actual_labels_per_slot?: number;
-  labels_per_output_roll?: number;
-  needs_rewinding?: boolean;
-  consolidation_suggestion?: string;
-  // User adjustments
+  reasoning?: string;
+  // Used by interactive finishing controls
   quantity_override?: number;
   roll_split?: RollSplitOption;
-  // AI reasoning
-  reasoning?: string;
 }
 
-export interface OptimizationWeights {
-  material_efficiency: number;
-  print_efficiency: number;
-  labor_efficiency: number;
-}
-
-// ---- Post-print / finishing types (re-exported from hooks for use in LabelOrder) ----
+// ---- Post-print / finishing types ----
 export type LabelServiceType =
   | 'finishing' | 'rewinding' | 'joining' | 'handwork' | 'qa' | 'packaging' | 'delivery';
 
@@ -541,4 +498,3 @@ export interface LabelOrderStageInstance {
   updated_at: string;
   stage?: { id: string; name: string; color: string; stage_group: string } | null;
 }
-

@@ -1,92 +1,39 @@
 
+# AI Layout Optimizer — Clean Architecture (v3)
 
-# Complete Rewrite: AI Layout Optimizer
+## Current State
 
-## The Core Problems
+### Architecture: AI-Only, Physics-First
 
-1. **`getAlreadyPrintedQuantities()` counts slot assignments, not actual prints** — it sums `quantity_in_slot` from ALL saved runs (including runs that haven't been printed yet), so each time you regenerate, previous saved layouts corrupt the input
-2. **The AI prompt is overengineered** — 200+ lines of "worked examples" and edge cases that confuse the model rather than help it
-3. **Client-side recalculates everything** — `buildAILayoutOption()` recomputes frames, meters, efficiency scores, trade-offs on top of what the AI already figured out, creating mismatches
-4. **Validation/retry loop** adds another layer of mutation
-
-## The Rewrite — Three Clean Files
-
-### 1. Edge Function: `supabase/functions/label-optimize/index.ts` (~150 lines, down from 456)
-
-**Strip to essentials:**
-- Accept: `items[]`, `dieline`, `max_overrun`, `qty_per_roll`
-- Simple, physics-focused prompt:
-  - "You have N slots. Each slot prints simultaneously. A run's length = ceil(max_slot_qty / labels_per_slot_per_frame). Every slot produces that many. Overrun = actual - requested. Max overrun: X."
-  - "EVERY item must appear. No item may be skipped. Assign all items."
-  - "Items sorted by quantity for you: [list]"
-- Tool calling for structured output (keep `create_layout` tool schema)
-- **No retry loop.** Single AI call. Return result + validation warnings. Human reviews.
-- Return the AI's raw runs + reasoning directly — no server-side manipulation
-
-**The prompt will be ~40 lines**, not 200. Clear physics, clear constraint, clear objective.
-
-### 2. Hook: `src/hooks/labels/useLayoutOptimizer.ts` (~200 lines, down from 522)
-
-**Simplify to:**
-- `generateOptions()`: 
-  - Query `label_runs` WHERE `status IN ('printing','completed')` (only actually printed runs, not saved/planned ones)
-  - Subtract from item quantities
-  - Call edge function with adjusted items
-  - Map AI response directly to `LayoutOption` — minimal transformation (just add slot index numbers)
-- `applyLayout()`: Save runs to DB (unchanged)
-- `saveLayout()` / `clearSavedLayout()`: Persist to `label_orders.saved_layout` (unchanged)
-- **Remove**: efficiency scoring, weights system, fallback layout builder, complex debug info builder
-
-### 3. Utilities: `src/utils/labels/layoutOptimizer.ts` (~80 lines, down from 250)
-
-**Keep only:**
-- `getSlotConfig()` — needed by imposition engine
-- `calculateFramesForSlot()`, `calculateMeters()` — basic math
-- `calculateProductionTime()`, `calculateRunPrintTime()` — time estimates
-- `formatLayoutSummary()` — display helper
-
-**Remove**: `scoreLayout`, `buildTradeOffs`, `createLayoutOption`, `createSingleItemRun`, `validateRunOverrun`, `suggestQtyPerRoll` — all the "second brain" stuff
-
-### 4. Panel: `src/components/labels/optimizer/LayoutOptimizerPanel.tsx`
-
-- Remove weights sliders (material/print/labor efficiency) — the AI decides
-- Keep max overrun slider — that's a real constraint
-- Keep generate button, layout cards display
-- Show AI reasoning prominently
-
-### 5. Types: `src/types/labels.ts`
-
-- Remove `OptimizationWeights`, `DEFAULT_OPTIMIZATION_WEIGHTS`, `LayoutDebugInfo`
-- Simplify `LayoutOption`: remove efficiency scores, keep `id`, `runs`, `total_meters`, `total_frames`, `reasoning`, `trade_offs`
-- Simplify `ProposedRun`: remove `needs_rewinding`, `consolidation_suggestion`, `quantity_override`, `roll_split`
-
-## Key Fix: Already-Printed Logic
-
-```typescript
-// BEFORE (broken): counts ALL runs including un-printed saved layouts
-.from('label_runs').select('slot_assignments').eq('order_id', orderId)
-
-// AFTER: only count runs that actually went to press
-.from('label_runs').select('slot_assignments')
-.eq('order_id', orderId)
-.in('status', ['printing', 'completed'])
+```text
+FLOW: Query printed runs (printing/completed only) → Subtract from items → AI (single call) → Validate (warnings only) → Human review
+NO: Post-processing, correction loops, algorithmic strategies, efficiency scoring
 ```
 
-## Key Fix: AI Prompt
+### What Was Removed (from v2)
+1. **`OptimizationWeights`** — material/print/labor efficiency weights and UI sliders
+2. **`LayoutDebugInfo`** — correction_notes, input_items debug section
+3. **Efficiency scores** — material_efficiency_score, print_efficiency_score, labor_efficiency_score, overall_score
+4. **`scoreLayout()`**, `buildTradeOffs()`, `createLayoutOption()`, `createSingleItemRun()`, `validateRunOverrun()`, `suggestQtyPerRoll()` — all "second brain" utilities
+5. **`buildFallbackLayout()`** — no fallback, AI-only
+6. **`buildAILayoutOption()`** — client-side recalculation replaced with direct AI mapping
+7. **AI retry loop** — single call, warnings returned for human review
+8. **200+ line prompt** — replaced with ~40 line physics-focused prompt
 
-Short, clear, physics-only. No "worked examples" with made-up numbers. Just:
-- Here's how the press works (3 sentences)
-- Here are the items (exact IDs and quantities)
-- Rules: every item must appear, max overrun X, minimize waste
-- Return via `create_layout` tool
+### Key Fix: Already-Printed Logic
+```text
+BEFORE: Queried ALL label_runs (including planned/saved), corrupting input on regeneration
+AFTER:  Only queries runs with status IN ('printing', 'completed')
+```
 
-## Files to Modify
-
-| File | Action |
-|------|--------|
-| `supabase/functions/label-optimize/index.ts` | Rewrite — ~150 lines |
-| `src/hooks/labels/useLayoutOptimizer.ts` | Rewrite — ~200 lines |
-| `src/utils/labels/layoutOptimizer.ts` | Strip to ~80 lines |
-| `src/types/labels.ts` | Simplify layout types |
-| `src/components/labels/optimizer/LayoutOptimizerPanel.tsx` | Remove weights UI |
-
+### Files
+| File | Lines | Change |
+|------|-------|--------|
+| `supabase/functions/label-optimize/index.ts` | ~200 | Clean prompt, single AI call, validation warnings only |
+| `src/hooks/labels/useLayoutOptimizer.ts` | ~230 | Fixed already-printed, direct AI mapping, no scoring |
+| `src/utils/labels/layoutOptimizer.ts` | ~85 | Math only: getSlotConfig, frames, meters, time |
+| `src/types/labels.ts` | ~480 | Removed weights/scores/debug, simplified LayoutOption & ProposedRun |
+| `src/components/labels/LayoutOptimizer.tsx` | ~400 | Removed weight sliders and score bars |
+| `src/components/labels/optimizer/LayoutOptionCard.tsx` | ~170 | Shows warnings + trade-offs, no efficiency scores |
+| `src/components/labels/optimizer/LayoutOptimizerPanel.tsx` | ~100 | Simplified, no weights |
+| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | ~350 | Unchanged visual, kept interactive controls |

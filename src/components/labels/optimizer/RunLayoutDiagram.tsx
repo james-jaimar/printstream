@@ -13,7 +13,7 @@ import { getSlotConfig } from '@/utils/labels/layoutOptimizer';
 import { RunQuantityAdjuster } from './RunQuantityAdjuster';
 import { RollSplitSelector } from './RollSplitSelector';
 
-// Color palette for items - using semantic tokens where possible
+// Color palette for items
 const ITEM_COLORS = [
   { bg: 'bg-blue-500', text: 'text-white', border: 'border-blue-600', light: 'bg-blue-100' },
   { bg: 'bg-emerald-500', text: 'text-white', border: 'border-emerald-600', light: 'bg-emerald-100' },
@@ -45,13 +45,11 @@ interface RunLayoutDiagramProps {
   compact?: boolean;
   showStats?: boolean;
   reasoning?: string;
-  // Roll-awareness
   qtyPerRoll?: number;
   needsRewinding?: boolean;
   labelsPerOutputRoll?: number;
   actualLabelsPerSlot?: number;
   consolidationSuggestion?: string;
-  // Interactive controls
   quantityOverride?: number;
   rollSplit?: RollSplitOption;
   onQuantityOverride?: (runNumber: number, newQty: number) => void;
@@ -81,19 +79,16 @@ export function RunLayoutDiagram({
   onQuantityOverride,
   onRollSplitChange,
 }: RunLayoutDiagramProps) {
-  // Create item color map
   const itemColorMap = new Map<string, typeof ITEM_COLORS[0]>();
   items.forEach((item, index) => {
     itemColorMap.set(item.id, ITEM_COLORS[index % ITEM_COLORS.length]);
   });
 
-  // Create slot map for quick lookup
   const slotMap = new Map<number, SlotAssignment>();
   slotAssignments.forEach(assignment => {
     slotMap.set(assignment.slot, assignment);
   });
 
-  // Detect single-item runs - these use ALL slots for the same item
   const isSingleItemRun = slotAssignments.length === 1;
   const singleItemAssignment = isSingleItemRun ? slotAssignments[0] : null;
   const singleItem = singleItemAssignment 
@@ -103,18 +98,14 @@ export function RunLayoutDiagram({
   const columnsAcross = dieline.columns_across;
   const rowsAround = dieline.rows_around;
 
-  // Calculate total print qty for this run using proper template stacking
   const slotConfig = getSlotConfig(dieline);
   const labelsPerFrame = slotConfig.labelsPerFrame;
   const totalPrintQty = frames ? frames * labelsPerFrame : null;
   
-  // Actual output per slot (frames-based, not requested)
   const effectiveActualPerSlot = actualLabelsPerSlot ?? (frames ? frames * slotConfig.labelsPerSlotPerFrame : null);
 
-  // Calculate how many frames to show (max 3 for preview)
   const framesToShow = compact ? 1 : Math.min(3, Math.max(1, frames || 1));
   
-  // Show interactive controls even in compact mode when callbacks are provided
   const ROLL_TOLERANCE = 50;
   const showControls = qtyPerRoll && qtyPerRoll > 0;
   const showAdjuster = showControls && effectiveActualPerSlot && effectiveActualPerSlot < qtyPerRoll && onQuantityOverride;
@@ -122,7 +113,6 @@ export function RunLayoutDiagram({
 
   return (
     <Card className={cn("overflow-hidden", compact && "border-0 shadow-none")}>
-      {/* Compact mode header */}
       {compact && (
         <div className="px-2 pt-2 pb-1 text-center space-y-1">
           <span className="text-xs font-medium text-muted-foreground">
@@ -234,21 +224,17 @@ export function RunLayoutDiagram({
 
             {/* Roll Layout Container */}
             <div className="flex-1 border-2 border-dashed border-muted-foreground/30 rounded-lg p-2 bg-muted/20">
-              {/* Roll Width Label */}
               <div className="text-center text-[10px] text-muted-foreground mb-2 font-mono">
                 {dieline.roll_width_mm}mm roll
               </div>
 
-              {/* Frames */}
               <div className="space-y-2">
                 {Array.from({ length: framesToShow }).map((_, frameIndex) => (
                   <div key={frameIndex}>
-                    {/* Frame separator */}
                     {frameIndex > 0 && (
                       <div className="border-t border-dashed border-muted-foreground/40 my-2" />
                     )}
                     
-                    {/* Label Grid for this frame */}
                     <div 
                       className="grid gap-1"
                       style={{ 
@@ -258,7 +244,6 @@ export function RunLayoutDiagram({
                     >
                       {Array.from({ length: columnsAcross * rowsAround }).map((_, cellIndex) => {
                         const slotNumber = cellIndex % columnsAcross;
-                        // For single-item runs, ALL slots use the same item
                         const assignment = isSingleItemRun ? singleItemAssignment : slotMap.get(slotNumber);
                         const item = isSingleItemRun ? singleItem : (assignment ? items.find(i => i.id === assignment.item_id) : null);
                         const colors = item ? itemColorMap.get(item.id) : null;
@@ -331,7 +316,6 @@ export function RunLayoutDiagram({
                   </div>
                 ))}
 
-                {/* More frames indicator */}
                 {(frames || 0) > framesToShow && (
                   <div className="text-center text-[10px] text-muted-foreground py-1 border-t border-dashed border-muted-foreground/30">
                     + {(frames || 0) - framesToShow} more frames
@@ -339,7 +323,6 @@ export function RunLayoutDiagram({
                 )}
               </div>
 
-              {/* Print Direction */}
               <div className="flex items-center justify-center gap-1 mt-2 text-muted-foreground">
                 <ArrowUp className="h-3 w-3" />
                 <span className="text-[10px]">Print Direction</span>
@@ -404,7 +387,6 @@ export function RunLayoutDiagram({
             />
           </div>
         )}
-        
         {showSplitter && (
           <div className="mt-3">
             <RollSplitSelector
@@ -417,11 +399,9 @@ export function RunLayoutDiagram({
           </div>
         )}
 
-        {/* AI Reasoning for this run */}
-        {reasoning && !compact && (
-          <p className="mt-3 text-xs text-muted-foreground italic border-t pt-2">
-            💡 {reasoning}
-          </p>
+        {/* Reasoning */}
+        {reasoning && (
+          <p className="mt-3 text-[11px] text-muted-foreground italic">{reasoning}</p>
         )}
       </CardContent>
     </Card>
