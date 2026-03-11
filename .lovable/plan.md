@@ -1,38 +1,35 @@
 
-# AI Layout Optimizer — Hybrid Solver Architecture (v4)
+# AI Layout Optimizer — Hybrid Solver Architecture (v5)
 
 ## Current State
 
-### Architecture: Deterministic Solver + Optional AI Advisor
+### Architecture: Deterministic Solver + Fill-First Strategy
 
 ```text
-FLOW: Query printed runs (printing/completed only) → Subtract from items → Deterministic Solver (multi-strategy) → Validate → Score → Return best
+FLOW: Query printed runs (printing/completed only) → Subtract from items → Deterministic Solver (multi-strategy incl. fill-first) → Validate → Score → Return best
 NO: AI for arithmetic, retry loops, prompt engineering for math
+RULE: Blank slots only allowed on the LAST run. All other runs must have every slot filled.
 ```
 
-### What Changed (from v3 → v4)
-1. **Replaced AI-only layout engine** with deterministic constraint solver
-2. **`canAddToRun()`** — mathematical guarantee: every slot stays within maxOverrun
-3. **Multi-strategy candidate generation**: no-split, split-2, aggressive-split, qtyPerRoll-rounded
-4. **Scoring engine**: ranks valid layouts by run count, blank slots, overrun, splits, remainder
-5. **Removed**: 200-line AI prompt, retry loop, AI API call dependency
-6. **No LOVABLE_API_KEY needed** for basic layout — solver is pure code
-
-### Why
-LLMs are sequence predictors, not constraint solvers. Under multi-step integer arithmetic with hard limits (ceil, compare, iterate), they drift. The solver guarantees zero overrun violations by construction.
+### What Changed (from v4 → v5)
+1. **Added `solveFullSlots()` fill-first strategy** — aggressively splits items to fill every slot in every run
+2. **Updated scoring** — blank slots on non-last runs penalized 1000 (was 10), effectively forbidden
+3. **Added 2 new strategies** (fill-first plain + fill-first with qtyPerRoll rounding) to candidate pool
+4. **Strategy logging** — scores for all candidates logged for debugging
 
 ### Files
 | File | Lines | Change |
 |------|-------|--------|
-| `supabase/functions/label-optimize/index.ts` | ~380 | Complete rewrite: deterministic solver with canAddToRun, greedySolve, scoreLayout, multi-strategy candidates |
-| `src/hooks/labels/useLayoutOptimizer.ts` | ~320 | Unchanged — maps response to LayoutOption (same shape) |
-| `src/utils/labels/layoutOptimizer.ts` | ~85 | Unchanged — math utilities |
+| `supabase/functions/label-optimize/index.ts` | ~620 | Added solveFullSlots(), updated scoreLayout() blank penalty, added strategies 5+6 |
+| `src/hooks/labels/useLayoutOptimizer.ts` | ~320 | Unchanged |
+| `src/utils/labels/layoutOptimizer.ts` | ~85 | Unchanged |
 | `src/types/labels.ts` | ~480 | Unchanged |
 | UI components | - | Unchanged |
 
-### Solver Algorithm
-1. `canAddToRun(existingQtys[], candidateQty, lpf, maxOverrun)` — checks ALL items against frame output
-2. `greedySolve(splitItems, totalSlots, lpf, maxOverrun)` — first-fit descending bin packing
-3. `solveLayout()` — generates 3-4 candidate strategies, scores each, returns best
-4. `validateLayout()` — belt & suspenders final check
-5. `formatSolverOutput()` — converts to the same JSON shape the hook expects
+### Fill-First Algorithm
+1. Track remaining quantity per item
+2. For each new run, pick largest remaining item as "anchor"
+3. Compute compatible range: `[actual - maxOverrun, actual]` where `actual = ceil(anchorQty/lpf) * lpf`
+4. Fill remaining slots by splitting items into portions within compatible range
+5. Only allow blank slots when no items remain (last run)
+
