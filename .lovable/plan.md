@@ -1,25 +1,39 @@
 
+# AI Layout Optimizer — Clean Architecture (v3)
 
-# Update AI Instruction Set for Label Optimizer
+## Current State
 
-## What's Changing
+### Architecture: AI-Only, Physics-First
 
-Replace `buildSystemPrompt()` (lines 109-167) and the user message (line 297) with the new finishing-efficiency-focused instruction set provided by the team.
+```text
+FLOW: Query printed runs (printing/completed only) → Subtract from items → AI (single call) → Validate (warnings only) → Human review
+NO: Post-processing, correction loops, algorithmic strategies, efficiency scoring
+```
 
-## Key Differences from Current Prompt
+### What Was Removed (from v2)
+1. **`OptimizationWeights`** — material/print/labor efficiency weights and UI sliders
+2. **`LayoutDebugInfo`** — correction_notes, input_items debug section
+3. **Efficiency scores** — material_efficiency_score, print_efficiency_score, labor_efficiency_score, overall_score
+4. **`scoreLayout()`**, `buildTradeOffs()`, `createLayoutOption()`, `createSingleItemRun()`, `validateRunOverrun()`, `suggestQtyPerRoll()` — all "second brain" utilities
+5. **`buildFallbackLayout()`** — no fallback, AI-only
+6. **`buildAILayoutOption()`** — client-side recalculation replaced with direct AI mapping
+7. **AI retry loop** — single call, warnings returned for human review
+8. **200+ line prompt** — replaced with ~40 line physics-focused prompt
 
-1. **Primary objective shifts** from "minimize waste/runs" to "minimize finishing pain" (rewinding, joining, awkward leftovers)
-2. **Blank slots explicitly encouraged** when they improve finishing — current prompt says "minimize blank slots"
-3. **Roll-size preference** (`qtyPerRoll`) gets a dedicated section with guidance on clean multiples
-4. **Overrun description refined** to specify "filled slots" only (not blank ones)
-5. **Rule 4 removed** ("minimize blank slots — wastes X%") — replaced with "blank slots are allowed"
-6. **Rule 5 softened** — minimize runs "only when this does not worsen finishing"
+### Key Fix: Already-Printed Logic
+```text
+BEFORE: Queried ALL label_runs (including planned/saved), corrupting input on regeneration
+AFTER:  Only queries runs with status IN ('printing', 'completed')
+```
 
-## File: `supabase/functions/label-optimize/index.ts`
-
-- **Replace `buildSystemPrompt()`** with the new prompt verbatim as provided
-- **Replace user message** (line 297) with the new finishing-focused message
-- Everything else stays: `validateLayout()`, `callAI()`, retry logic, `buildTools()`, `calcLabelsPerSlotPerFrame()`
-
-No other files need changes — the hook, utilities, types, and UI components are unaffected.
-
+### Files
+| File | Lines | Change |
+|------|-------|--------|
+| `supabase/functions/label-optimize/index.ts` | ~200 | Clean prompt, single AI call, validation warnings only |
+| `src/hooks/labels/useLayoutOptimizer.ts` | ~230 | Fixed already-printed, direct AI mapping, no scoring |
+| `src/utils/labels/layoutOptimizer.ts` | ~85 | Math only: getSlotConfig, frames, meters, time |
+| `src/types/labels.ts` | ~480 | Removed weights/scores/debug, simplified LayoutOption & ProposedRun |
+| `src/components/labels/LayoutOptimizer.tsx` | ~400 | Removed weight sliders and score bars |
+| `src/components/labels/optimizer/LayoutOptionCard.tsx` | ~170 | Shows warnings + trade-offs, no efficiency scores |
+| `src/components/labels/optimizer/LayoutOptimizerPanel.tsx` | ~100 | Simplified, no weights |
+| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | ~350 | Unchanged visual, kept interactive controls |
