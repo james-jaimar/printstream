@@ -1,39 +1,38 @@
 
-# AI Layout Optimizer — Clean Architecture (v3)
+# AI Layout Optimizer — Hybrid Solver Architecture (v4)
 
 ## Current State
 
-### Architecture: AI-Only, Physics-First
+### Architecture: Deterministic Solver + Optional AI Advisor
 
 ```text
-FLOW: Query printed runs (printing/completed only) → Subtract from items → AI (single call) → Validate (warnings only) → Human review
-NO: Post-processing, correction loops, algorithmic strategies, efficiency scoring
+FLOW: Query printed runs (printing/completed only) → Subtract from items → Deterministic Solver (multi-strategy) → Validate → Score → Return best
+NO: AI for arithmetic, retry loops, prompt engineering for math
 ```
 
-### What Was Removed (from v2)
-1. **`OptimizationWeights`** — material/print/labor efficiency weights and UI sliders
-2. **`LayoutDebugInfo`** — correction_notes, input_items debug section
-3. **Efficiency scores** — material_efficiency_score, print_efficiency_score, labor_efficiency_score, overall_score
-4. **`scoreLayout()`**, `buildTradeOffs()`, `createLayoutOption()`, `createSingleItemRun()`, `validateRunOverrun()`, `suggestQtyPerRoll()` — all "second brain" utilities
-5. **`buildFallbackLayout()`** — no fallback, AI-only
-6. **`buildAILayoutOption()`** — client-side recalculation replaced with direct AI mapping
-7. **AI retry loop** — single call, warnings returned for human review
-8. **200+ line prompt** — replaced with ~40 line physics-focused prompt
+### What Changed (from v3 → v4)
+1. **Replaced AI-only layout engine** with deterministic constraint solver
+2. **`canAddToRun()`** — mathematical guarantee: every slot stays within maxOverrun
+3. **Multi-strategy candidate generation**: no-split, split-2, aggressive-split, qtyPerRoll-rounded
+4. **Scoring engine**: ranks valid layouts by run count, blank slots, overrun, splits, remainder
+5. **Removed**: 200-line AI prompt, retry loop, AI API call dependency
+6. **No LOVABLE_API_KEY needed** for basic layout — solver is pure code
 
-### Key Fix: Already-Printed Logic
-```text
-BEFORE: Queried ALL label_runs (including planned/saved), corrupting input on regeneration
-AFTER:  Only queries runs with status IN ('printing', 'completed')
-```
+### Why
+LLMs are sequence predictors, not constraint solvers. Under multi-step integer arithmetic with hard limits (ceil, compare, iterate), they drift. The solver guarantees zero overrun violations by construction.
 
 ### Files
 | File | Lines | Change |
 |------|-------|--------|
-| `supabase/functions/label-optimize/index.ts` | ~200 | Clean prompt, single AI call, validation warnings only |
-| `src/hooks/labels/useLayoutOptimizer.ts` | ~230 | Fixed already-printed, direct AI mapping, no scoring |
-| `src/utils/labels/layoutOptimizer.ts` | ~85 | Math only: getSlotConfig, frames, meters, time |
-| `src/types/labels.ts` | ~480 | Removed weights/scores/debug, simplified LayoutOption & ProposedRun |
-| `src/components/labels/LayoutOptimizer.tsx` | ~400 | Removed weight sliders and score bars |
-| `src/components/labels/optimizer/LayoutOptionCard.tsx` | ~170 | Shows warnings + trade-offs, no efficiency scores |
-| `src/components/labels/optimizer/LayoutOptimizerPanel.tsx` | ~100 | Simplified, no weights |
-| `src/components/labels/optimizer/RunLayoutDiagram.tsx` | ~350 | Unchanged visual, kept interactive controls |
+| `supabase/functions/label-optimize/index.ts` | ~380 | Complete rewrite: deterministic solver with canAddToRun, greedySolve, scoreLayout, multi-strategy candidates |
+| `src/hooks/labels/useLayoutOptimizer.ts` | ~320 | Unchanged — maps response to LayoutOption (same shape) |
+| `src/utils/labels/layoutOptimizer.ts` | ~85 | Unchanged — math utilities |
+| `src/types/labels.ts` | ~480 | Unchanged |
+| UI components | - | Unchanged |
+
+### Solver Algorithm
+1. `canAddToRun(existingQtys[], candidateQty, lpf, maxOverrun)` — checks ALL items against frame output
+2. `greedySolve(splitItems, totalSlots, lpf, maxOverrun)` — first-fit descending bin packing
+3. `solveLayout()` — generates 3-4 candidate strategies, scores each, returns best
+4. `validateLayout()` — belt & suspenders final check
+5. `formatSolverOutput()` — converts to the same JSON shape the hook expects
