@@ -153,7 +153,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
       return name
         .toLowerCase()
         .replace(/\.(pdf|png|jpg|jpeg)$/i, '')
-        .replace(/[\s_-]*(proof|print|final|ready|v\d+)[\s_-]*/gi, '')
+        .replace(/[\s_-]*(proof|print|final|ready|v\d+|no[\s_-]*trace|trace)[\s_-]*/gi, '')
         .replace(/\s*\([^)]*\)\s*/g, '') // Strip parenthetical content like (5000)
         .trim();
     };
@@ -222,8 +222,20 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                 );
                 for (const child of childrenNeedingThumbs) {
                   try {
+                    // Get a fresh signed URL from the storage path (not the possibly-expired signed URL from the edge function)
+                    let pdfUrl = child.print_pdf_url!;
+                    if (!pdfUrl.startsWith('http') || !pdfUrl.includes('token=')) {
+                      const storagePath = pdfUrl.startsWith('http') ? pdfUrl : pdfUrl;
+                      // If it's a storage path (not a full URL), generate a fresh signed URL
+                      if (!pdfUrl.startsWith('http')) {
+                        const { data: signedData } = await supabase.storage
+                          .from('label-files')
+                          .createSignedUrl(pdfUrl, 300);
+                        if (signedData?.signedUrl) pdfUrl = signedData.signedUrl;
+                      }
+                    }
                     const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
-                    const thumbDataUrl = await generatePdfThumbnailFromUrl(child.print_pdf_url!, 300);
+                    const thumbDataUrl = await generatePdfThumbnailFromUrl(pdfUrl, 300);
                     const blob = dataUrlToBlob(thumbDataUrl);
                     const thumbPath = `label-artwork/orders/${order.id}/thumbnails/${child.id}-print.png`;
                     const { error } = await supabase.storage
@@ -231,6 +243,8 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
                       .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
                     if (!error) {
                       updateItem.mutate({ id: child.id, updates: { print_thumbnail_url: thumbPath } });
+                    } else {
+                      console.warn('Print thumbnail upload failed for child:', child.id, error);
                     }
                   } catch (err) {
                     console.warn('Print thumbnail gen failed for child:', child.id, err);

@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react';
 import { FileText, CheckCircle, XCircle, Loader2, AlertTriangle, Trash2, Upload, Link2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -5,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useThumbnailUrl } from '@/hooks/labels/useThumbnailUrl';
+import { supabase } from '@/integrations/supabase/client';
 import type { LabelItem, PrintPdfStatus } from '@/types/labels';
 
 interface PrintReadyItemCardProps {
@@ -29,6 +31,9 @@ const printStatusConfig: Record<PrintPdfStatus, {
 };
 
 export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile, isUnmatched, availableProofItems, onLinkToProof }: PrintReadyItemCardProps) {
+  const [isGeneratingThumb, setIsGeneratingThumb] = useState(false);
+  const [generatedThumbUrl, setGeneratedThumbUrl] = useState<string | null>(null);
+
   // Proof thumbnail: prefer proof_thumbnail_url, fall back to artwork_thumbnail_url
   const proofThumbPath = item.proof_thumbnail_url || item.artwork_thumbnail_url || null;
   const { url: proofThumbUrl, isLoading: proofLoading } = useThumbnailUrl(proofThumbPath);
@@ -42,6 +47,49 @@ export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile
   const printStatus = printStatusConfig[item.print_pdf_status || 'pending'];
   const PrintStatusIcon = printStatus.icon;
   const hasPrintFile = !!item.print_pdf_url;
+
+  // On-demand thumbnail generation when print PDF exists but thumbnail is missing
+  const generateThumbnailOnDemand = useCallback(async () => {
+    if (!item.print_pdf_url || item.print_thumbnail_url || isGeneratingThumb) return;
+    setIsGeneratingThumb(true);
+    try {
+      // Get a fresh signed URL from the storage path
+      let pdfUrl = item.print_pdf_url;
+      if (!pdfUrl.includes('token=') && !pdfUrl.startsWith('http')) {
+        const { data } = await supabase.storage
+          .from('label-files')
+          .createSignedUrl(pdfUrl, 300);
+        if (data?.signedUrl) pdfUrl = data.signedUrl;
+      }
+      
+      const { generatePdfThumbnailFromUrl, dataUrlToBlob } = await import('@/utils/pdf/thumbnailUtils');
+      const dataUrl = await generatePdfThumbnailFromUrl(pdfUrl, 300);
+      setGeneratedThumbUrl(dataUrl);
+      
+      // Upload and persist the thumbnail
+      const blob = dataUrlToBlob(dataUrl);
+      const thumbPath = `label-artwork/orders/${item.order_id}/thumbnails/${item.id}-print.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from('label-files')
+        .upload(thumbPath, blob, { contentType: 'image/png', upsert: true });
+      if (!uploadErr) {
+        await supabase.from('label_items').update({ print_thumbnail_url: thumbPath }).eq('id', item.id);
+      }
+    } catch (err) {
+      console.warn('On-demand print thumbnail generation failed:', item.id, err);
+    } finally {
+      setIsGeneratingThumb(false);
+    }
+  }, [item.id, item.print_pdf_url, item.print_thumbnail_url, item.order_id, isGeneratingThumb]);
+
+  // Auto-trigger thumbnail generation when print file exists but no thumbnail
+  useEffect(() => {
+    if (hasPrintFile && !printThumbPath && !generatedThumbUrl && !isGeneratingThumb) {
+      generateThumbnailOnDemand();
+    }
+  }, [hasPrintFile, printThumbPath, generatedThumbUrl, isGeneratingThumb, generateThumbnailOnDemand]);
+
+  const effectivePrintThumbUrl = printThumbUrl || generatedThumbUrl;
 
   return (
     <Card className="overflow-hidden">
@@ -77,10 +125,15 @@ export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile
           {/* Right: Print-Ready */}
           <div className="w-3/5">
             <div className="relative aspect-[4/3] bg-muted flex items-center justify-center">
-              {printLoading ? (
+              {printLoading || isGeneratingThumb ? (
                 <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
-              ) : printThumbUrl ? (
-                <img src={printThumbUrl} alt={`${item.name} print-ready`} className="w-full h-full object-contain" />
+              ) : effectivePrintThumbUrl ? (
+                <img src={effectivePrintThumbUrl} alt={`${item.name} print-ready`} className="w-full h-full object-contain" />
+              ) : hasPrintFile ? (
+                <div className="flex flex-col items-center gap-1 text-green-600">
+                  <CheckCircle className="h-8 w-8" />
+                  <span className="text-[10px]">Print file ready</span>
+                </div>
               ) : (
                 <div className="flex flex-col items-center gap-1 text-muted-foreground">
                   <FileText className="h-8 w-8" />
