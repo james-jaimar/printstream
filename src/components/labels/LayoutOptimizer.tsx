@@ -1,14 +1,14 @@
 /**
  * AI Layout Optimizer Component
  * 
- * Visual interface for generating and selecting optimal label layouts
+ * Visual interface for generating and selecting optimal label layouts.
+ * AI-only — no algorithmic strategies or efficiency weights.
  */
 
 import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -19,10 +19,8 @@ import {
   Clock, 
   Ruler, 
   Layers,
-  Settings2,
   ChevronDown,
   ChevronUp,
-  Zap,
   LayoutGrid,
   AlertTriangle,
   Loader2,
@@ -61,7 +59,6 @@ export function LayoutOptimizer({
   onLayoutApplied,
   onLayoutSaved
 }: LayoutOptimizerProps) {
-  const [showWeights, setShowWeights] = useState(false);
   const [showPreview, setShowPreview] = useState(!!savedLayout);
   const [runOverrides, setRunOverrides] = useState<Record<number, number>>({});
   const [runSplits, setRunSplits] = useState<Record<number, RollSplitOption>>({});
@@ -71,15 +68,12 @@ export function LayoutOptimizer({
     selectedOption,
     isGenerating,
     isApplying,
-    weights,
     summary,
     canGenerate,
     generateOptions,
     selectOption,
     applyLayout,
-    updateWeights,
     getProductionTime,
-    isLoadingAI,
     isSaving,
     hasSavedLayout,
     saveLayout,
@@ -90,22 +84,12 @@ export function LayoutOptimizer({
 
   const { prepareBulk, isProcessing: isPreparingArtwork } = usePrepareArtwork(orderId);
 
-  // Check artwork readiness - separate "has any artwork" from "is print-ready"
+  // Check artwork readiness
   const artworkReadiness = useMemo(() => {
-    // Items that are fully print-ready
     const printReady = items.filter(item => item.print_pdf_status === 'ready');
-    
-    // Items with some form of artwork (proof or print)
-    const hasAnyArtwork = items.filter(item => 
-      item.proof_pdf_url || item.artwork_pdf_url || item.print_pdf_url
-    );
-    
-    // Placeholder items (no artwork at all)
     const placeholders = items.filter(item => 
       !item.proof_pdf_url && !item.artwork_pdf_url && !item.print_pdf_url
     );
-    
-    // Items not print-ready (for apply-time blocking)
     const notPrintReady = items.filter(item => item.print_pdf_status !== 'ready');
     const needsCrop = notPrintReady.filter(item => item.requires_crop || item.print_pdf_status === 'needs_crop');
     const canAutoFix = notPrintReady.filter(item => 
@@ -115,20 +99,13 @@ export function LayoutOptimizer({
     );
     
     return {
-      // Placeholders - valid for generation but block apply
       placeholderCount: placeholders.length,
       hasPlaceholders: placeholders.length > 0,
-      
-      // For layout generation - placeholders are now allowed
-      allHaveArtwork: true, // Always allow generation
+      allHaveArtwork: true,
       missingArtworkCount: 0,
-      
-      // For apply - need print-ready AND no placeholders
       allPrintReady: printReady.length === items.length && placeholders.length === 0,
       notPrintReadyCount: notPrintReady.length,
       notPrintReadyItems: notPrintReady,
-      
-      // For auto-fix UI
       needsCropCount: needsCrop.length,
       needsCropItems: needsCrop,
       canAutoFixCount: canAutoFix.length + needsCrop.length,
@@ -144,7 +121,6 @@ export function LayoutOptimizer({
   };
 
   const handleSave = async () => {
-    // Before saving, apply overrides and splits to the selected option
     if (selectedOption && (Object.keys(runOverrides).length > 0 || Object.keys(runSplits).length > 0)) {
       const updatedOption = {
         ...selectedOption,
@@ -169,13 +145,11 @@ export function LayoutOptimizer({
         : 'crop_to_bleed' as const,
       cropMm: item.crop_amount_mm || undefined,
     }));
-    
     await prepareBulk(itemsToPrep);
   };
 
   const handleQuantityOverride = useCallback((runNumber: number, newQty: number) => {
     if (newQty <= 0) {
-      // Clear override
       setRunOverrides(prev => {
         const next = { ...prev };
         delete next[runNumber];
@@ -199,7 +173,6 @@ export function LayoutOptimizer({
       const override = runOverrides[run.run_number];
       if (!override) return run;
       
-      // Recalculate frames/meters for the overridden qty
       const newFrames = calculateFramesForSlot(override, config);
       const newMeters = calculateMeters(newFrames, config);
       const newActualPerSlot = newFrames * config.labelsPerSlotPerFrame;
@@ -210,11 +183,9 @@ export function LayoutOptimizer({
         frames: newFrames,
         meters: newMeters,
         actual_labels_per_slot: newActualPerSlot,
-        labels_per_output_roll: newActualPerSlot,
-        needs_rewinding: qtyPerRoll ? newActualPerSlot < (qtyPerRoll - 50) : false,
       };
     });
-  }, [selectedOption, runOverrides, dieline, qtyPerRoll]);
+  }, [selectedOption, runOverrides, dieline]);
 
   return (
     <Card>
@@ -240,44 +211,11 @@ export function LayoutOptimizer({
           </div>
         </div>
         <CardDescription>
-          Automatically arrange labels across slots to minimize waste and optimize production
+          AI-powered layout planning — minimizes waste and optimizes slot usage
         </CardDescription>
       </CardHeader>
       
       <CardContent className="space-y-6">
-        {/* Weight Controls */}
-        <Collapsible open={showWeights} onOpenChange={setShowWeights}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="w-full justify-between">
-              <span className="flex items-center gap-2">
-                <Settings2 className="h-4 w-4" />
-                Optimization Weights
-              </span>
-              {showWeights ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-4 space-y-4">
-            <WeightSlider
-              label="Material Efficiency"
-              value={weights.material_efficiency}
-              onChange={(v) => updateWeights({ ...weights, material_efficiency: v })}
-              description="Minimize substrate waste"
-            />
-            <WeightSlider
-              label="Print Efficiency"
-              value={weights.print_efficiency}
-              onChange={(v) => updateWeights({ ...weights, print_efficiency: v })}
-              description="Minimize number of runs"
-            />
-            <WeightSlider
-              label="Labor Efficiency"
-              value={weights.labor_efficiency}
-              onChange={(v) => updateWeights({ ...weights, labor_efficiency: v })}
-              description="Minimize handling/changeovers"
-            />
-          </CollapsibleContent>
-        </Collapsible>
-
         {/* Max Overrun Control */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -308,19 +246,7 @@ export function LayoutOptimizer({
           </Alert>
         )}
 
-        {/* Missing Artwork Alert - no longer blocks generation */}
-        {!artworkReadiness.allHaveArtwork && (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Missing Artwork</AlertTitle>
-            <AlertDescription>
-              {artworkReadiness.missingArtworkCount} item{artworkReadiness.missingArtworkCount !== 1 ? 's' : ''} missing 
-              artwork files. Please upload artwork before generating layouts.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Print-Ready Warning - Allows layout generation but warns about apply */}
+        {/* Print-Ready Warning */}
         {artworkReadiness.allHaveArtwork && !artworkReadiness.allPrintReady && (
           <Alert>
             <AlertTriangle className="h-4 w-4" />
@@ -352,7 +278,7 @@ export function LayoutOptimizer({
           </Alert>
         )}
 
-        {/* Generate Button — fires algorithm + AI in parallel */}
+        {/* Generate Button */}
         <Button 
           onClick={() => generateOptions()} 
           disabled={!canGenerate || isGenerating}
@@ -361,18 +287,13 @@ export function LayoutOptimizer({
         >
           {isGenerating ? (
             <>
-              <Zap className="h-4 w-4 mr-2 animate-pulse" />
-              Generating Options...
-            </>
-          ) : isLoadingAI ? (
-            <>
               <Sparkles className="h-4 w-4 mr-2 animate-pulse" />
               AI Computing Layout...
             </>
           ) : (
             <>
               <Sparkles className="h-4 w-4 mr-2" />
-              Generate Layout Options
+              Generate Layout
             </>
           )}
         </Button>
@@ -381,7 +302,7 @@ export function LayoutOptimizer({
         {options.length > 0 && (
           <div className="space-y-3">
             <h4 className="text-sm font-medium text-muted-foreground">
-              Select a Layout Option
+              Layout Result
             </h4>
             {options.map((option) => (
               <LayoutOptionCard
@@ -410,28 +331,32 @@ export function LayoutOptimizer({
             <CollapsibleContent className="pt-4">
               <ScrollArea className="h-[60vh]">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pr-4">
-                  {effectiveRuns.map((run, idx) => (
-                    <RunLayoutDiagram
-                      key={idx}
-                      runNumber={run.run_number}
-                      slotAssignments={run.slot_assignments}
-                      dieline={dieline}
-                      items={items}
-                      meters={run.meters}
-                      frames={run.frames}
-                      showStats={true}
-                      compact={true}
-                      qtyPerRoll={qtyPerRoll ?? undefined}
-                      needsRewinding={run.needs_rewinding}
-                      labelsPerOutputRoll={run.labels_per_output_roll}
-                      actualLabelsPerSlot={run.actual_labels_per_slot}
-                      consolidationSuggestion={run.consolidation_suggestion}
-                      quantityOverride={runOverrides[run.run_number]}
-                      rollSplit={runSplits[run.run_number]}
-                      onQuantityOverride={handleQuantityOverride}
-                      onRollSplitChange={handleRollSplitChange}
-                    />
-                  ))}
+                  {effectiveRuns.map((run, idx) => {
+                    const actualPerSlot = run.actual_labels_per_slot;
+                    const needsRewinding = qtyPerRoll && actualPerSlot ? actualPerSlot < (qtyPerRoll - 50) : false;
+                    
+                    return (
+                      <RunLayoutDiagram
+                        key={idx}
+                        runNumber={run.run_number}
+                        slotAssignments={run.slot_assignments}
+                        dieline={dieline}
+                        items={items}
+                        meters={run.meters}
+                        frames={run.frames}
+                        showStats={true}
+                        compact={true}
+                        qtyPerRoll={qtyPerRoll ?? undefined}
+                        needsRewinding={needsRewinding}
+                        labelsPerOutputRoll={actualPerSlot}
+                        actualLabelsPerSlot={actualPerSlot}
+                        quantityOverride={runOverrides[run.run_number]}
+                        rollSplit={runSplits[run.run_number]}
+                        onQuantityOverride={handleQuantityOverride}
+                        onRollSplitChange={handleRollSplitChange}
+                      />
+                    );
+                  })}
                 </div>
               </ScrollArea>
             </CollapsibleContent>
@@ -458,6 +383,21 @@ export function LayoutOptimizer({
                 <span className="text-destructive">{summary.wasteMeters.toFixed(2)}m</span>
               </div>
             </div>
+
+            {/* Warnings */}
+            {selectedOption.warnings && selectedOption.warnings.length > 0 && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Layout Warnings</AlertTitle>
+                <AlertDescription>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    {selectedOption.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            )}
 
             {/* Save Layout for Quoting */}
             <div className="flex gap-2">
@@ -526,34 +466,7 @@ export function LayoutOptimizer({
   );
 }
 
-// Sub-components
-
-interface WeightSliderProps {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  description: string;
-}
-
-function WeightSlider({ label, value, onChange, description }: WeightSliderProps) {
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between text-sm">
-        <span>{label}</span>
-        <span className="text-muted-foreground">{Math.round(value * 100)}%</span>
-      </div>
-      <Slider
-        value={[value * 100]}
-        onValueChange={([v]) => onChange(v / 100)}
-        max={100}
-        step={5}
-        className="w-full"
-      />
-      <p className="text-xs text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
+// Inline sub-component for layout option display
 interface LayoutOptionCardProps {
   option: LayoutOption;
   isSelected: boolean;
@@ -562,6 +475,8 @@ interface LayoutOptionCardProps {
 }
 
 function LayoutOptionCard({ option, isSelected, productionTime, onSelect }: LayoutOptionCardProps) {
+  const hasWarnings = option.warnings && option.warnings.length > 0;
+  
   return (
     <button
       onClick={onSelect}
@@ -578,42 +493,38 @@ function LayoutOptionCard({ option, isSelected, productionTime, onSelect }: Layo
           <span className="font-medium">
             {option.runs.length} Run{option.runs.length !== 1 ? 's' : ''}
           </span>
-          <Badge variant={Math.round(option.overall_score * 100) >= 80 ? "default" : "secondary"}>
-            {Math.round(option.overall_score * 100)}% score
+          <Badge variant="secondary">
+            {option.total_meters.toFixed(1)}m
           </Badge>
+          {hasWarnings && (
+            <Badge variant="destructive" className="text-xs">
+              {option.warnings!.length} warning{option.warnings!.length > 1 ? 's' : ''}
+            </Badge>
+          )}
         </div>
         <span className="text-sm text-muted-foreground">
           ~{productionTime} min
         </span>
       </div>
       
-      <div className="grid grid-cols-3 gap-2 mb-2">
-        <ScoreBar label="Material" value={option.material_efficiency_score} />
-        <ScoreBar label="Print" value={option.print_efficiency_score} />
-        <ScoreBar label="Labor" value={option.labor_efficiency_score} />
+      <div className="grid grid-cols-3 gap-2 mb-2 text-xs">
+        <div className="text-center p-1.5 rounded bg-muted/50">
+          <span className="text-muted-foreground">Frames</span>
+          <p className="font-medium">{option.total_frames}</p>
+        </div>
+        <div className="text-center p-1.5 rounded bg-muted/50">
+          <span className="text-muted-foreground">Meters</span>
+          <p className="font-medium">{option.total_meters.toFixed(1)}m</p>
+        </div>
+        <div className="text-center p-1.5 rounded bg-muted/50">
+          <span className="text-muted-foreground">Waste</span>
+          <p className="font-medium">{option.total_waste_meters.toFixed(1)}m</p>
+        </div>
       </div>
       
       <p className="text-xs text-muted-foreground">
         {option.reasoning}
       </p>
     </button>
-  );
-}
-
-interface ScoreBarProps {
-  label: string;
-  value: number;
-}
-
-function ScoreBar({ label, value }: ScoreBarProps) {
-  const percent = Math.round(value * 100);
-  return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span>{percent}%</span>
-      </div>
-      <Progress value={percent} className="h-1" />
-    </div>
   );
 }

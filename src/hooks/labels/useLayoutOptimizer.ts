@@ -1,31 +1,24 @@
 /**
  * Hook for AI Layout Optimization
  * 
- * AI-only layout engine. Queries existing runs to subtract already-printed
- * quantities before sending to the AI. Falls back to individual runs if AI fails.
+ * AI-only layout engine. Queries existing runs (printing/completed only)
+ * to subtract already-printed quantities before sending to the AI.
  */
 
 import { useState, useCallback, useMemo } from 'react';
 import { 
-  calculateProductionTime,
-  calculateRunPrintTime,
   getSlotConfig,
   calculateFramesForSlot,
   calculateMeters,
-  scoreLayout,
-  createSingleItemRun,
-  DEFAULT_MAX_OVERRUN
+  calculateProductionTime,
+  calculateRunPrintTime,
 } from '@/utils/labels/layoutOptimizer';
-import { 
-  type LabelItem, 
-  type LabelDieline, 
-  type LayoutOption,
-  type LayoutDebugInfo,
-  type LayoutTradeOffs,
-  type ProposedRun,
-  type SlotAssignment,
-  type OptimizationWeights,
-  DEFAULT_OPTIMIZATION_WEIGHTS 
+import type { 
+  LabelItem, 
+  LabelDieline, 
+  LayoutOption,
+  ProposedRun,
+  SlotAssignment,
 } from '@/types/labels';
 import { useCreateLabelRun } from './useLabelRuns';
 import { supabase } from '@/integrations/supabase/client';
@@ -40,25 +33,22 @@ interface UseLayoutOptimizerProps {
 }
 
 /**
- * Query existing runs for an order and compute already-printed quantities per item
+ * Query existing runs for an order — ONLY count runs that are actually printing or completed.
+ * Planned/saved runs are NOT counted to avoid corrupting input on regeneration.
  */
 async function getAlreadyPrintedQuantities(orderId: string): Promise<Map<string, number>> {
   const printed = new Map<string, number>();
   
   try {
-    const { data: existingRuns, error } = await supabase
+    const { data, error } = await supabase
       .from('label_runs')
       .select('slot_assignments')
-      .eq('order_id', orderId);
+      .eq('order_id', orderId)
+      .in('status', ['printing', 'completed']);
     
-    if (error) {
-      console.error('Error fetching existing runs:', error);
-      return printed;
-    }
+    if (error || !data?.length) return printed;
     
-    if (!existingRuns || existingRuns.length === 0) return printed;
-    
-    for (const run of existingRuns) {
+    for (const run of data) {
       const slots = run.slot_assignments as unknown as Array<{ item_id: string; quantity_in_slot: number }>;
       if (!Array.isArray(slots)) continue;
       
@@ -75,315 +65,133 @@ async function getAlreadyPrintedQuantities(orderId: string): Promise<Map<string,
   return printed;
 }
 
-/**
- * Convert AI response runs into a proper LayoutOption
- */
-function buildAILayoutOption(
-  aiRuns: Array<{
-    slot_assignments: Array<{ item_id: string; quantity_in_slot: number }>;
-    reasoning: string;
-  }>,
-  aiReasoning: string,
-  aiWastePercent: number,
-  dieline: LabelDieline,
-  items: LabelItem[],
-  weights: OptimizationWeights,
-  qtyPerRoll?: number,
-  aiTradeOffs?: LayoutTradeOffs,
-  debugInfo?: LayoutDebugInfo
-): LayoutOption | null {
-  try {
-    const config = getSlotConfig(dieline);
-    const totalLabelsNeeded = items.reduce((sum, i) => sum + i.quantity, 0);
-    const theoreticalMinFrames = Math.ceil(totalLabelsNeeded / config.labelsPerFrame);
-    const theoreticalMinMeters = calculateMeters(theoreticalMinFrames, config);
-
-    const proposedRuns: ProposedRun[] = aiRuns.map((aiRun, idx) => {
-      const slotAssignments: SlotAssignment[] = aiRun.slot_assignments.map((slot, slotIdx) => ({
-        slot: slotIdx,
-        item_id: slot.item_id,
-        quantity_in_slot: slot.quantity_in_slot,
-        needs_rotation: items.find(i => i.id === slot.item_id)?.needs_rotation || false,
-      }));
-
-      const maxSlotQty = Math.max(...slotAssignments.map(a => a.quantity_in_slot));
-      const frames = calculateFramesForSlot(maxSlotQty, config);
-      const meters = calculateMeters(frames, config);
-      const actualLabelsPerSlot = frames * config.labelsPerSlotPerFrame;
-
-      return {
-        run_number: idx + 1,
-        slot_assignments: slotAssignments,
-        meters,
-        frames,
-        actual_labels_per_slot: actualLabelsPerSlot,
-        labels_per_output_roll: actualLabelsPerSlot,
-        needs_rewinding: qtyPerRoll ? actualLabelsPerSlot < (qtyPerRoll - 50) : false,
-        reasoning: aiRun.reasoning,
-      };
-    });
-
-    const totalMeters = proposedRuns.reduce((sum, r) => sum + r.meters, 0);
-    const totalFrames = proposedRuns.reduce((sum, r) => sum + r.frames, 0);
-    const wasteMeters = Math.max(0, totalMeters - theoreticalMinMeters);
-
-    const materialEfficiency = totalMeters > 0
-      ? Math.max(0, 1 - (wasteMeters / totalMeters))
-      : 0;
-    const printEfficiency = 1 / (1 + proposedRuns.length * 0.1);
-    let laborEfficiency = 1 / (1 + proposedRuns.length * 0.15);
-
-    if (qtyPerRoll && qtyPerRoll > 0) {
-      const rewindingRuns = proposedRuns.filter(r => r.needs_rewinding);
-      if (rewindingRuns.length > 0) {
-        const rewindPenalty = (rewindingRuns.length / proposedRuns.length) * 0.4;
-        laborEfficiency = Math.max(0, laborEfficiency - rewindPenalty);
-      }
-    }
-
-    const partial = {
-      id: 'ai-computed',
-      runs: proposedRuns,
-      total_meters: totalMeters,
-      total_frames: totalFrames,
-      total_waste_meters: Math.round(wasteMeters * 100) / 100,
-      material_efficiency_score: materialEfficiency,
-      print_efficiency_score: printEfficiency,
-      labor_efficiency_score: laborEfficiency,
-      reasoning: `🤖 AI-Computed: ${aiReasoning}`,
-      trade_offs: aiTradeOffs,
-      debug_info: debugInfo,
-    };
-
-    return {
-      ...partial,
-      overall_score: scoreLayout(partial, weights),
-    };
-  } catch (error) {
-    console.error('Failed to build AI layout option:', error);
-    return null;
-  }
-}
-
-/**
- * Build a fallback layout using individual runs (one item per run)
- */
-function buildFallbackLayout(
-  items: LabelItem[],
-  dieline: LabelDieline,
-  weights: OptimizationWeights,
-  qtyPerRoll?: number
-): LayoutOption {
-  const config = getSlotConfig(dieline);
-  const totalLabelsNeeded = items.reduce((sum, i) => sum + i.quantity, 0);
-  const theoreticalMinFrames = Math.ceil(totalLabelsNeeded / config.labelsPerFrame);
-  const theoreticalMinMeters = calculateMeters(theoreticalMinFrames, config);
-
-  const runs = items.map((item, idx) => createSingleItemRun(item, idx + 1, config));
-  const totalMeters = runs.reduce((sum, r) => sum + r.meters, 0);
-  const totalFrames = runs.reduce((sum, r) => sum + r.frames, 0);
-  const wasteMeters = Math.max(0, totalMeters - theoreticalMinMeters);
-
-  const materialEfficiency = totalMeters > 0 ? Math.max(0, 1 - (wasteMeters / totalMeters)) : 0;
-  const printEfficiency = 1 / (1 + runs.length * 0.1);
-  let laborEfficiency = 1 / (1 + runs.length * 0.15);
-
-  if (qtyPerRoll && qtyPerRoll > 0) {
-    const rewindingRuns = runs.filter(r => {
-      const actualPerSlot = r.frames * config.labelsPerSlotPerFrame;
-      return actualPerSlot < (qtyPerRoll - 50);
-    });
-    if (rewindingRuns.length > 0) {
-      const rewindPenalty = (rewindingRuns.length / runs.length) * 0.4;
-      laborEfficiency = Math.max(0, laborEfficiency - rewindPenalty);
-    }
-  }
-
-  const partial = {
-    id: 'fallback-individual',
-    runs,
-    total_meters: totalMeters,
-    total_frames: totalFrames,
-    total_waste_meters: Math.round(wasteMeters * 100) / 100,
-    material_efficiency_score: materialEfficiency,
-    print_efficiency_score: printEfficiency,
-    labor_efficiency_score: laborEfficiency,
-    reasoning: '⚙️ Fallback: Each item on its own run (AI was unavailable)',
-  };
-
-  return {
-    ...partial,
-    overall_score: scoreLayout(partial, weights),
-  };
-}
-
 export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPerRoll }: UseLayoutOptimizerProps) {
   const [options, setOptions] = useState<LayoutOption[]>([]);
   const [selectedOption, setSelectedOption] = useState<LayoutOption | null>(
-    savedLayout ? savedLayout as LayoutOption : null
+    savedLayout ?? null
   );
   const [isGenerating, setIsGenerating] = useState(false);
-  const [weights, setWeights] = useState<OptimizationWeights>(DEFAULT_OPTIMIZATION_WEIGHTS);
-  const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasSavedLayout, setHasSavedLayout] = useState(!!savedLayout);
-  const [maxOverrun, setMaxOverrun] = useState(DEFAULT_MAX_OVERRUN);
+  const [maxOverrun, setMaxOverrun] = useState(250);
   
   const { mutateAsync: createRun, isPending: isCreating } = useCreateLabelRun();
 
   /**
-   * Fetch AI-computed layout from edge function
+   * Generate layout — AI-only, single call, direct mapping
    */
-  const fetchAILayout = useCallback(async (
-    itemsToUse: LabelItem[],
-    dielineToUse: LabelDieline,
-    weightsToUse: OptimizationWeights,
-    currentMaxOverrun: number,
-    alreadyPrinted: Array<{ item_id: string; printed_qty: number }>
-  ): Promise<LayoutOption | null> => {
-    try {
-      const { data, error } = await supabase.functions.invoke('label-optimize', {
-        body: { 
-          items: itemsToUse, 
-          dieline: dielineToUse, 
-          constraints: { max_overrun: currentMaxOverrun },
-          qty_per_roll: qtyPerRoll ?? undefined,
-          label_width_mm: dielineToUse.label_width_mm,
-          label_height_mm: dielineToUse.label_height_mm,
-          already_printed: alreadyPrinted.length > 0 ? alreadyPrinted : undefined,
-        }
-      });
-
-      if (error) throw error;
-
-      if (data?.layout?.runs) {
-        const validationWarnings: string[] = data.validation?.warnings || [];
-
-        const reasoning = data.layout.overall_reasoning || 'AI-optimized layout';
-
-        // Build debug info for UI inspection
-        const debugInfo: LayoutDebugInfo = {
-          validation_warnings: validationWarnings,
-          correction_notes: [],
-          input_items: itemsToUse.map(i => ({ id: i.id, name: i.name, quantity: i.quantity })),
-        };
-
-        const aiOption = buildAILayoutOption(
-          data.layout.runs,
-          reasoning,
-          data.layout.estimated_waste_percent || 0,
-          dielineToUse,
-          itemsToUse,
-          weightsToUse,
-          qtyPerRoll ?? undefined,
-          data.layout.trade_offs,
-          debugInfo
-        );
-
-        if (data.validation && !data.validation.valid) {
-          console.warn('AI layout validation warnings:', validationWarnings);
-          toast.warning('AI layout has validation warnings — review before applying');
-        }
-
-        return aiOption;
-      }
-      return null;
-    } catch (error: any) {
-      console.error('AI layout error:', error);
-      if (error.message?.includes('429') || error.status === 429) {
-        toast.error('AI rate limit reached. Using fallback layout.');
-      } else if (error.message?.includes('402') || error.status === 402) {
-        toast.error('AI credits exhausted. Using fallback layout.');
-      }
-      return null;
-    }
-  }, [qtyPerRoll]);
-
-  /**
-   * Generate layout options — AI-only with fallback
-   */
-  const generateLayoutOptions = useCallback(async (
-    customItems?: LabelItem[],
-    customDieline?: LabelDieline,
-    customWeights?: OptimizationWeights
-  ) => {
-    const itemsToUse = customItems ?? items;
-    const dielineToUse = customDieline ?? dieline;
-    const weightsToUse = customWeights ?? weights;
-    
-    if (!dielineToUse) {
+  const generateOptions = useCallback(async () => {
+    if (!dieline) {
       toast.error('Please select a dieline before generating layouts');
       return;
     }
-    
-    if (itemsToUse.length === 0) {
+    if (items.length === 0) {
       toast.error('Please add items before generating layouts');
       return;
     }
     
     setIsGenerating(true);
-    setIsLoadingAI(true);
     
     try {
-      // Step 1: Query already-printed quantities for this order
+      // Step 1: Query already-printed quantities (printing/completed only)
       const printedMap = await getAlreadyPrintedQuantities(orderId);
       
-      // Step 2: Subtract already-printed from item quantities
-      const alreadyPrinted: Array<{ item_id: string; printed_qty: number }> = [];
-      const adjustedItems: LabelItem[] = [];
-      
-      for (const item of itemsToUse) {
+      // Step 2: Subtract printed from requested
+      const adjustedItems = items.map(item => {
         const printed = printedMap.get(item.id) || 0;
-        const remaining = Math.max(0, item.quantity - printed);
-        
-        if (printed > 0) {
-          alreadyPrinted.push({ item_id: item.id, printed_qty: printed });
-        }
-        
-        if (remaining > 0) {
-          adjustedItems.push({ ...item, quantity: remaining });
-        }
-        // Skip fully-printed items entirely
-      }
+        return { ...item, quantity: Math.max(0, item.quantity - printed) };
+      }).filter(item => item.quantity > 0);
       
       if (adjustedItems.length === 0) {
         toast.info('All items have already been printed — no layout needed');
         setIsGenerating(false);
-        setIsLoadingAI(false);
         return;
       }
       
-      if (alreadyPrinted.length > 0) {
-        const totalPrinted = alreadyPrinted.reduce((s, a) => s + a.printed_qty, 0);
-        toast.info(`${alreadyPrinted.length} item(s) partially printed (${totalPrinted.toLocaleString()} labels). Planning for remaining quantities.`);
+      if (printedMap.size > 0) {
+        const totalPrinted = Array.from(printedMap.values()).reduce((s, v) => s + v, 0);
+        toast.info(`${printedMap.size} item(s) partially printed (${totalPrinted.toLocaleString()} labels). Planning remaining.`);
       }
       
-      // Step 3: Call AI with adjusted quantities
-      const aiOption = await fetchAILayout(adjustedItems, dielineToUse, weightsToUse, maxOverrun, alreadyPrinted);
+      // Step 3: Call AI edge function
+      const { data, error } = await supabase.functions.invoke('label-optimize', {
+        body: {
+          items: adjustedItems.map(i => ({ id: i.id, name: i.name, quantity: i.quantity })),
+          dieline,
+          max_overrun: maxOverrun,
+          qty_per_roll: qtyPerRoll ?? undefined,
+        }
+      });
       
-      if (aiOption) {
-        setOptions([aiOption]);
-        setSelectedOption(aiOption);
-        toast.success('AI layout computed');
+      if (error) throw error;
+      if (!data?.layout?.runs) throw new Error('No layout returned from AI');
+      
+      // Step 4: Map AI response directly to LayoutOption
+      const config = getSlotConfig(dieline);
+      
+      const runs: ProposedRun[] = data.layout.runs.map((aiRun: any, idx: number) => {
+        const slotAssignments: SlotAssignment[] = aiRun.slot_assignments.map((slot: any, slotIdx: number) => ({
+          slot: slotIdx,
+          item_id: slot.item_id,
+          quantity_in_slot: slot.quantity_in_slot,
+          needs_rotation: items.find(i => i.id === slot.item_id)?.needs_rotation || false,
+        }));
+        
+        const maxSlotQty = Math.max(...slotAssignments.map(a => a.quantity_in_slot));
+        const frames = calculateFramesForSlot(maxSlotQty, config);
+        const meters = calculateMeters(frames, config);
+        
+        return {
+          run_number: idx + 1,
+          slot_assignments: slotAssignments,
+          meters,
+          frames,
+          actual_labels_per_slot: frames * config.labelsPerSlotPerFrame,
+          reasoning: aiRun.reasoning,
+        };
+      });
+      
+      const totalMeters = runs.reduce((s, r) => s + r.meters, 0);
+      const totalFrames = runs.reduce((s, r) => s + r.frames, 0);
+      const totalLabelsNeeded = adjustedItems.reduce((s, i) => s + i.quantity, 0);
+      const theoreticalMinFrames = Math.ceil(totalLabelsNeeded / config.labelsPerFrame);
+      const theoreticalMinMeters = calculateMeters(theoreticalMinFrames, config);
+      
+      const option: LayoutOption = {
+        id: 'ai-layout',
+        runs,
+        total_meters: totalMeters,
+        total_frames: totalFrames,
+        total_waste_meters: Math.max(0, Math.round((totalMeters - theoreticalMinMeters) * 100) / 100),
+        reasoning: data.layout.overall_reasoning || 'AI-optimized layout',
+        trade_offs: data.layout.trade_offs,
+        warnings: data.warnings,
+      };
+      
+      setOptions([option]);
+      setSelectedOption(option);
+      
+      if (data.warnings?.length > 0) {
+        toast.warning(`Layout has ${data.warnings.length} warning(s) — review before applying`);
       } else {
-        // Fallback: individual runs
-        const fallback = buildFallbackLayout(adjustedItems, dielineToUse, weightsToUse, qtyPerRoll ?? undefined);
-        setOptions([fallback]);
-        setSelectedOption(fallback);
-        toast.warning('AI unavailable — using fallback layout (one run per item)');
+        toast.success('AI layout computed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Layout generation failed:', error);
-      toast.error('Layout generation failed');
+      if (error.message?.includes('429') || error.status === 429) {
+        toast.error('AI rate limit reached — try again shortly');
+      } else if (error.message?.includes('402') || error.status === 402) {
+        toast.error('AI credits exhausted');
+      } else {
+        toast.error('Layout generation failed');
+      }
     } finally {
       setIsGenerating(false);
-      setIsLoadingAI(false);
     }
-
-  }, [items, dieline, weights, qtyPerRoll, maxOverrun, fetchAILayout, orderId]);
+  }, [items, dieline, maxOverrun, qtyPerRoll, orderId]);
 
   /**
-   * Apply selected layout - creates runs in database
+   * Apply selected layout — creates runs in database
    */
   const applyLayout = useCallback(async () => {
     if (!selectedOption) {
@@ -399,7 +207,6 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
           meters_to_print: run.meters,
           frames_count: run.frames,
           estimated_duration_minutes: calculateRunPrintTime(run),
-          ai_optimization_score: selectedOption.overall_score,
           ai_reasoning: selectedOption.reasoning,
         });
       }
@@ -414,34 +221,14 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
   }, [selectedOption, orderId, createRun]);
 
   /**
-   * Get production time estimate for an option
+   * Get production time estimate
    */
   const getProductionTime = useCallback((option: LayoutOption) => {
     return calculateProductionTime(option.runs);
   }, []);
 
   /**
-   * Computed values
-   */
-  const summary = useMemo(() => {
-    if (!selectedOption) return null;
-    
-    return {
-      totalRuns: selectedOption.runs.length,
-      totalMeters: selectedOption.total_meters,
-      totalFrames: selectedOption.total_frames,
-      wasteMeters: selectedOption.total_waste_meters,
-      estimatedMinutes: calculateProductionTime(selectedOption.runs),
-      overallScore: selectedOption.overall_score
-    };
-  }, [selectedOption]);
-
-  const canGenerate = useMemo(() => {
-    return dieline !== null && items.length > 0;
-  }, [dieline, items]);
-
-  /**
-   * Save selected layout to the order in database
+   * Save selected layout to the order
    */
   const saveLayout = useCallback(async () => {
     if (!selectedOption) {
@@ -471,7 +258,7 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
   }, [selectedOption, orderId]);
 
   /**
-   * Clear saved layout from the order
+   * Clear saved layout
    */
   const clearSavedLayout = useCallback(async () => {
     setIsSaving(true);
@@ -495,28 +282,38 @@ export function useLayoutOptimizer({ orderId, items, dieline, savedLayout, qtyPe
     }
   }, [orderId]);
 
+  const summary = useMemo(() => {
+    if (!selectedOption) return null;
+    return {
+      totalRuns: selectedOption.runs.length,
+      totalMeters: selectedOption.total_meters,
+      totalFrames: selectedOption.total_frames,
+      wasteMeters: selectedOption.total_waste_meters,
+      estimatedMinutes: calculateProductionTime(selectedOption.runs),
+    };
+  }, [selectedOption]);
+
+  const canGenerate = useMemo(() => {
+    return dieline !== null && items.length > 0;
+  }, [dieline, items]);
+
   return {
-    // State
     options,
     selectedOption,
     isGenerating,
     isApplying: isCreating,
-    weights,
     summary,
     canGenerate,
-    isLoadingAI,
     isSaving,
     hasSavedLayout,
     maxOverrun,
     
-    // Actions
-    generateOptions: generateLayoutOptions,
+    generateOptions,
     selectOption: setSelectedOption,
     applyLayout,
-    updateWeights: setWeights,
     getProductionTime,
     saveLayout,
     clearSavedLayout,
-    setMaxOverrun
+    setMaxOverrun,
   };
 }

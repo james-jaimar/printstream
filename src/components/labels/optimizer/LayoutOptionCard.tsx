@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { Check, Zap, Package, Scissors, AlertTriangle, Info, LayoutGrid, Bug, ChevronDown } from 'lucide-react';
+import { Check, Sparkles, AlertTriangle, Info, LayoutGrid, ChevronDown } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
@@ -21,35 +20,8 @@ export function LayoutOptionCard({
   isRecommended,
   onSelect 
 }: LayoutOptionCardProps) {
-  const scorePercent = Math.round(option.overall_score * 100);
-  
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600 dark:text-green-400';
-    if (score >= 60) return 'text-yellow-600 dark:text-yellow-400';
-    return 'text-orange-600 dark:text-orange-400';
-  };
-
-  const getOptionIcon = (id: string) => {
-    switch (id) {
-      case 'ganged-all': return <Zap className="h-4 w-4" />;
-      case 'individual': return <Package className="h-4 w-4" />;
-      case 'optimized': return <Scissors className="h-4 w-4" />;
-      case 'equal-qty': return <Zap className="h-4 w-4" />;
-      default: return <Package className="h-4 w-4" />;
-    }
-  };
-
-  const getOptionTitle = (id: string) => {
-    switch (id) {
-      case 'ganged-all': return 'Ganged Run';
-      case 'individual': return 'Individual Runs';
-      case 'optimized': return 'Optimized Split';
-      case 'equal-qty': return 'Equal Quantity';
-      default: return 'Layout Option';
-    }
-  };
-
   const tradeOffs = option.trade_offs;
+  const hasWarnings = option.warnings && option.warnings.length > 0;
 
   return (
     <Card 
@@ -63,8 +35,8 @@ export function LayoutOptionCard({
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {getOptionIcon(option.id)}
-            <CardTitle className="text-base">{getOptionTitle(option.id)}</CardTitle>
+            <Sparkles className="h-4 w-4" />
+            <CardTitle className="text-base">AI Layout</CardTitle>
           </div>
           <div className="flex items-center gap-2">
             {isRecommended && (
@@ -82,17 +54,6 @@ export function LayoutOptionCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Score */}
-        <div>
-          <div className="flex items-center justify-between text-sm mb-1">
-            <span className="text-muted-foreground">Efficiency Score</span>
-            <span className={cn('font-bold', getScoreColor(scorePercent))}>
-              {scorePercent}%
-            </span>
-          </div>
-          <Progress value={scorePercent} className="h-2" />
-        </div>
-
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3 text-sm">
           <div className="text-center p-2 rounded-lg bg-muted/50">
@@ -109,21 +70,18 @@ export function LayoutOptionCard({
           </div>
         </div>
 
-        {/* Efficiency Breakdown */}
-        <div className="space-y-2 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Material Efficiency</span>
-            <span>{Math.round(option.material_efficiency_score * 100)}%</span>
+        {/* Warnings */}
+        {hasWarnings && (
+          <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2 space-y-1">
+            <p className="text-xs font-medium text-destructive flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              {option.warnings!.length} warning{option.warnings!.length > 1 ? 's' : ''}
+            </p>
+            {option.warnings!.map((w, i) => (
+              <p key={i} className="text-[11px] text-destructive/80">{w}</p>
+            ))}
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Print Efficiency</span>
-            <span>{Math.round(option.print_efficiency_score * 100)}%</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Labor Efficiency</span>
-            <span>{Math.round(option.labor_efficiency_score * 100)}%</span>
-          </div>
-        </div>
+        )}
 
         {/* Trade-off Badges */}
         {tradeOffs && (
@@ -183,64 +141,22 @@ export function LayoutOptionCard({
           {option.reasoning}
         </p>
 
-        {/* Debug / AI Reasoning Section */}
-        {(option.debug_info || option.runs.some(r => r.reasoning)) && (
+        {/* Per-Run Reasoning */}
+        {option.runs.some(r => r.reasoning) && (
           <Collapsible>
             <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full" onClick={(e) => e.stopPropagation()}>
-              <Bug className="h-3 w-3" />
-              <span>Debug / AI Reasoning</span>
+              <Sparkles className="h-3 w-3" />
+              <span>AI Run Details</span>
               <ChevronDown className="h-3 w-3 ml-auto" />
             </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2 space-y-3 text-xs">
-              {/* Input items the AI received */}
-              {option.debug_info?.input_items && option.debug_info.input_items.length > 0 && (
-                <div className="space-y-1">
-                  <p className="font-medium text-muted-foreground">AI Input Items:</p>
-                  <div className="bg-muted/50 rounded p-2 space-y-0.5 font-mono text-[11px]">
-                    {option.debug_info.input_items.map((item, i) => (
-                      <p key={i}>{item.name}: {item.quantity.toLocaleString()} labels</p>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Per-run reasoning */}
-              {option.runs.some(r => r.reasoning) && (
-                <div className="space-y-1">
-                  <p className="font-medium text-muted-foreground">Per-Run Reasoning:</p>
-                  <div className="bg-muted/50 rounded p-2 space-y-1.5">
-                    {option.runs.map((run, i) => run.reasoning ? (
-                      <p key={i} className="text-[11px]">
-                        <span className="font-semibold">Run {run.run_number}:</span> {run.reasoning}
-                      </p>
-                    ) : null)}
-                  </div>
-                </div>
-              )}
-
-              {/* Validation warnings */}
-              {option.debug_info?.validation_warnings && option.debug_info.validation_warnings.length > 0 && (
-                <div className="space-y-1">
-                  <p className="font-medium text-destructive">Validation Warnings:</p>
-                  <div className="bg-destructive/5 rounded p-2 space-y-0.5">
-                    {option.debug_info.validation_warnings.map((w, i) => (
-                      <p key={i} className="text-[11px] text-destructive">{w}</p>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Correction notes */}
-              {option.debug_info?.correction_notes && option.debug_info.correction_notes.length > 0 && (
-                <div className="space-y-1">
-                  <p className="font-medium text-amber-600">Auto-Corrections Applied:</p>
-                  <div className="bg-amber-50 dark:bg-amber-950/30 rounded p-2 space-y-0.5">
-                    {option.debug_info.correction_notes.map((n, i) => (
-                      <p key={i} className="text-[11px] text-amber-700 dark:text-amber-300">{n}</p>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <CollapsibleContent className="mt-2 space-y-1">
+              <div className="bg-muted/50 rounded p-2 space-y-1.5">
+                {option.runs.map((run, i) => run.reasoning ? (
+                  <p key={i} className="text-[11px]">
+                    <span className="font-semibold">Run {run.run_number}:</span> {run.reasoning}
+                  </p>
+                ) : null)}
+              </div>
             </CollapsibleContent>
           </Collapsible>
         )}
