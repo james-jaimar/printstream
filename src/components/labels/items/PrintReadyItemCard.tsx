@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react';
 import { FileText, CheckCircle, XCircle, Loader2, AlertTriangle, Trash2, Upload, Link2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -5,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useThumbnailUrl } from '@/hooks/labels/useThumbnailUrl';
+import { supabase } from '@/integrations/supabase/client';
 import type { LabelItem, PrintPdfStatus } from '@/types/labels';
 
 interface PrintReadyItemCardProps {
