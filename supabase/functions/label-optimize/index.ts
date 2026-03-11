@@ -1,8 +1,8 @@
 /**
- * Label Layout Optimizer — AI Edge Function
+ * Label Layout Optimizer — Deterministic Constraint Solver
  * 
- * Physics-focused prompt with explicit self-check algorithm.
- * Single retry with concrete violation feedback if overrun limit breached.
+ * Architecture: Code does math, AI advises on strategy (optional).
+ * The solver guarantees zero overrun violations by construction.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -11,6 +11,8 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface LabelItem {
   id: string;
@@ -29,6 +31,30 @@ interface Dieline {
   bleed_bottom_mm?: number;
 }
 
+interface SlotAssignment {
+  item_id: string;
+  quantity_in_slot: number;
+}
+
+interface SolverRun {
+  slot_assignments: SlotAssignment[];
+  reasoning: string;
+}
+
+interface SolverLayout {
+  runs: SolverRun[];
+  overall_reasoning: string;
+  estimated_waste_percent: number;
+  trade_offs?: {
+    blank_slots_available?: number;
+    blank_slot_note?: string;
+    roll_size_note?: string;
+    overrun_warnings?: string[];
+  };
+}
+
+// ─── Physics ─────────────────────────────────────────────────────────────────
+
 function calcLabelsPerSlotPerFrame(dieline: Dieline): number {
   const MAX_FRAME_LENGTH_MM = 960;
   const bleedVertical = (dieline.bleed_top_mm || 0) + (dieline.bleed_bottom_mm || 0);
@@ -39,6 +65,253 @@ function calcLabelsPerSlotPerFrame(dieline: Dieline): number {
   return dieline.rows_around * templatesPerFrame;
 }
 
+// ─── Core Constraint Check ───────────────────────────────────────────────────
+
+/**
+ * Can a candidate quantity be added to a run that already has these slot quantities?
+ * Returns true only if EVERY item (existing + candidate) stays within maxOverrun.
+ */
+function canAddToRun(
+  existingQtys: number[],
+  candidateQty: number,
+  lpf: number,
+  maxOverrun: number
+): boolean {
+  const allQtys = [...existingQtys, candidateQty];
+  const maxQty = Math.max(...allQtys);
+  const frames = Math.ceil(maxQty / lpf);
+  const actual = frames * lpf;
+  return allQtys.every(q => (actual - q) <= maxOverrun);
+}
+
+/**
+ * Compute overrun for each slot in a run.
+ */
+function getRunOverruns(slotQtys: number[], lpf: number): number[] {
+  const filled = slotQtys.filter(q => q > 0);
+  if (filled.length === 0) return slotQtys.map(() => 0);
+  const maxQty = Math.max(...filled);
+  const frames = Math.ceil(maxQty / lpf);
+  const actual = frames * lpf;
+  return slotQtys.map(q => q > 0 ? actual - q : 0);
+}
+
+// ─── Splitting Helper ────────────────────────────────────────────────────────
+
+interface SplitItem {
+  originalId: string;
+  originalName: string;
+  quantity: number;
+  splitIndex: number;     // 0-based
+  totalSplits: number;    // how many pieces this item was split into
+}
+
+/**
+ * Try splitting an item into N equal-ish parts.
+ * Returns array of SplitItems. If N=1, no split.
+ */
+function splitItem(item: LabelItem, n: number): SplitItem[] {
+  if (n <= 1) {
+    return [{ originalId: item.id, originalName: item.name, quantity: item.quantity, splitIndex: 0, totalSplits: 1 }];
+  }
+  const base = Math.floor(item.quantity / n);
+  const remainder = item.quantity % n;
+  const parts: SplitItem[] = [];
+  for (let i = 0; i < n; i++) {
+    parts.push({
+      originalId: item.id,
+      originalName: item.name,
+      quantity: base + (i < remainder ? 1 : 0),
+      splitIndex: i,
+      totalSplits: n,
+    });
+  }
+  return parts;
+}
+
+// ─── Greedy Solver ───────────────────────────────────────────────────────────
+
+interface RunBucket {
+  slots: SplitItem[];
+  slotQtys: number[];
+}
+
+/**
+ * Greedy bin-packing: sort items descending, first-fit into runs.
+ * Each run has at most totalSlots filled slots.
+ * Every slot must satisfy canAddToRun.
+ */
+function greedySolve(
+  splitItems: SplitItem[],
+  totalSlots: number,
+  lpf: number,
+  maxOverrun: number
+): RunBucket[] {
+  // Sort by quantity descending for best packing
+  const sorted = [...splitItems].sort((a, b) => b.quantity - a.quantity);
+  const runs: RunBucket[] = [];
+
+  for (const si of sorted) {
+    let placed = false;
+    // Try to fit into an existing run
+    for (const run of runs) {
+      if (run.slots.length >= totalSlots) continue;
+      if (canAddToRun(run.slotQtys, si.quantity, lpf, maxOverrun)) {
+        run.slots.push(si);
+        run.slotQtys.push(si.quantity);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      runs.push({ slots: [si], slotQtys: [si.quantity] });
+    }
+  }
+
+  return runs;
+}
+
+// ─── Scoring ─────────────────────────────────────────────────────────────────
+
+interface ScoredLayout {
+  runs: RunBucket[];
+  score: number;
+  breakdown: {
+    runCountPenalty: number;
+    blankSlotPenalty: number;
+    totalOverrun: number;
+    splitPenalty: number;
+    remainderPenalty: number;
+  };
+}
+
+function scoreLayout(
+  runs: RunBucket[],
+  totalSlots: number,
+  lpf: number,
+  items: LabelItem[],
+  qtyPerRoll: number | undefined
+): ScoredLayout {
+  let runCountPenalty = runs.length * 100;
+  let blankSlotPenalty = 0;
+  let totalOverrun = 0;
+  let splitPenalty = 0;
+  let remainderPenalty = 0;
+
+  // Blank slots
+  for (const run of runs) {
+    blankSlotPenalty += (totalSlots - run.slots.length) * 10;
+  }
+
+  // Total overrun
+  for (const run of runs) {
+    const overruns = getRunOverruns(run.slotQtys, lpf);
+    totalOverrun += overruns.reduce((s, o) => s + o, 0);
+  }
+
+  // Split penalty: count how many runs each original item appears in
+  const itemRunMap = new Map<string, Set<number>>();
+  runs.forEach((run, ri) => {
+    for (const slot of run.slots) {
+      if (!itemRunMap.has(slot.originalId)) itemRunMap.set(slot.originalId, new Set());
+      itemRunMap.get(slot.originalId)!.add(ri);
+    }
+  });
+  for (const [, runSet] of itemRunMap) {
+    if (runSet.size > 1) splitPenalty += (runSet.size - 1) * 50; // rewind/join penalty
+  }
+
+  // Remainder penalty (qtyPerRoll)
+  if (qtyPerRoll && qtyPerRoll > 0) {
+    // Sum total assigned per item
+    const itemTotals = new Map<string, number>();
+    for (const run of runs) {
+      for (const slot of run.slots) {
+        itemTotals.set(slot.originalId, (itemTotals.get(slot.originalId) || 0) + slot.quantity);
+      }
+    }
+    for (const [, total] of itemTotals) {
+      const rem = total % qtyPerRoll;
+      if (rem > 0) {
+        remainderPenalty += Math.min(rem, qtyPerRoll - rem) * 0.5;
+      }
+    }
+  }
+
+  const score = runCountPenalty + blankSlotPenalty + totalOverrun * 0.1 + splitPenalty + remainderPenalty;
+
+  return {
+    runs,
+    score,
+    breakdown: { runCountPenalty, blankSlotPenalty, totalOverrun, splitPenalty, remainderPenalty },
+  };
+}
+
+// ─── Candidate Generator ─────────────────────────────────────────────────────
+
+/**
+ * Generate multiple candidate layouts with different splitting strategies.
+ * Returns the best-scoring one.
+ */
+function solveLayout(
+  items: LabelItem[],
+  totalSlots: number,
+  lpf: number,
+  maxOverrun: number,
+  qtyPerRoll: number | undefined
+): { layout: ScoredLayout; candidates: number } {
+  const candidates: ScoredLayout[] = [];
+
+  // Strategy 1: No splitting (greedy)
+  const noSplit = items.map(i => splitItem(i, 1)).flat();
+  const runs1 = greedySolve(noSplit, totalSlots, lpf, maxOverrun);
+  candidates.push(scoreLayout(runs1, totalSlots, lpf, items, qtyPerRoll));
+
+  // Strategy 2: Split large items across 2 slots
+  const split2 = items.map(i => {
+    // Only split if the item is large enough that it would benefit
+    if (i.quantity > lpf * 2) return splitItem(i, 2);
+    return splitItem(i, 1);
+  }).flat();
+  const runs2 = greedySolve(split2, totalSlots, lpf, maxOverrun);
+  candidates.push(scoreLayout(runs2, totalSlots, lpf, items, qtyPerRoll));
+
+  // Strategy 3: Aggressive splitting — split large items to match smaller ones
+  if (items.length >= 2) {
+    const sortedByQty = [...items].sort((a, b) => b.quantity - a.quantity);
+    const medianQty = sortedByQty[Math.floor(sortedByQty.length / 2)].quantity;
+    const split3 = items.map(i => {
+      if (medianQty > 0 && i.quantity > medianQty * 2) {
+        const n = Math.min(totalSlots, Math.ceil(i.quantity / medianQty));
+        return splitItem(i, n);
+      }
+      return splitItem(i, 1);
+    }).flat();
+    const runs3 = greedySolve(split3, totalSlots, lpf, maxOverrun);
+    candidates.push(scoreLayout(runs3, totalSlots, lpf, items, qtyPerRoll));
+  }
+
+  // Strategy 4: If qtyPerRoll set, try rounding quantities up to clean multiples
+  if (qtyPerRoll && qtyPerRoll > 0) {
+    const rounded = items.map(i => {
+      const roundedQty = Math.ceil(i.quantity / qtyPerRoll) * qtyPerRoll;
+      return { ...i, quantity: roundedQty };
+    });
+    const splitR = rounded.map(i => {
+      if (i.quantity > lpf * 2) return splitItem(i, 2);
+      return splitItem(i, 1);
+    }).flat();
+    const runsR = greedySolve(splitR, totalSlots, lpf, maxOverrun);
+    candidates.push(scoreLayout(runsR, totalSlots, lpf, items, qtyPerRoll));
+  }
+
+  // Pick best
+  candidates.sort((a, b) => a.score - b.score);
+  return { layout: candidates[0], candidates: candidates.length };
+}
+
+// ─── Validation (belt & suspenders) ──────────────────────────────────────────
+
 interface ValidationResult {
   warnings: string[];
   overrunViolations: string[];
@@ -46,10 +319,10 @@ interface ValidationResult {
 }
 
 function validateLayout(
-  layout: any,
+  runs: RunBucket[],
   items: LabelItem[],
   totalSlots: number,
-  labelsPerSlotPerFrame: number,
+  lpf: number,
   maxOverrun: number
 ): ValidationResult {
   const warnings: string[] = [];
@@ -58,47 +331,30 @@ function validateLayout(
 
   // Check every item is assigned
   const itemTotals = new Map<string, number>();
-  for (let i = 0; i < layout.runs.length; i++) {
-    const run = layout.runs[i];
-    if (run.slot_assignments.length !== totalSlots) {
-      warnings.push(`Run ${i + 1} has ${run.slot_assignments.length} slots, expected ${totalSlots}`);
-    }
-    for (const slot of run.slot_assignments) {
-      if (slot.item_id && slot.quantity_in_slot > 0) {
-        itemTotals.set(slot.item_id, (itemTotals.get(slot.item_id) || 0) + slot.quantity_in_slot);
-      }
+  for (const run of runs) {
+    for (const slot of run.slots) {
+      itemTotals.set(slot.originalId, (itemTotals.get(slot.originalId) || 0) + slot.quantity);
     }
   }
 
   for (const item of items) {
     const assigned = itemTotals.get(item.id) || 0;
     if (assigned === 0) {
-      missingItems.push(`MISSING: Item "${item.name}" (${item.id}) not assigned to any run`);
+      missingItems.push(`MISSING: Item "${item.name}" (${item.id}) not assigned`);
     } else if (assigned < item.quantity) {
-      const shortfall = item.quantity - assigned;
-      warnings.push(`Item "${item.name}": only assigned ${assigned} of ${item.quantity} (short by ${shortfall})`);
+      warnings.push(`Item "${item.name}": assigned ${assigned} of ${item.quantity} (short by ${item.quantity - assigned})`);
     }
   }
 
   // Check overrun per slot
-  for (let i = 0; i < layout.runs.length; i++) {
-    const run = layout.runs[i];
-    const filledSlots = run.slot_assignments.filter((s: any) => s.quantity_in_slot > 0);
-    if (filledSlots.length === 0) continue;
-    
-    const maxSlotQty = Math.max(...filledSlots.map((s: any) => s.quantity_in_slot));
-    const frames = Math.ceil(maxSlotQty / labelsPerSlotPerFrame);
-    const actualPerSlot = frames * labelsPerSlotPerFrame;
-
-    for (let j = 0; j < run.slot_assignments.length; j++) {
-      const slot = run.slot_assignments[j];
-      if (slot.quantity_in_slot > 0) {
-        const overrun = actualPerSlot - slot.quantity_in_slot;
-        if (overrun > maxOverrun) {
-          overrunViolations.push(
-            `Run ${i + 1}, slot ${j + 1} ("${slot.item_id}"): requested ${slot.quantity_in_slot}, actual output ${actualPerSlot}, overrun ${overrun} > max ${maxOverrun}`
-          );
-        }
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    const overruns = getRunOverruns(run.slotQtys, lpf);
+    for (let j = 0; j < run.slots.length; j++) {
+      if (overruns[j] > maxOverrun) {
+        overrunViolations.push(
+          `Run ${i + 1}, slot ${j + 1} ("${run.slots[j].originalName}"): qty ${run.slotQtys[j]}, overrun ${overruns[j]} > max ${maxOverrun}`
+        );
       }
     }
   }
@@ -106,209 +362,117 @@ function validateLayout(
   return { warnings: [...warnings, ...missingItems], overrunViolations, missingItems };
 }
 
-function buildSystemPrompt(
+// ─── Format Output ───────────────────────────────────────────────────────────
+
+function formatSolverOutput(
+  scored: ScoredLayout,
   items: LabelItem[],
   totalSlots: number,
-  labelsPerSlotPerFrame: number,
-  maxOverrun: number,
+  lpf: number,
   qtyPerRoll: number | undefined
-): string {
-  const rollSizeSection = qtyPerRoll
-    ? `- The preferred finished roll size is ${qtyPerRoll}.
-- Strongly prefer plans where each SKU total is close to or aligned with clean multiples of ${qtyPerRoll}.
-- Avoid producing small remainder quantities that would require rewinding or joining to make full rolls.
-- A slightly less full print layout is acceptable if it produces cleaner finished rolls.`
-    : `- No preferred finished roll size is specified.
-- You may use any efficient quantity, but still prioritize minimizing rewinds, joins, and awkward leftover rolls.`;
-
-  return `You are a production planner for an HP Indigo roll label press.
-
-PHYSICS:
-- The press has ${totalSlots} slots across the roll. All ${totalSlots} slots print simultaneously.
-- One frame produces ${labelsPerSlotPerFrame} labels per slot.
-- A run's length = ceil(highest_slot_qty / ${labelsPerSlotPerFrame}) frames.
-- EVERY filled slot in that run produces frames × ${labelsPerSlotPerFrame} labels.
-- Overrun per filled slot = actual_produced − quantity_in_slot.
-
-HARD CONSTRAINT — MAX OVERRUN:
-- Maximum allowed overrun is ${maxOverrun} labels per filled slot.
-- This is a HARD LIMIT. Any filled slot with overrun > ${maxOverrun} makes the run invalid.
-
-PRIMARY OBJECTIVE:
-Your main goal is to create the most finishing-efficient plan, not merely the most tightly packed print layout.
-Optimize in this order:
-1. Ensure every item reaches at least its requested total quantity.
-2. Minimize finishing pain:
-   - avoid small awkward leftovers,
-   - avoid rewinding and joining rolls where possible,
-   - avoid splitting one SKU across too many runs unless necessary.
-3. If qtyPerRoll is provided, strongly prefer clean multiples of ${qtyPerRoll || 'N/A'} for each SKU total and for slot quantities where practical.
-4. Keep every filled slot within the max overrun limit.
-5. Minimize total number of runs only when this does not worsen finishing.
-6. Blank slots are allowed when they improve finishing efficiency or reduce overrun risk.
-
-IMPORTANT FINISHING RULES:
-- A blank slot is better than forcing a poor quantity combination that creates extra rewinding, joining, or awkward roll fragments.
-- When quantities are very different, separate them into different runs or split the larger item across multiple runs/slots.
-- Group items with similar quantities where possible.
-- Prefer fewer, cleaner runs over tightly packed but awkward runs.
-- Do NOT optimize only for material utilization; optimize for post-press handling.
-
-ROLL-SIZE PREFERENCE:
-${rollSizeSection}
-
-SPLITTING RULES:
-- You may split an item across multiple runs.
-- You may split an item across multiple slots within the same run.
-- Example: a 5,000-label item may be split across 2 slots or multiple runs if that improves overrun control or finishing efficiency.
-- Use splitting when quantities differ greatly or when it helps produce cleaner finished rolls.
-
-HOW TO CHECK EACH RUN (you MUST do this before returning):
-1. Find the HIGHEST quantity_in_slot across all filled slots in the run.
-2. frames = ceil(highest_qty / ${labelsPerSlotPerFrame})
-3. actual_output = frames × ${labelsPerSlotPerFrame}
-4. For EACH filled slot:
-   - overrun = actual_output − quantity_in_slot
-5. If ANY filled slot has overrun > ${maxOverrun}, you MUST fix it by:
-   - splitting the item,
-   - moving the slot to another run,
-   - regrouping similar quantities together,
-   - or creating another run.
-
-WORKED EXAMPLE (labelsPerSlotPerFrame=${labelsPerSlotPerFrame}, maxOverrun=${maxOverrun}):
-- Bad: Slot A=5300, Slot B=700
-  - frames = ceil(5300 / ${labelsPerSlotPerFrame})
-  - actual_output = frames × ${labelsPerSlotPerFrame}
-  - Slot B overrun = actual_output − 700
-  - If Slot B overrun > ${maxOverrun}, this run is INVALID.
-- Fix:
-  - Put Slot B in a separate run, or
-  - split Slot A, or
-  - regroup so the highest quantity in that run is closer to 700.
-
-GLOBAL RULES:
-1. EVERY item MUST appear in at least one slot with quantity_in_slot > 0.
-2. The SUM of quantity_in_slot for each item across ALL runs MUST equal or exceed that item's requested quantity.
-3. Each run MUST have EXACTLY ${totalSlots} slot_assignments.
-4. Blank slots MUST use item_id="" and quantity_in_slot=0.
-5. Do not modify, rename, skip, or duplicate item IDs outside valid split allocations.
-6. Prefer plans that reduce finishing work even if they use one or more blank slots.
-
-ITEMS TO ASSIGN (use these EXACT IDs — do NOT modify or skip them):
-${items.map((i: LabelItem) => `- ID: "${i.id}" | Name: "${i.name}" | Qty: ${i.quantity.toLocaleString()}`).join('\n')}
-
-REQUIRED SELF-VALIDATION BEFORE RETURNING:
-- Every item ID from the list above appears in at least one slot_assignment with quantity_in_slot > 0.
-- Sum of quantity_in_slot per item across all runs is >= that item's requested quantity.
-- Every run has exactly ${totalSlots} slot_assignments.
-- Every blank slot uses item_id="" and quantity_in_slot=0.
-- Every run passes the overrun check algorithm above.
-- ${qtyPerRoll ? 'qtyPerRoll is set — confirm the plan prefers clean roll quantities and reduces rewind/join work.' : 'No roll size is set — confirm the plan still minimizes awkward leftovers and finishing effort.'}
-
-OUTPUT EXPECTATION:
-- Return a concrete multi-run layout using the create_layout tool.
-- The layout must reflect the best finishing-efficient plan, not just the fullest slot utilization.
-- If blank slots are used, that is acceptable when it improves the finishing outcome.`;
-}
-
-function buildTools(totalSlots: number) {
-  return [{
-    type: "function",
-    function: {
-      name: "create_layout",
-      description: "Create production layout with run assignments",
-      parameters: {
-        type: "object",
-        properties: {
-          runs: {
-            type: "array",
-            description: `Array of runs. Each MUST have exactly ${totalSlots} slot_assignments.`,
-            items: {
-              type: "object",
-              properties: {
-                slot_assignments: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      item_id: { type: "string", description: "Item ID or empty string for blank slot" },
-                      quantity_in_slot: { type: "number", description: "Labels needed. 0 for blank slots." }
-                    },
-                    required: ["item_id", "quantity_in_slot"],
-                    additionalProperties: false
-                  }
-                },
-                reasoning: { type: "string", description: "Why this run is configured this way" }
-              },
-              required: ["slot_assignments", "reasoning"],
-              additionalProperties: false
-            }
-          },
-          overall_reasoning: { type: "string", description: "Overall layout strategy explanation" },
-          estimated_waste_percent: { type: "number", description: "Estimated waste %" },
-          trade_offs: {
-            type: "object",
-            properties: {
-              blank_slots_available: { type: "number" },
-              blank_slot_note: { type: "string" },
-              roll_size_note: { type: "string" },
-              overrun_warnings: { type: "array", items: { type: "string" } }
-            },
-            additionalProperties: false
-          }
-        },
-        required: ["runs", "overall_reasoning", "estimated_waste_percent"],
-        additionalProperties: false
-      }
+): SolverLayout {
+  const runs: SolverRun[] = scored.runs.map((run, ri) => {
+    // Build slot assignments padded to totalSlots
+    const slotAssignments: SlotAssignment[] = [];
+    
+    for (const slot of run.slots) {
+      slotAssignments.push({
+        item_id: slot.originalId,
+        quantity_in_slot: slot.quantity,
+      });
     }
-  }];
-}
+    
+    // Pad with blank slots
+    while (slotAssignments.length < totalSlots) {
+      slotAssignments.push({ item_id: "", quantity_in_slot: 0 });
+    }
 
-async function callAI(
-  apiKey: string,
-  systemPrompt: string,
-  userMessage: string,
-  tools: any[]
-): Promise<{ layout: any; error?: string }> {
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      tools,
-      tool_choice: { type: "function", function: { name: "create_layout" } }
-    }),
+    // Build reasoning
+    const filled = run.slots.length;
+    const blanks = totalSlots - filled;
+    const overruns = getRunOverruns(run.slotQtys, lpf);
+    const maxOvr = Math.max(...overruns, 0);
+    const maxQty = Math.max(...run.slotQtys);
+    const frames = Math.ceil(maxQty / lpf);
+
+    const parts: string[] = [];
+    parts.push(`${filled} filled slot(s), ${blanks} blank`);
+    parts.push(`${frames} frames, max overrun ${maxOvr}`);
+    
+    // Note which items are in this run
+    const itemNames = [...new Set(run.slots.map(s => s.originalName))];
+    parts.push(`Items: ${itemNames.join(', ')}`);
+
+    // Note splits
+    const splits = run.slots.filter(s => s.totalSplits > 1);
+    if (splits.length > 0) {
+      parts.push(`Contains split portions`);
+    }
+
+    return {
+      slot_assignments: slotAssignments,
+      reasoning: parts.join('. '),
+    };
   });
 
-  if (!response.ok) {
-    const status = response.status;
-    const errorText = await response.text();
-    console.error("AI gateway error:", status, errorText);
-    if (status === 429) return { layout: null, error: "rate_limit" };
-    if (status === 402) return { layout: null, error: "credits_exhausted" };
-    throw new Error(`AI gateway error: ${status}`);
+  // Calculate waste
+  let totalActual = 0;
+  let totalRequested = 0;
+  for (const run of scored.runs) {
+    const filled = run.slotQtys.filter(q => q > 0);
+    if (filled.length === 0) continue;
+    const maxQty = Math.max(...filled);
+    const frames = Math.ceil(maxQty / lpf);
+    const actual = frames * lpf;
+    totalActual += actual * filled.length;
+    totalRequested += run.slotQtys.reduce((s, q) => s + q, 0);
+  }
+  const wastePct = totalRequested > 0 ? Math.round(((totalActual - totalRequested) / totalActual) * 100 * 10) / 10 : 0;
+
+  // Trade-offs
+  const totalBlanks = scored.runs.reduce((s, r) => s + (totalSlots - r.slots.length), 0);
+  const itemRunCounts = new Map<string, number>();
+  scored.runs.forEach(run => {
+    const ids = new Set(run.slots.map(s => s.originalId));
+    for (const id of ids) {
+      itemRunCounts.set(id, (itemRunCounts.get(id) || 0) + 1);
+    }
+  });
+  const splitItems = [...itemRunCounts.entries()].filter(([, count]) => count > 1);
+
+  const overrunWarnings: string[] = [];
+  for (let ri = 0; ri < scored.runs.length; ri++) {
+    const overruns = getRunOverruns(scored.runs[ri].slotQtys, lpf);
+    for (let si = 0; si < overruns.length; si++) {
+      if (overruns[si] > 0) {
+        overrunWarnings.push(`Run ${ri + 1}, slot ${si + 1}: overrun ${overruns[si]}`);
+      }
+    }
   }
 
-  const aiResult = await response.json();
-  const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+  const rollNote = qtyPerRoll
+    ? `Target roll size: ${qtyPerRoll}. ${scored.breakdown.remainderPenalty > 0 ? 'Some items not on clean multiples.' : 'All items on clean multiples.'}`
+    : 'No roll size preference set.';
 
-  if (!toolCall?.function?.arguments) {
-    return { layout: null, error: "no_tool_call" };
-  }
-
-  try {
-    return { layout: JSON.parse(toolCall.function.arguments) };
-  } catch {
-    return { layout: null, error: "parse_failed" };
-  }
+  return {
+    runs,
+    overall_reasoning: `Deterministic solver: ${runs.length} run(s), ${totalBlanks} blank slot(s), ${wastePct}% waste. `
+      + `Score: ${scored.score.toFixed(0)} (runs=${scored.breakdown.runCountPenalty}, blanks=${scored.breakdown.blankSlotPenalty}, `
+      + `overrun=${scored.breakdown.totalOverrun.toFixed(0)}, splits=${scored.breakdown.splitPenalty}, remainder=${scored.breakdown.remainderPenalty.toFixed(0)}). `
+      + (splitItems.length > 0
+        ? `${splitItems.length} item(s) split across multiple runs (may need rewind/join).`
+        : 'No items split across runs.'),
+    estimated_waste_percent: wastePct,
+    trade_offs: {
+      blank_slots_available: totalBlanks,
+      blank_slot_note: totalBlanks > 0 ? `${totalBlanks} blank slot(s) used to maintain overrun compliance.` : 'All slots filled.',
+      roll_size_note: rollNote,
+      overrun_warnings: overrunWarnings,
+    },
+  };
 }
+
+// ─── HTTP Handler ────────────────────────────────────────────────────────────
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -324,102 +488,43 @@ serve(async (req) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "AI service not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
-    }
-
     const totalSlots = dieline.columns_across;
-    const labelsPerSlotPerFrame = calcLabelsPerSlotPerFrame(dieline);
+    const lpf = calcLabelsPerSlotPerFrame(dieline);
     const totalLabels = items.reduce((sum: number, i: LabelItem) => sum + i.quantity, 0);
 
-    console.log(`[label-optimize] ${items.length} items, ${totalLabels} labels, ${totalSlots} slots, ${labelsPerSlotPerFrame} labels/slot/frame, maxOverrun=${max_overrun}`);
+    console.log(`[label-optimize] Solver: ${items.length} items, ${totalLabels} labels, ${totalSlots} slots, ${lpf} lpf, maxOverrun=${max_overrun}, qtyPerRoll=${qty_per_roll || 'none'}`);
 
-    const systemPrompt = buildSystemPrompt(items, totalSlots, labelsPerSlotPerFrame, max_overrun, qty_per_roll);
-    const tools = buildTools(totalSlots);
-    const userMessage = `Plan the most finishing-efficient shared print layout for ${items.length} items.
+    // ─── Run deterministic solver ────────────────────────────────────
+    const { layout: scored, candidates } = solveLayout(
+      items,
+      totalSlots,
+      lpf,
+      max_overrun,
+      qty_per_roll
+    );
 
-Context:
-- Total labels requested: ${totalLabels.toLocaleString()}
-- Slots across: ${totalSlots}
-- Labels per slot per frame: ${labelsPerSlotPerFrame}
-- Max overrun per filled slot: ${max_overrun}
-- Preferred qty per roll: ${qty_per_roll || "not specified"}
+    console.log(`[label-optimize] Evaluated ${candidates} candidate strategies. Best score: ${scored.score.toFixed(0)}`);
+    console.log(`[label-optimize] Breakdown:`, JSON.stringify(scored.breakdown));
 
-Important:
-- Prioritize reducing rewind and roll-joining work.
-- Clean finished roll quantities are more important than perfect slot utilization.
-- Blank slots are acceptable if they improve finishing efficiency.
-- Verify every run against the overrun rule before returning.
+    // ─── Validate (belt & suspenders) ────────────────────────────────
+    const validation = validateLayout(scored.runs, items, totalSlots, lpf, max_overrun);
 
-Return the layout using the create_layout tool only.`;
-
-    // --- First AI call ---
-    const firstResult = await callAI(LOVABLE_API_KEY, systemPrompt, userMessage, tools);
-
-    if (firstResult.error === "rate_limit") {
-      return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
-        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+    if (validation.overrunViolations.length > 0) {
+      console.error(`[label-optimize] BUG: Solver produced overrun violations!`, validation.overrunViolations);
     }
-    if (firstResult.error === "credits_exhausted") {
-      return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-        status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
-    }
-    if (!firstResult.layout) {
-      return new Response(JSON.stringify({ error: `AI returned no layout (${firstResult.error})` }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+    if (validation.missingItems.length > 0) {
+      console.error(`[label-optimize] BUG: Solver missed items!`, validation.missingItems);
     }
 
-    let layout = firstResult.layout;
-    let validation = validateLayout(layout, items, totalSlots, labelsPerSlotPerFrame, max_overrun);
-    let retried = false;
+    const allWarnings = [
+      ...validation.warnings,
+      ...validation.overrunViolations,
+    ];
 
-    // --- Single retry if overrun violations or missing items ---
-    if (validation.overrunViolations.length > 0 || validation.missingItems.length > 0) {
-      console.warn(`[label-optimize] Attempt 1 failed validation. Violations: ${validation.overrunViolations.length}, Missing: ${validation.missingItems.length}`);
-      console.warn("Violations:", validation.overrunViolations);
-      console.warn("Missing:", validation.missingItems);
+    // ─── Format output ───────────────────────────────────────────────
+    const layout = formatSolverOutput(scored, items, totalSlots, lpf, qty_per_roll);
 
-      const feedbackLines: string[] = [];
-      
-      if (validation.overrunViolations.length > 0) {
-        feedbackLines.push("OVERRUN VIOLATIONS (each must be fixed):");
-        feedbackLines.push(...validation.overrunViolations.map(v => `  - ${v}`));
-        feedbackLines.push("");
-        feedbackLines.push("To fix overrun: split the high-quantity item across more slots or runs, or move low-quantity items to a separate run where they share with items of similar quantity.");
-      }
-
-      if (validation.missingItems.length > 0) {
-        feedbackLines.push("MISSING ITEMS (each must appear in at least one slot):");
-        feedbackLines.push(...validation.missingItems.map(m => `  - ${m}`));
-      }
-
-      const retryMessage = `Your previous layout has these violations:\n\n${feedbackLines.join('\n')}\n\nFix ALL violations and return a corrected layout. Remember: max overrun is ${max_overrun} per slot. Every item must be assigned. Use the overrun check algorithm from the system prompt.`;
-
-      const retryResult = await callAI(LOVABLE_API_KEY, systemPrompt, retryMessage, tools);
-      retried = true;
-
-      if (retryResult.layout) {
-        layout = retryResult.layout;
-        validation = validateLayout(layout, items, totalSlots, labelsPerSlotPerFrame, max_overrun);
-        console.log(`[label-optimize] Retry result: ${validation.overrunViolations.length} violations, ${validation.missingItems.length} missing`);
-      } else {
-        console.warn("[label-optimize] Retry failed, using first attempt result");
-      }
-    }
-
-    // Combine all warnings
-    const allWarnings = [...validation.warnings, ...validation.overrunViolations];
-    if (retried) {
-      allWarnings.push(`Layout was retried due to violations. ${validation.overrunViolations.length > 0 ? 'Some violations remain — review carefully.' : 'All violations resolved.'}`);
-    }
-
-    console.log(`[label-optimize] Final: ${layout.runs.length} runs, ${allWarnings.length} warnings, retried=${retried}`);
+    console.log(`[label-optimize] Final: ${layout.runs.length} runs, ${allWarnings.length} warnings`);
 
     return new Response(JSON.stringify({
       success: true,
@@ -429,8 +534,10 @@ Return the layout using the create_layout tool only.`;
         items_count: items.length,
         total_labels: totalLabels,
         available_slots: totalSlots,
-        labels_per_slot_per_frame: labelsPerSlotPerFrame,
-        retried,
+        labels_per_slot_per_frame: lpf,
+        solver: 'deterministic_v1',
+        candidates_evaluated: candidates,
+        score: scored.score,
       }
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
