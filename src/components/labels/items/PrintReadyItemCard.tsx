@@ -125,10 +125,15 @@ export function PrintReadyItemCard({ item, onDeletePrintFile, onReplacePrintFile
           {/* Right: Print-Ready */}
           <div className="w-3/5">
             <div className="relative aspect-[4/3] bg-muted flex items-center justify-center">
-              {printLoading ? (
+              {printLoading || isGeneratingThumb ? (
                 <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
-              ) : printThumbUrl ? (
-                <img src={printThumbUrl} alt={`${item.name} print-ready`} className="w-full h-full object-contain" />
+              ) : effectivePrintThumbUrl ? (
+                <img src={effectivePrintThumbUrl} alt={`${item.name} print-ready`} className="w-full h-full object-contain" />
+              ) : hasPrintFile ? (
+                <div className="flex flex-col items-center gap-1 text-green-600">
+                  <CheckCircle className="h-8 w-8" />
+                  <span className="text-[10px]">Print file ready</span>
+                </div>
               ) : (
                 <div className="flex flex-col items-center gap-1 text-muted-foreground">
                   <FileText className="h-8 w-8" />
