@@ -1,38 +1,39 @@
 
-# AI Layout Optimizer — Band-Based Constrained Optimization (v6)
 
-## Current State
+# Fix: Run 9 Blank Slot Failure + Imposition Speed
 
-### Architecture: Deterministic Band-Based Solver
+## Issues Found
 
-```text
-FLOW: Query printed runs (printing/completed only) → Subtract from items → Band Solver (multi-strategy) → Validate → Score → Return best
-NO: AI for arithmetic, retry loops, prompt engineering for math
-RULE: Blank slots only on LAST run. All other runs must have every slot filled. Enforced by 10,000 penalty.
+### 1. Run 9 fails because blank slot has empty `item_id`
+
+Run 9 (the last run) has a legitimate blank slot from the solver:
+```json
+{"slot": 3, "item_id": "", "quantity_in_slot": 0}
 ```
 
-### What Changed (from v5 → v6)
-1. **Complete solver rewrite** — removed greedy bin-packing and fill-first, replaced with band-based grouping
-2. **Core concept: Bands** — a run's frame count defines a valid quantity range `[actual - maxOverrun, actual]`
-3. **7 base strategies + 5 rounded variants** — 12 total candidate layouts evaluated per optimization
-4. **Strategies**: no-split, split-2, split-largest, split-median, split-neighbors, split-all, band-merge
-5. **Blank penalty = 10,000** on non-last runs (effectively forbidden by construction)
+In `useBatchImpose.ts` line 180-192, when mapping slot assignments, the code tries to find an item with `id === ""`, which returns `undefined`, so `pdf_url` becomes `''`. The guard at line 192 then rejects the entire run because it finds a slot with no `pdf_url`.
 
-### Files
-| File | Lines | Change |
-|------|-------|--------|
-| `supabase/functions/label-optimize/index.ts` | ~530 | Full rewrite: band-based solver |
-| `src/hooks/labels/useLayoutOptimizer.ts` | ~320 | Unchanged |
-| `src/utils/labels/layoutOptimizer.ts` | ~85 | Unchanged |
-| `src/types/labels.ts` | ~480 | Unchanged |
+**Fix**: Filter out blank slots (where `item_id` is empty or `quantity_in_slot` is 0) before the empty-URL check. Blank slots are valid — the VPS just won't get artwork for that position. Only check slots that actually have an item assigned.
 
-### Band Math
-- `computeBand(qty, lpf, maxOverrun)` → `{ min: actual - maxOverrun, max: actual, frames }`
-- Portions in the same band can share a run (overrun guaranteed ≤ maxOverrun)
-- Items are split into portions before band assignment, not during run building
+### 2. Slowness: 5-second inter-run delay × 9 runs = 40+ seconds of pure waiting
 
-### Scoring Formula
-```
-score = runCountPenalty(100/run) + blankSlotPenalty(10000 non-last, 10 last)
-      + totalOverrun * 0.1 + splitPenalty(50/extra run per item) + remainderPenalty
-```
+The `INTER_RUN_DELAY_MS = 5000` was set conservatively. With 9 runs, that's 40 seconds of idle delay alone, on top of actual VPS processing time.
+
+**Fix**: Reduce `INTER_RUN_DELAY_MS` from 5000 to 2000ms. The VPS logs show each run completes in under 1 second ("VPS responded immediately"). A 2-second gap is still generous.
+
+## File Changes
+
+### `src/hooks/labels/useBatchImpose.ts`
+
+1. **Line 29**: Change `INTER_RUN_DELAY_MS` from `5000` to `2000`
+
+2. **Lines 191-192**: Filter out blank/empty slots before checking for missing PDFs:
+   ```typescript
+   const filledSlots = slotAssignments.filter(s => s.item_id && s.quantity_in_slot > 0);
+   const emptySlots = filledSlots.filter(s => !s.pdf_url);
+   ```
+   
+3. **Lines 180-188**: When mapping slots, skip blank slots (empty `item_id`) so they aren't sent to the VPS at all — or mark them distinctly so the edge function knows they're intentional blanks.
+
+No other files change.
+
