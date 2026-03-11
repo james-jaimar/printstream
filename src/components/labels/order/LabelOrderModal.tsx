@@ -153,7 +153,7 @@ export function LabelOrderModal({ orderId, open, onOpenChange }: LabelOrderModal
       return name
         .toLowerCase()
         .replace(/\.(pdf|png|jpg|jpeg)$/i, '')
-        .replace(/[\s_-]*(proof|print|final|ready|v\d+)[\s_-]*/gi, '')
+        .replace(/[\s_-]*(proof|print|final|ready|v\d+|no[\s_-]*trace|trace)[\s_-]*/gi, '')
         .replace(/\s*\([^)]*\)\s*/g, '') // Strip parenthetical content like (5000)
         .trim();
     };
