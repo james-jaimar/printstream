@@ -177,18 +177,22 @@ export function useBatchImpose(
       }));
 
       try {
-        const slotAssignments: ImpositionSlot[] = ((run.slot_assignments || []) as any[]).map(slot => {
-          const item = items.find(it => it.id === slot.item_id);
-          return {
-            slot: slot.slot,
-            item_id: slot.item_id,
-            quantity_in_slot: slot.quantity_in_slot,
-            needs_rotation: item?.needs_rotation ?? slot.needs_rotation ?? false,
-            pdf_url: item?.print_pdf_url || '',
-          };
-        });
+        // Map slots, filtering out blank/empty slots (no item assigned)
+        const allSlots = (run.slot_assignments || []) as any[];
+        const slotAssignments: ImpositionSlot[] = allSlots
+          .filter(slot => slot.item_id && slot.quantity_in_slot > 0)
+          .map(slot => {
+            const item = items.find(it => it.id === slot.item_id);
+            return {
+              slot: slot.slot,
+              item_id: slot.item_id,
+              quantity_in_slot: slot.quantity_in_slot,
+              needs_rotation: item?.needs_rotation ?? slot.needs_rotation ?? false,
+              pdf_url: item?.print_pdf_url || '',
+            };
+          });
 
-        // Guard: skip run if any slot has empty pdf_url
+        // Guard: skip run if any filled slot has empty pdf_url
         const emptySlots = slotAssignments.filter(s => !s.pdf_url);
         if (emptySlots.length > 0) {
           const errMsg = `${emptySlots.length} slot(s) have empty pdf_url (item_ids: ${emptySlots.map(s => s.item_id).join(', ')}). Skipping run to avoid broken VPS request.`;
