@@ -1,8 +1,11 @@
 /**
- * Label Layout Optimizer — Deterministic Constraint Solver
+ * Label Layout Optimizer — Band-Based Constrained Optimization Solver (v2)
  * 
- * Architecture: Code does math, AI advises on strategy (optional).
- * The solver guarantees zero overrun violations by construction.
+ * Architecture: Pure deterministic math. No AI for arithmetic.
+ * 
+ * Core insight: A run's frame count defines a "band" of valid slot quantities.
+ * Items are split into portions that fit bands, then bands fill runs completely.
+ * Blank slots only appear on the last run of the entire plan.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -53,6 +56,39 @@ interface SolverLayout {
   };
 }
 
+interface SplitItem {
+  originalId: string;
+  originalName: string;
+  quantity: number;
+  splitIndex: number;
+  totalSplits: number;
+}
+
+interface RunBucket {
+  slots: SplitItem[];
+  slotQtys: number[];
+}
+
+interface Band {
+  frames: number;
+  actual: number;  // frames * lpf
+  min: number;     // actual - maxOverrun
+  max: number;     // actual
+}
+
+interface ScoredLayout {
+  runs: RunBucket[];
+  score: number;
+  strategyName: string;
+  breakdown: {
+    runCountPenalty: number;
+    blankSlotPenalty: number;
+    totalOverrun: number;
+    splitPenalty: number;
+    remainderPenalty: number;
+  };
+}
+
 // ─── Physics ─────────────────────────────────────────────────────────────────
 
 function calcLabelsPerSlotPerFrame(dieline: Dieline): number {
@@ -65,27 +101,42 @@ function calcLabelsPerSlotPerFrame(dieline: Dieline): number {
   return dieline.rows_around * templatesPerFrame;
 }
 
-// ─── Core Constraint Check ───────────────────────────────────────────────────
+// ─── Band Math ───────────────────────────────────────────────────────────────
 
 /**
- * Can a candidate quantity be added to a run that already has these slot quantities?
- * Returns true only if EVERY item (existing + candidate) stays within maxOverrun.
+ * Compute the band for a given quantity.
+ * Band = [actual - maxOverrun, actual] where actual = ceil(qty/lpf) * lpf
  */
-function canAddToRun(
-  existingQtys: number[],
-  candidateQty: number,
-  lpf: number,
-  maxOverrun: number
-): boolean {
-  const allQtys = [...existingQtys, candidateQty];
-  const maxQty = Math.max(...allQtys);
-  const frames = Math.ceil(maxQty / lpf);
+function computeBand(qty: number, lpf: number, maxOverrun: number): Band {
+  if (qty <= 0) return { frames: 0, actual: 0, min: 0, max: 0 };
+  const frames = Math.ceil(qty / lpf);
   const actual = frames * lpf;
-  return allQtys.every(q => (actual - q) <= maxOverrun);
+  return {
+    frames,
+    actual,
+    min: Math.max(1, actual - maxOverrun),
+    max: actual,
+  };
 }
 
 /**
- * Compute overrun for each slot in a run.
+ * Check if a quantity fits within a band.
+ */
+function fitsInBand(qty: number, band: Band): boolean {
+  return qty >= band.min && qty <= band.max;
+}
+
+/**
+ * Check if two quantities are band-compatible (can share a run).
+ */
+function areBandCompatible(q1: number, q2: number, lpf: number, maxOverrun: number): boolean {
+  const maxQ = Math.max(q1, q2);
+  const band = computeBand(maxQ, lpf, maxOverrun);
+  return fitsInBand(Math.min(q1, q2), band);
+}
+
+/**
+ * Get overrun for each slot quantity given the run's actual output.
  */
 function getRunOverruns(slotQtys: number[], lpf: number): number[] {
   const filled = slotQtys.filter(q => q > 0);
@@ -96,21 +147,12 @@ function getRunOverruns(slotQtys: number[], lpf: number): number[] {
   return slotQtys.map(q => q > 0 ? actual - q : 0);
 }
 
-// ─── Splitting Helper ────────────────────────────────────────────────────────
-
-interface SplitItem {
-  originalId: string;
-  originalName: string;
-  quantity: number;
-  splitIndex: number;     // 0-based
-  totalSplits: number;    // how many pieces this item was split into
-}
+// ─── Splitting ───────────────────────────────────────────────────────────────
 
 /**
- * Try splitting an item into N equal-ish parts.
- * Returns array of SplitItems. If N=1, no split.
+ * Split an item's quantity into N roughly equal portions.
  */
-function splitItem(item: LabelItem, n: number): SplitItem[] {
+function splitItemInto(item: LabelItem, n: number): SplitItem[] {
   if (n <= 1) {
     return [{ originalId: item.id, originalName: item.name, quantity: item.quantity, splitIndex: 0, totalSplits: 1 }];
   }
@@ -129,270 +171,295 @@ function splitItem(item: LabelItem, n: number): SplitItem[] {
   return parts;
 }
 
-// ─── Greedy Solver ───────────────────────────────────────────────────────────
-
-interface RunBucket {
-  slots: SplitItem[];
-  slotQtys: number[];
+/**
+ * Split an item into portions that each fit a target band.
+ * Returns portions sized to land within [band.min, band.max].
+ */
+function splitItemToBand(item: LabelItem, targetBand: Band): SplitItem[] {
+  if (item.quantity <= 0) return [];
+  
+  // If item already fits the band, no split needed
+  if (fitsInBand(item.quantity, targetBand)) {
+    return [{ originalId: item.id, originalName: item.name, quantity: item.quantity, splitIndex: 0, totalSplits: 1 }];
+  }
+  
+  // How many portions of size ~targetBand.max do we need?
+  const portionSize = targetBand.max; // aim for max of band
+  const n = Math.ceil(item.quantity / portionSize);
+  return splitItemInto(item, n);
 }
 
+// ─── Band-Based Solver ──────────────────────────────────────────────────────
+
 /**
- * Greedy bin-packing: sort items descending, first-fit into runs.
- * Each run has at most totalSlots filled slots.
- * Every slot must satisfy canAddToRun.
+ * Given a list of portions, group them into bands and build runs.
+ * Each run has exactly totalSlots slots (padded with blanks if needed on last run).
  */
-function greedySolve(
-  splitItems: SplitItem[],
+function buildRunsFromPortions(
+  portions: SplitItem[],
   totalSlots: number,
   lpf: number,
   maxOverrun: number
 ): RunBucket[] {
-  const sorted = [...splitItems].sort((a, b) => b.quantity - a.quantity);
-  const runs: RunBucket[] = [];
+  if (portions.length === 0) return [];
 
-  for (const si of sorted) {
+  // Sort portions descending by quantity
+  const sorted = [...portions].sort((a, b) => b.quantity - a.quantity);
+
+  // Group into bands: portions that can share a run
+  // Use a greedy approach: for each portion, find an existing band group it fits,
+  // or create a new band group.
+  interface BandGroup {
+    band: Band;
+    portions: SplitItem[];
+  }
+
+  const bandGroups: BandGroup[] = [];
+
+  for (const portion of sorted) {
     let placed = false;
-    for (const run of runs) {
-      if (run.slots.length >= totalSlots) continue;
-      if (canAddToRun(run.slotQtys, si.quantity, lpf, maxOverrun)) {
-        run.slots.push(si);
-        run.slotQtys.push(si.quantity);
+
+    for (const group of bandGroups) {
+      // Check if this portion fits the group's band
+      if (fitsInBand(portion.quantity, group.band)) {
+        group.portions.push(portion);
+        placed = true;
+        break;
+      }
+
+      // Check if adding this portion would create a valid expanded band
+      const allQtys = [...group.portions.map(p => p.quantity), portion.quantity];
+      const maxQ = Math.max(...allQtys);
+      const newBand = computeBand(maxQ, lpf, maxOverrun);
+      if (allQtys.every(q => fitsInBand(q, newBand))) {
+        group.band = newBand;
+        group.portions.push(portion);
         placed = true;
         break;
       }
     }
+
     if (!placed) {
-      runs.push({ slots: [si], slotQtys: [si.quantity] });
+      const band = computeBand(portion.quantity, lpf, maxOverrun);
+      bandGroups.push({ band, portions: [portion] });
     }
   }
 
-  return runs;
-}
-
-// ─── Fill-First Solver ───────────────────────────────────────────────────────
-
-/**
- * Remaining quantity tracker for fill-first algorithm.
- */
-interface ItemRemainder {
-  id: string;
-  name: string;
-  remaining: number;
-}
-
-/**
- * Fill-first solver: ensures every slot in every run is filled (except possibly the last run).
- * Splits items aggressively to fill slots within the compatible range of each run's anchor item.
- */
-function solveFullSlots(
-  items: LabelItem[],
-  totalSlots: number,
-  lpf: number,
-  maxOverrun: number
-): RunBucket[] {
-  // Track remaining quantities for each item
-  const remainders: ItemRemainder[] = items
-    .map(i => ({ id: i.id, name: i.name, remaining: i.quantity }))
-    .sort((a, b) => b.remaining - a.remaining);
-
+  // Now build runs from band groups
   const runs: RunBucket[] = [];
-  let splitCounter = 0; // global split index tracker per item
-  const splitCounts = new Map<string, number>(); // track total splits per item
 
-  function totalRemaining(): number {
-    return remainders.reduce((s, r) => s + r.remaining, 0);
-  }
-
-  while (totalRemaining() > 0) {
-    // Sort remainders descending, filter out zero
-    remainders.sort((a, b) => b.remaining - a.remaining);
-    const available = remainders.filter(r => r.remaining > 0);
-    if (available.length === 0) break;
-
-    const run: RunBucket = { slots: [], slotQtys: [] };
-
-    // Pick the largest remaining item as anchor for this run
-    const anchor = available[0];
-    const anchorQty = anchor.remaining;
-
-    // Compute compatible range for this run
-    const frames = Math.ceil(anchorQty / lpf);
-    const actual = frames * lpf;
-    const minCompatible = Math.max(1, actual - maxOverrun);
-
-    // Place anchor in first slot (use all of it)
-    const anchorSplitIdx = splitCounts.get(anchor.id) || 0;
-    run.slots.push({
-      originalId: anchor.id,
-      originalName: anchor.name,
-      quantity: anchorQty,
-      splitIndex: anchorSplitIdx,
-      totalSplits: 0, // will be finalized later
-    });
-    run.slotQtys.push(anchorQty);
-    splitCounts.set(anchor.id, anchorSplitIdx + 1);
-    anchor.remaining = 0;
-
-    // Fill remaining slots
-    for (let slotIdx = 1; slotIdx < totalSlots; slotIdx++) {
-      // Re-sort available items
-      const candidates = remainders.filter(r => r.remaining > 0);
-      if (candidates.length === 0) break; // no more items — last run will have blanks
-
-      let placed = false;
-
-      // First: try to find an item that fits entirely within the compatible range
-      for (const cand of candidates) {
-        if (cand.remaining >= minCompatible && cand.remaining <= actual) {
-          // Fits entirely — verify with canAddToRun
-          if (canAddToRun(run.slotQtys, cand.remaining, lpf, maxOverrun)) {
-            const si = splitCounts.get(cand.id) || 0;
-            run.slots.push({
-              originalId: cand.id,
-              originalName: cand.name,
-              quantity: cand.remaining,
-              splitIndex: si,
-              totalSplits: 0,
-            });
-            run.slotQtys.push(cand.remaining);
-            splitCounts.set(cand.id, si + 1);
-            cand.remaining = 0;
-            placed = true;
-            break;
-          }
-        }
-      }
-
-      if (placed) continue;
-
-      // Second: try to split an item to create a portion that fits in the compatible range
-      // Pick the item with the most remaining quantity to split from
-      for (const cand of candidates) {
-        if (cand.remaining > actual) {
-          // Item is larger than actual — take a portion equal to anchorQty (will match anchor perfectly)
-          const portion = anchorQty;
-          if (canAddToRun(run.slotQtys, portion, lpf, maxOverrun)) {
-            const si = splitCounts.get(cand.id) || 0;
-            run.slots.push({
-              originalId: cand.id,
-              originalName: cand.name,
-              quantity: portion,
-              splitIndex: si,
-              totalSplits: 0,
-            });
-            run.slotQtys.push(portion);
-            splitCounts.set(cand.id, si + 1);
-            cand.remaining -= portion;
-            placed = true;
-            break;
-          }
-        } else if (cand.remaining < minCompatible) {
-          // Item is smaller than minCompatible — try placing it at minCompatible
-          // (this means we'll produce more than needed, but within overrun limit)
-          const portion = minCompatible;
-          if (portion <= cand.remaining) {
-            // Item has enough for minCompatible — shouldn't happen since remaining < minCompatible
-            continue;
-          }
-          // Actually, the item is too small. Try using its full remaining as a slot
-          // but only if it satisfies overrun constraint
-          if (canAddToRun(run.slotQtys, cand.remaining, lpf, maxOverrun)) {
-            const si = splitCounts.get(cand.id) || 0;
-            run.slots.push({
-              originalId: cand.id,
-              originalName: cand.name,
-              quantity: cand.remaining,
-              splitIndex: si,
-              totalSplits: 0,
-            });
-            run.slotQtys.push(cand.remaining);
-            splitCounts.set(cand.id, si + 1);
-            cand.remaining = 0;
-            placed = true;
-            break;
-          }
-        } else {
-          // Item is between minCompatible and actual — fits! Use all of it
-          if (canAddToRun(run.slotQtys, cand.remaining, lpf, maxOverrun)) {
-            const si = splitCounts.get(cand.id) || 0;
-            run.slots.push({
-              originalId: cand.id,
-              originalName: cand.name,
-              quantity: cand.remaining,
-              splitIndex: si,
-              totalSplits: 0,
-            });
-            run.slotQtys.push(cand.remaining);
-            splitCounts.set(cand.id, si + 1);
-            cand.remaining = 0;
-            placed = true;
-            break;
-          }
-        }
-      }
-
-      if (placed) continue;
-
-      // Third: if no item fits even with splitting, try taking a compatible portion from the largest
-      for (const cand of candidates) {
-        if (cand.remaining >= minCompatible) {
-          // Take exactly what fits: use anchorQty or cand.remaining, whichever is smaller
-          const portion = Math.min(cand.remaining, anchorQty);
-          if (portion >= minCompatible && canAddToRun(run.slotQtys, portion, lpf, maxOverrun)) {
-            const si = splitCounts.get(cand.id) || 0;
-            run.slots.push({
-              originalId: cand.id,
-              originalName: cand.name,
-              quantity: portion,
-              splitIndex: si,
-              totalSplits: 0,
-            });
-            run.slotQtys.push(portion);
-            splitCounts.set(cand.id, si + 1);
-            cand.remaining -= portion;
-            placed = true;
-            break;
-          }
-        }
-      }
-
-      // If still not placed, this slot stays blank (should only happen on last run)
-      if (!placed) break;
-    }
-
-    runs.push(run);
-  }
-
-  // Finalize totalSplits for each item
-  for (const run of runs) {
-    for (const slot of run.slots) {
-      slot.totalSplits = splitCounts.get(slot.originalId) || 1;
+  for (const group of bandGroups) {
+    // Each band group produces ceil(portions / totalSlots) runs
+    const groupPortions = [...group.portions]; // don't mutate original
+    while (groupPortions.length > 0) {
+      const runSlots = groupPortions.splice(0, totalSlots);
+      runs.push({
+        slots: runSlots,
+        slotQtys: runSlots.map(s => s.quantity),
+      });
     }
   }
 
   return runs;
+}
+
+// ─── Candidate Strategies ────────────────────────────────────────────────────
+
+/**
+ * Strategy 1: No splitting — each item as one portion.
+ */
+function strategyNoSplit(items: LabelItem[]): SplitItem[] {
+  return items.map(i => ({
+    originalId: i.id, originalName: i.name, quantity: i.quantity, splitIndex: 0, totalSplits: 1
+  }));
+}
+
+/**
+ * Strategy 2: Split largest item into totalSlots portions.
+ */
+function strategySplitLargest(items: LabelItem[], totalSlots: number): SplitItem[] {
+  const sorted = [...items].sort((a, b) => b.quantity - a.quantity);
+  const portions: SplitItem[] = [];
+  // Split the largest into totalSlots pieces
+  portions.push(...splitItemInto(sorted[0], totalSlots));
+  // Rest as-is
+  for (let i = 1; i < sorted.length; i++) {
+    portions.push(...splitItemInto(sorted[i], 1));
+  }
+  return portions;
+}
+
+/**
+ * Strategy 3: Split all items toward the median quantity.
+ */
+function strategySplitToMedian(items: LabelItem[], totalSlots: number, lpf: number, maxOverrun: number): SplitItem[] {
+  if (items.length < 2) return strategyNoSplit(items);
+  
+  const sorted = [...items].sort((a, b) => b.quantity - a.quantity);
+  const medianQty = sorted[Math.floor(sorted.length / 2)].quantity;
+  if (medianQty <= 0) return strategyNoSplit(items);
+
+  const targetBand = computeBand(medianQty, lpf, maxOverrun);
+  const portions: SplitItem[] = [];
+
+  for (const item of items) {
+    if (item.quantity > targetBand.max) {
+      // Split to fit target band
+      const n = Math.ceil(item.quantity / targetBand.max);
+      portions.push(...splitItemInto(item, n));
+    } else {
+      portions.push(...splitItemInto(item, 1));
+    }
+  }
+  return portions;
+}
+
+/**
+ * Strategy 4: Split items to match their nearest neighbor's band.
+ * For each item from largest to smallest, if it doesn't share a band
+ * with the next item, try splitting to create compatibility.
+ */
+function strategySplitToNeighbors(items: LabelItem[], lpf: number, maxOverrun: number): SplitItem[] {
+  if (items.length < 2) return strategyNoSplit(items);
+
+  const sorted = [...items].sort((a, b) => b.quantity - a.quantity);
+  const portions: SplitItem[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const item = sorted[i];
+    // Find the next smaller item
+    const nextItem = sorted[i + 1];
+    
+    if (!nextItem) {
+      // Last item, no neighbor to match
+      portions.push(...splitItemInto(item, 1));
+      continue;
+    }
+
+    // Check if they're already compatible
+    if (areBandCompatible(item.quantity, nextItem.quantity, lpf, maxOverrun)) {
+      portions.push(...splitItemInto(item, 1));
+      continue;
+    }
+
+    // Try splitting this item so pieces land near nextItem's band
+    const nextBand = computeBand(nextItem.quantity, lpf, maxOverrun);
+    if (nextBand.max > 0) {
+      const n = Math.ceil(item.quantity / nextBand.max);
+      if (n > 1 && n <= 8) { // reasonable split count
+        const splits = splitItemInto(item, n);
+        // Verify splits actually fit the target band
+        if (splits.every(s => fitsInBand(s.quantity, nextBand))) {
+          portions.push(...splits);
+          continue;
+        }
+      }
+    }
+
+    // Can't match neighbor, keep as-is
+    portions.push(...splitItemInto(item, 1));
+  }
+  return portions;
+}
+
+/**
+ * Strategy 5: Split every item into exactly totalSlots portions.
+ * This guarantees each item fills one complete run.
+ */
+function strategySplitAll(items: LabelItem[], totalSlots: number): SplitItem[] {
+  const portions: SplitItem[] = [];
+  for (const item of items) {
+    if (item.quantity > 0) {
+      portions.push(...splitItemInto(item, totalSlots));
+    }
+  }
+  return portions;
+}
+
+/**
+ * Strategy 6: Split large items into 2 portions (conservative).
+ */
+function strategySplit2(items: LabelItem[], lpf: number): SplitItem[] {
+  const portions: SplitItem[] = [];
+  for (const item of items) {
+    if (item.quantity > lpf * 2) {
+      portions.push(...splitItemInto(item, 2));
+    } else {
+      portions.push(...splitItemInto(item, 1));
+    }
+  }
+  return portions;
+}
+
+/**
+ * Strategy 7: Band-merge — try to split items so maximum number of portions
+ * share the same band, creating fully-filled runs.
+ */
+function strategyBandMerge(items: LabelItem[], totalSlots: number, lpf: number, maxOverrun: number): SplitItem[] {
+  if (items.length < 2) return strategyNoSplit(items);
+
+  const sorted = [...items].sort((a, b) => b.quantity - a.quantity);
+  const portions: SplitItem[] = [];
+
+  // Find the most common "achievable" band by trying each item's band
+  // and seeing how many others could be split to fit it
+  let bestBand: Band | null = null;
+  let bestFitCount = 0;
+
+  for (const item of sorted) {
+    const band = computeBand(item.quantity, lpf, maxOverrun);
+    let fitCount = 0;
+    for (const other of sorted) {
+      if (fitsInBand(other.quantity, band)) {
+        fitCount++;
+      } else if (other.quantity > band.max) {
+        // Could split to fit
+        const n = Math.ceil(other.quantity / band.max);
+        const portionSize = Math.floor(other.quantity / n);
+        if (fitsInBand(portionSize, band)) fitCount++;
+      }
+    }
+    if (fitCount > bestFitCount) {
+      bestFitCount = fitCount;
+      bestBand = band;
+    }
+  }
+
+  if (!bestBand) return strategyNoSplit(items);
+
+  // Split items to fit the best band
+  for (const item of sorted) {
+    if (fitsInBand(item.quantity, bestBand)) {
+      portions.push(...splitItemInto(item, 1));
+    } else if (item.quantity > bestBand.max) {
+      const n = Math.ceil(item.quantity / bestBand.max);
+      portions.push(...splitItemInto(item, n));
+    } else {
+      // Too small for the band — keep as-is, will go in separate band
+      portions.push(...splitItemInto(item, 1));
+    }
+  }
+  return portions;
+}
+
+// ─── Apply qtyPerRoll rounding ───────────────────────────────────────────────
+
+function roundItemsToRoll(items: LabelItem[], qtyPerRoll: number): LabelItem[] {
+  return items.map(i => ({
+    ...i,
+    quantity: Math.ceil(i.quantity / qtyPerRoll) * qtyPerRoll,
+  }));
 }
 
 // ─── Scoring ─────────────────────────────────────────────────────────────────
-
-interface ScoredLayout {
-  runs: RunBucket[];
-  score: number;
-  breakdown: {
-    runCountPenalty: number;
-    blankSlotPenalty: number;
-    totalOverrun: number;
-    splitPenalty: number;
-    remainderPenalty: number;
-  };
-}
 
 function scoreLayout(
   runs: RunBucket[],
   totalSlots: number,
   lpf: number,
   items: LabelItem[],
-  qtyPerRoll: number | undefined
+  qtyPerRoll: number | undefined,
+  strategyName: string
 ): ScoredLayout {
   let runCountPenalty = runs.length * 100;
   let blankSlotPenalty = 0;
@@ -400,15 +467,13 @@ function scoreLayout(
   let splitPenalty = 0;
   let remainderPenalty = 0;
 
-  // Blank slots — massive penalty on non-last runs, mild on last run
+  // Blank slots — massive penalty on non-last runs
   for (let ri = 0; ri < runs.length; ri++) {
     const blanks = totalSlots - runs[ri].slots.length;
     if (ri < runs.length - 1) {
-      // Non-last run: blanks are effectively forbidden
-      blankSlotPenalty += blanks * 1000;
+      blankSlotPenalty += blanks * 10000; // effectively forbidden
     } else {
-      // Last run: blanks are acceptable
-      blankSlotPenalty += blanks * 10;
+      blankSlotPenalty += blanks * 10; // acceptable on last run
     }
   }
 
@@ -418,7 +483,7 @@ function scoreLayout(
     totalOverrun += overruns.reduce((s, o) => s + o, 0);
   }
 
-  // Split penalty: count how many runs each original item appears in
+  // Split penalty: how many runs each original item appears in
   const itemRunMap = new Map<string, Set<number>>();
   runs.forEach((run, ri) => {
     for (const slot of run.slots) {
@@ -427,12 +492,11 @@ function scoreLayout(
     }
   });
   for (const [, runSet] of itemRunMap) {
-    if (runSet.size > 1) splitPenalty += (runSet.size - 1) * 50; // rewind/join penalty
+    if (runSet.size > 1) splitPenalty += (runSet.size - 1) * 50;
   }
 
   // Remainder penalty (qtyPerRoll)
   if (qtyPerRoll && qtyPerRoll > 0) {
-    // Sum total assigned per item
     const itemTotals = new Map<string, number>();
     for (const run of runs) {
       for (const slot of run.slots) {
@@ -452,16 +516,13 @@ function scoreLayout(
   return {
     runs,
     score,
+    strategyName,
     breakdown: { runCountPenalty, blankSlotPenalty, totalOverrun, splitPenalty, remainderPenalty },
   };
 }
 
-// ─── Candidate Generator ─────────────────────────────────────────────────────
+// ─── Main Solver ─────────────────────────────────────────────────────────────
 
-/**
- * Generate multiple candidate layouts with different splitting strategies.
- * Returns the best-scoring one.
- */
 function solveLayout(
   items: LabelItem[],
   totalSlots: number,
@@ -471,72 +532,43 @@ function solveLayout(
 ): { layout: ScoredLayout; candidates: number } {
   const candidates: ScoredLayout[] = [];
 
-  // Strategy 1: No splitting (greedy)
-  const noSplit = items.map(i => splitItem(i, 1)).flat();
-  const runs1 = greedySolve(noSplit, totalSlots, lpf, maxOverrun);
-  candidates.push(scoreLayout(runs1, totalSlots, lpf, items, qtyPerRoll));
+  // Helper: generate portions → build runs → score
+  const tryStrategy = (name: string, portions: SplitItem[], sourceItems: LabelItem[]) => {
+    const runs = buildRunsFromPortions(portions, totalSlots, lpf, maxOverrun);
+    if (runs.length > 0) {
+      candidates.push(scoreLayout(runs, totalSlots, lpf, sourceItems, qtyPerRoll, name));
+    }
+  };
 
-  // Strategy 2: Split large items across 2 slots
-  const split2 = items.map(i => {
-    // Only split if the item is large enough that it would benefit
-    if (i.quantity > lpf * 2) return splitItem(i, 2);
-    return splitItem(i, 1);
-  }).flat();
-  const runs2 = greedySolve(split2, totalSlots, lpf, maxOverrun);
-  candidates.push(scoreLayout(runs2, totalSlots, lpf, items, qtyPerRoll));
+  // ─── Base strategies (original quantities) ───────────────────────
+  tryStrategy("no-split", strategyNoSplit(items), items);
+  tryStrategy("split-2", strategySplit2(items, lpf), items);
+  tryStrategy("split-largest", strategySplitLargest(items, totalSlots), items);
+  tryStrategy("split-median", strategySplitToMedian(items, totalSlots, lpf, maxOverrun), items);
+  tryStrategy("split-neighbors", strategySplitToNeighbors(items, lpf, maxOverrun), items);
+  tryStrategy("split-all", strategySplitAll(items, totalSlots), items);
+  tryStrategy("band-merge", strategyBandMerge(items, totalSlots, lpf, maxOverrun), items);
 
-  // Strategy 3: Aggressive splitting — split large items to match smaller ones
-  if (items.length >= 2) {
-    const sortedByQty = [...items].sort((a, b) => b.quantity - a.quantity);
-    const medianQty = sortedByQty[Math.floor(sortedByQty.length / 2)].quantity;
-    const split3 = items.map(i => {
-      if (medianQty > 0 && i.quantity > medianQty * 2) {
-        const n = Math.min(totalSlots, Math.ceil(i.quantity / medianQty));
-        return splitItem(i, n);
-      }
-      return splitItem(i, 1);
-    }).flat();
-    const runs3 = greedySolve(split3, totalSlots, lpf, maxOverrun);
-    candidates.push(scoreLayout(runs3, totalSlots, lpf, items, qtyPerRoll));
-  }
-
-  // Strategy 4: If qtyPerRoll set, try rounding quantities up to clean multiples
+  // ─── qtyPerRoll variants ─────────────────────────────────────────
   if (qtyPerRoll && qtyPerRoll > 0) {
-    const rounded = items.map(i => {
-      const roundedQty = Math.ceil(i.quantity / qtyPerRoll) * qtyPerRoll;
-      return { ...i, quantity: roundedQty };
-    });
-    const splitR = rounded.map(i => {
-      if (i.quantity > lpf * 2) return splitItem(i, 2);
-      return splitItem(i, 1);
-    }).flat();
-    const runsR = greedySolve(splitR, totalSlots, lpf, maxOverrun);
-    candidates.push(scoreLayout(runsR, totalSlots, lpf, items, qtyPerRoll));
-  }
-
-  // Strategy 5: Fill-first solver — aggressively fills every slot
-  const runsFull = solveFullSlots(items, totalSlots, lpf, maxOverrun);
-  candidates.push(scoreLayout(runsFull, totalSlots, lpf, items, qtyPerRoll));
-
-  // Strategy 6: Fill-first with qtyPerRoll rounding
-  if (qtyPerRoll && qtyPerRoll > 0) {
-    const roundedItems = items.map(i => ({
-      ...i,
-      quantity: Math.ceil(i.quantity / qtyPerRoll) * qtyPerRoll,
-    }));
-    const runsFullR = solveFullSlots(roundedItems, totalSlots, lpf, maxOverrun);
-    candidates.push(scoreLayout(runsFullR, totalSlots, lpf, items, qtyPerRoll));
+    const rounded = roundItemsToRoll(items, qtyPerRoll);
+    tryStrategy("rounded-no-split", strategyNoSplit(rounded), items);
+    tryStrategy("rounded-split-2", strategySplit2(rounded, lpf), items);
+    tryStrategy("rounded-split-largest", strategySplitLargest(rounded, totalSlots), items);
+    tryStrategy("rounded-split-median", strategySplitToMedian(rounded, totalSlots, lpf, maxOverrun), items);
+    tryStrategy("rounded-band-merge", strategyBandMerge(rounded, totalSlots, lpf, maxOverrun), items);
   }
 
   // Pick best
   candidates.sort((a, b) => a.score - b.score);
 
-  console.log(`[label-optimize] Strategy scores: ${candidates.map((c, i) => `S${i + 1}=${c.score.toFixed(0)}`).join(', ')}`);
+  const strategyLog = candidates.map(c => `${c.strategyName}=${c.score.toFixed(0)}`).join(', ');
+  console.log(`[label-optimize] Strategy scores: ${strategyLog}`);
 
   return { layout: candidates[0], candidates: candidates.length };
 }
 
-// ─── Validation (belt & suspenders) ──────────────────────────────────────────
+// ─── Validation ──────────────────────────────────────────────────────────────
 
 interface ValidationResult {
   warnings: string[];
@@ -598,7 +630,6 @@ function formatSolverOutput(
   qtyPerRoll: number | undefined
 ): SolverLayout {
   const runs: SolverRun[] = scored.runs.map((run, ri) => {
-    // Build slot assignments padded to totalSlots
     const slotAssignments: SlotAssignment[] = [];
     
     for (const slot of run.slots) {
@@ -613,7 +644,6 @@ function formatSolverOutput(
       slotAssignments.push({ item_id: "", quantity_in_slot: 0 });
     }
 
-    // Build reasoning
     const filled = run.slots.length;
     const blanks = totalSlots - filled;
     const overruns = getRunOverruns(run.slotQtys, lpf);
@@ -625,11 +655,9 @@ function formatSolverOutput(
     parts.push(`${filled} filled slot(s), ${blanks} blank`);
     parts.push(`${frames} frames, max overrun ${maxOvr}`);
     
-    // Note which items are in this run
     const itemNames = [...new Set(run.slots.map(s => s.originalName))];
     parts.push(`Items: ${itemNames.join(', ')}`);
 
-    // Note splits
     const splits = run.slots.filter(s => s.totalSplits > 1);
     if (splits.length > 0) {
       parts.push(`Contains split portions`);
@@ -682,7 +710,7 @@ function formatSolverOutput(
 
   return {
     runs,
-    overall_reasoning: `Deterministic solver: ${runs.length} run(s), ${totalBlanks} blank slot(s), ${wastePct}% waste. `
+    overall_reasoning: `Band solver (${scored.strategyName}): ${runs.length} run(s), ${totalBlanks} blank slot(s), ${wastePct}% waste. `
       + `Score: ${scored.score.toFixed(0)} (runs=${scored.breakdown.runCountPenalty}, blanks=${scored.breakdown.blankSlotPenalty}, `
       + `overrun=${scored.breakdown.totalOverrun.toFixed(0)}, splits=${scored.breakdown.splitPenalty}, remainder=${scored.breakdown.remainderPenalty.toFixed(0)}). `
       + (splitItems.length > 0
@@ -718,39 +746,29 @@ serve(async (req) => {
     const lpf = calcLabelsPerSlotPerFrame(dieline);
     const totalLabels = items.reduce((sum: number, i: LabelItem) => sum + i.quantity, 0);
 
-    console.log(`[label-optimize] Solver: ${items.length} items, ${totalLabels} labels, ${totalSlots} slots, ${lpf} lpf, maxOverrun=${max_overrun}, qtyPerRoll=${qty_per_roll || 'none'}`);
+    console.log(`[label-optimize] Band Solver v2: ${items.length} items, ${totalLabels} labels, ${totalSlots} slots, ${lpf} lpf, maxOverrun=${max_overrun}, qtyPerRoll=${qty_per_roll || 'none'}`);
 
-    // ─── Run deterministic solver ────────────────────────────────────
     const { layout: scored, candidates } = solveLayout(
-      items,
-      totalSlots,
-      lpf,
-      max_overrun,
-      qty_per_roll
+      items, totalSlots, lpf, max_overrun, qty_per_roll
     );
 
-    console.log(`[label-optimize] Evaluated ${candidates} candidate strategies. Best score: ${scored.score.toFixed(0)}`);
+    console.log(`[label-optimize] Evaluated ${candidates} strategies. Best: "${scored.strategyName}" score=${scored.score.toFixed(0)}`);
     console.log(`[label-optimize] Breakdown:`, JSON.stringify(scored.breakdown));
 
-    // ─── Validate (belt & suspenders) ────────────────────────────────
     const validation = validateLayout(scored.runs, items, totalSlots, lpf, max_overrun);
 
     if (validation.overrunViolations.length > 0) {
-      console.error(`[label-optimize] BUG: Solver produced overrun violations!`, validation.overrunViolations);
+      console.error(`[label-optimize] BUG: Overrun violations!`, validation.overrunViolations);
     }
     if (validation.missingItems.length > 0) {
-      console.error(`[label-optimize] BUG: Solver missed items!`, validation.missingItems);
+      console.error(`[label-optimize] BUG: Missing items!`, validation.missingItems);
     }
 
-    const allWarnings = [
-      ...validation.warnings,
-      ...validation.overrunViolations,
-    ];
+    const allWarnings = [...validation.warnings, ...validation.overrunViolations];
 
-    // ─── Format output ───────────────────────────────────────────────
     const layout = formatSolverOutput(scored, items, totalSlots, lpf, qty_per_roll);
 
-    console.log(`[label-optimize] Final: ${layout.runs.length} runs, ${allWarnings.length} warnings`);
+    console.log(`[label-optimize] Final: ${layout.runs.length} runs, ${allWarnings.length} warnings, strategy="${scored.strategyName}"`);
 
     return new Response(JSON.stringify({
       success: true,
@@ -761,7 +779,8 @@ serve(async (req) => {
         total_labels: totalLabels,
         available_slots: totalSlots,
         labels_per_slot_per_frame: lpf,
-        solver: 'deterministic_v1',
+        solver: 'band_solver_v2',
+        strategy_used: scored.strategyName,
         candidates_evaluated: candidates,
         score: scored.score,
       }
