@@ -157,18 +157,43 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-base font-bold text-foreground leading-tight">{order.customer_name}</p>
-                {order.contact_name && (
-                  <p className="text-sm text-muted-foreground mt-0.5">{order.contact_name}</p>
-                )}
-                {order.contact_email && (
-                  <a
-                    href={`mailto:${order.contact_email}`}
-                    className="text-xs text-primary hover:underline flex items-center gap-1 mt-1"
-                  >
-                    <Mail className="h-3 w-3" />
-                    {order.contact_email}
-                  </a>
-                )}
+                <Popover open={contactPopoverOpen} onOpenChange={setContactPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="text-left group mt-0.5">
+                      {order.contact_name ? (
+                        <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors cursor-pointer">
+                          {order.contact_name}
+                          {order.contact_email && (
+                            <span className="block text-xs text-primary">{order.contact_email}</span>
+                          )}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/60 group-hover:text-foreground transition-colors cursor-pointer italic">
+                          + Add contact
+                        </p>
+                      )}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-2" align="start">
+                    <p className="text-xs font-medium text-muted-foreground px-2 py-1">Change Contact</p>
+                    <div className="max-h-[200px] overflow-y-auto space-y-0.5">
+                      {contacts?.filter(c => c.is_active).map((c) => (
+                        <button
+                          key={c.id}
+                          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-muted text-sm transition-colors"
+                          onClick={() => handleContactChange({ name: c.name, email: c.email })}
+                        >
+                          <span className="font-medium">{c.name}</span>
+                          {c.is_primary && <Badge variant="secondary" className="text-[10px] ml-1.5">Primary</Badge>}
+                          <span className="block text-xs text-muted-foreground">{c.email}</span>
+                        </button>
+                      ))}
+                      {(!contacts || contacts.filter(c => c.is_active).length === 0) && (
+                        <p className="text-xs text-muted-foreground px-2 py-2">No contacts available</p>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               {/* Inline status select */}
               <Select
