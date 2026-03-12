@@ -5,7 +5,8 @@
  * This is also the client-facing summary page in the portal.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useCustomerContacts } from '@/hooks/labels/useCustomerContacts';
 import { format } from 'date-fns';
 import {
   Building2,
