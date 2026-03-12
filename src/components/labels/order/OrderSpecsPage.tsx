@@ -34,6 +34,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useUpdateLabelOrder } from '@/hooks/labels/useLabelOrders';
+import { useAuth } from '@/hooks/useAuth';
 import { OrientationPicker, getOrientationLabel, getOrientationSvg } from '@/components/labels/OrientationPicker';
 import { FinishingServicesCard } from './FinishingServicesCard';
 import { AddServiceDialog } from './AddServiceDialog';
