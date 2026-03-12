@@ -101,6 +101,7 @@ interface OrderSpecsPageProps {
 
 export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   const updateOrder = useUpdateLabelOrder();
+  const { user } = useAuth();
   const [addServiceOpen, setAddServiceOpen] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
   const [notesValue, setNotesValue] = useState(order.notes ?? '');
@@ -111,6 +112,19 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   const { data: contacts } = useCustomerContacts(order.customer_id ?? undefined);
 
   const canEdit = order.status !== 'completed' && order.status !== 'cancelled';
+  const isApproved = !!order.client_approved_at;
+  const canApprove = canEdit && !isApproved && ['quote', 'pending_approval', 'changes_requested'].includes(order.status);
+
+  const handleManualApprove = () => {
+    updateOrder.mutate({
+      id: order.id,
+      updates: {
+        status: 'approved',
+        client_approved_at: new Date().toISOString(),
+        client_approved_by: user?.id ?? null,
+      } as any,
+    });
+  };
 
   const handleContactChange = (contact: { name: string; email: string }) => {
     updateOrder.mutate({
