@@ -24,6 +24,8 @@ import {
   Info,
   Gauge,
   RotateCcw,
+  CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -32,6 +34,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useUpdateLabelOrder } from '@/hooks/labels/useLabelOrders';
+import { useAuth } from '@/hooks/useAuth';
 import { OrientationPicker, getOrientationLabel, getOrientationSvg } from '@/components/labels/OrientationPicker';
 import { FinishingServicesCard } from './FinishingServicesCard';
 import { AddServiceDialog } from './AddServiceDialog';
@@ -98,6 +101,7 @@ interface OrderSpecsPageProps {
 
 export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   const updateOrder = useUpdateLabelOrder();
+  const { user } = useAuth();
   const [addServiceOpen, setAddServiceOpen] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
   const [notesValue, setNotesValue] = useState(order.notes ?? '');
@@ -108,6 +112,19 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   const { data: contacts } = useCustomerContacts(order.customer_id ?? undefined);
 
   const canEdit = order.status !== 'completed' && order.status !== 'cancelled';
+  const isApproved = !!order.client_approved_at;
+  const canApprove = canEdit && !isApproved && ['quote', 'pending_approval', 'changes_requested'].includes(order.status);
+
+  const handleManualApprove = () => {
+    updateOrder.mutate({
+      id: order.id,
+      updates: {
+        status: 'approved',
+        client_approved_at: new Date().toISOString(),
+        client_approved_by: user?.id ?? null,
+      } as any,
+    });
+  };
 
   const handleContactChange = (contact: { name: string; email: string }) => {
     updateOrder.mutate({
@@ -214,6 +231,31 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Approval section */}
+            {isApproved ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-300/40">
+                <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                <div className="text-xs">
+                  <span className="font-medium text-emerald-700">Approved</span>
+                  {order.client_approved_at && (
+                    <span className="text-muted-foreground ml-1">
+                      on {format(new Date(order.client_approved_at), 'dd MMM yyyy, HH:mm')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : canApprove ? (
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                onClick={handleManualApprove}
+                disabled={updateOrder.isPending}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Approve Order
+              </Button>
+            ) : null}
 
             <div className="divide-y divide-border/50">
               {order.quickeasy_wo_no && (
