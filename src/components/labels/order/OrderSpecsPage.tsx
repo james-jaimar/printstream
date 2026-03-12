@@ -24,6 +24,8 @@ import {
   Info,
   Gauge,
   RotateCcw,
+  CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
