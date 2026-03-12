@@ -103,8 +103,19 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
   const [notesValue, setNotesValue] = useState(order.notes ?? '');
   const [referenceValue, setReferenceValue] = useState((order as any).reference ?? '');
   const [poNumberValue, setPoNumberValue] = useState((order as any).po_number ?? '');
+  const [contactPopoverOpen, setContactPopoverOpen] = useState(false);
+
+  const { data: contacts } = useCustomerContacts(order.customer_id ?? undefined);
 
   const canEdit = order.status !== 'completed' && order.status !== 'cancelled';
+
+  const handleContactChange = (contact: { name: string; email: string }) => {
+    updateOrder.mutate({
+      id: order.id,
+      updates: { contact_name: contact.name, contact_email: contact.email } as any,
+    });
+    setContactPopoverOpen(false);
+  };
 
   // ABG machine calculations
   const columnsAcross = order.dieline?.columns_across ?? 1;
