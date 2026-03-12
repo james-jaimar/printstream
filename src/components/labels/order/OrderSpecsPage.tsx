@@ -257,6 +257,7 @@ export function OrderSpecsPage({ order }: OrderSpecsPageProps) {
               </Button>
             ) : null}
 
+            <div className="divide-y divide-border/50">
               {order.quickeasy_wo_no && (
                 <SpecRow label="WO Number">
                   <Badge variant="outline" className="text-xs font-mono">
