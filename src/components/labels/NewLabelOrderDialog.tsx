@@ -138,11 +138,26 @@ export function NewLabelOrderDialog({ onSuccess }: NewLabelOrderDialogProps) {
   }, [selectedCustomerId, contacts, contactsLoading, setValue]);
 
   const toggleContact = (contactId: string) => {
-    setSelectedContacts(prev => 
-      prev.includes(contactId) 
+    setSelectedContacts(prev => {
+      const next = prev.includes(contactId)
         ? prev.filter(id => id !== contactId)
-        : [...prev, contactId]
-    );
+        : [...prev, contactId];
+
+      // Update primary contact fields based on new selection
+      if (next.length > 0) {
+        // Use the first selected contact (or primary if still selected)
+        const primaryInSelection = contacts?.find(c => c.id === next[0] && c.is_active);
+        if (primaryInSelection) {
+          setValue('contact_name', primaryInSelection.name);
+          setValue('contact_email', primaryInSelection.email);
+        }
+      } else {
+        setValue('contact_name', '');
+        setValue('contact_email', '');
+      }
+
+      return next;
+    });
   };
 
   const selectedDieline = dielines?.find(d => d.id === form.watch('dieline_id'));
